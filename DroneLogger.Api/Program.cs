@@ -53,8 +53,17 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.UseCors("frontend");
+
+// The built Angular app is copied into wwwroot at deploy time, so the site and the API share one origin.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapAircraft();
 app.MapTunes();
 app.MapFlights();
+
+// Client-side routes (/aircraft/3, /flights/7, ...) all load the Angular app. Unknown /api paths still 404.
+app.MapFallback("/api/{**path}", () => Results.NotFound());
+app.MapFallbackToFile("index.html");
 
 app.Run();

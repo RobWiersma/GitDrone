@@ -23,16 +23,16 @@ public static class AircraftEndpoints
         g.MapDelete("/{id:int}", Delete);
     }
 
-    private static async Task<IResult> List(AppDbContext db, HttpRequest req, CancellationToken ct)
+    private static async Task<IResult> List(AppDbContext db, CancellationToken ct)
     {
         var rows = await Project(db.Fleet.AsNoTracking().OrderBy(a => a.Name)).ToListAsync(ct);
-        return Results.Ok(rows.Select(r => ToDto(r, BaseUrl(req))));
+        return Results.Ok(rows.Select(ToDto));
     }
 
-    private static async Task<IResult> Get(int id, AppDbContext db, HttpRequest req, CancellationToken ct)
+    private static async Task<IResult> Get(int id, AppDbContext db, CancellationToken ct)
     {
         var row = await Project(db.Fleet.AsNoTracking().Where(a => a.Id == id)).FirstOrDefaultAsync(ct);
-        return row is null ? Results.NotFound() : Results.Ok(ToDto(row, BaseUrl(req)));
+        return row is null ? Results.NotFound() : Results.Ok(ToDto(row));
     }
 
     private static async Task<IResult> Create(HttpRequest req, AppDbContext db, ImageStore images, CancellationToken ct)
@@ -65,7 +65,7 @@ public static class AircraftEndpoints
         }
 
         var row = await Project(db.Fleet.AsNoTracking().Where(a => a.Id == aircraft.Id)).FirstAsync(ct);
-        return Results.Created($"/api/aircraft/{aircraft.Id}", ToDto(row, BaseUrl(req)));
+        return Results.Created($"/api/aircraft/{aircraft.Id}", ToDto(row));
     }
 
     private static async Task<IResult> Update(int id, HttpRequest req, AppDbContext db, ImageStore images, CancellationToken ct)
@@ -107,7 +107,7 @@ public static class AircraftEndpoints
         images.Delete(replaced);
 
         var row = await Project(db.Fleet.AsNoTracking().Where(a => a.Id == id)).FirstAsync(ct);
-        return Results.Ok(ToDto(row, BaseUrl(req)));
+        return Results.Ok(ToDto(row));
     }
 
     private static async Task<IResult> Delete(int id, AppDbContext db, ImageStore images, CancellationToken ct)
@@ -129,14 +129,12 @@ public static class AircraftEndpoints
             a.Tunes.Count,
             a.Tunes.OrderByDescending(t => t.CreatedAt).Select(t => (DateTime?)t.CreatedAt).FirstOrDefault()));
 
-    private static AircraftDto ToDto(Row r, string baseUrl) => new(
+    // Relative: the Angular app is served from the same origin (proxied to the API by `ng serve` in dev).
+    private static AircraftDto ToDto(Row r) => new(
         r.A.Id, r.A.Name, r.A.Type, r.A.PropSize, r.A.Frame, r.A.FlightController, r.A.Battery,
         r.A.WeightGrams, r.A.Notes,
-        r.A.ImageFileName is null ? null : $"{baseUrl}/uploads/{r.A.ImageFileName}",
+        r.A.ImageFileName is null ? null : $"/uploads/{r.A.ImageFileName}",
         r.A.CreatedAt, r.TuneCount, r.LastTuneAt);
-
-    // The Angular app runs on another origin, so image URLs must be absolute.
-    private static string BaseUrl(HttpRequest req) => $"{req.Scheme}://{req.Host}";
 
     private static IResult ImageProblem(string error) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { ["image"] = [error] });

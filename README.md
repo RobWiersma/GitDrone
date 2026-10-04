@@ -71,3 +71,25 @@ Craft name and device UID from the log header are not stored. The original file 
 `App_Data/logs` so it can be re-parsed later, for example to add GPS tracks once logs include them
 (enable the GPS field in the Configurator's Blackbox tab).
 
+## Local development
+
+Run the API (`dotnet run --launch-profile https` in `DroneLogger.Api`) and `ng serve` in `drone-logger`.
+The Angular app calls `/api`; `proxy.conf.json` forwards `/api` and `/uploads` to https://localhost:5001.
+
+## Deploying to Azure (free tier)
+
+One Linux App Service (F1) hosts both: CI builds Angular into the API's `wwwroot`
+(`.github/workflows/deploy.yml`, runs on every push to `master`).
+
+App settings on the App Service:
+
+| Setting                      | Value                                  |
+|------------------------------|----------------------------------------|
+| `ConnectionStrings__Default` | `Data Source=/home/data/droneLogger.db` |
+| `Storage__UploadsPath`       | `/home/data/uploads`                   |
+| `Storage__LogsPath`          | `/home/data/logs`                      |
+
+`/home` survives restarts and deploys, so SQLite is fine on a single instance. Turn on App Service
+Authentication (Microsoft provider) before sharing the URL; the app itself has no login.
+GitHub needs variable `AZURE_WEBAPP_NAME` and secret `AZURE_WEBAPP_PUBLISH_PROFILE`.
+

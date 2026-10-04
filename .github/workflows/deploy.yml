@@ -1,0 +1,53 @@
+# Builds the Angular app into the API's wwwroot and deploys both to one Azure App Service.
+# Needs, in GitHub repo Settings -> Secrets and variables -> Actions:
+#   variable AZURE_WEBAPP_NAME             the App Service name (e.g. gitdrone)
+#   secret   AZURE_WEBAPP_PUBLISH_PROFILE  contents of the publish profile downloaded from the portal
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: drone-logger/package-lock.json
+
+      - name: Build Angular
+        working-directory: drone-logger
+        run: |
+          npm ci
+          npx ng build --configuration production
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish API
+        run: dotnet publish DroneLogger.Api/DroneLogger.Api.csproj -c Release -o publish
+
+      - name: Copy Angular build into wwwroot
+        run: |
+          mkdir -p publish/wwwroot
+          cp -r drone-logger/dist/drone-logger/browser/. publish/wwwroot/
+
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: publish
