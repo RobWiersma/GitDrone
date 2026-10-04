@@ -19,6 +19,7 @@ public static class FlightEndpoints
             .WithMetadata(new RequestSizeLimitAttribute(LogStore.MaxBytes + 1024 * 1024)); // Kestrel's default is 30 MB
 
         var f = app.MapGroup("/api/flights");
+        f.MapGet("/", Feed);
         f.MapGet("/{id:int}", Get);
         f.MapPut("/{id:int}", Update);
         f.MapDelete("/{id:int}", Delete);
@@ -31,6 +32,20 @@ public static class FlightEndpoints
             .OrderByDescending(x => x.StartedAt ?? x.CreatedAt).ThenByDescending(x => x.LogIndex))
             .ToListAsync(ct);
         return Results.Ok(flights);
+    }
+
+    private const int MaxPageSize = 100;
+
+    /// <summary>Every aircraft's flights, newest first. Flights without a log date sort by upload time.</summary>
+    private static async Task<IResult> Feed(int? skip, int? take, AppDbContext db, CancellationToken ct)
+    {
+        var s = Math.Max(0, skip ?? 0);
+        var t = Math.Clamp(take ?? 50, 1, MaxPageSize);
+        var page = await Project(db.Flights.AsNoTracking()
+                .OrderByDescending(x => x.StartedAt ?? x.CreatedAt).ThenByDescending(x => x.LogIndex).ThenByDescending(x => x.Id)
+                .Skip(s).Take(t + 1)) // one extra row tells us whether there's another page
+            .ToListAsync(ct);
+        return Results.Ok(new FlightFeedPage(page.Take(t).ToList(), page.Count > t));
     }
 
     private static async Task<IResult> Get(int id, AppDbContext db, CancellationToken ct)
@@ -173,7 +188,7 @@ public static class FlightEndpoints
 
     private static IQueryable<FlightDto> Project(IQueryable<Flight> q) =>
         q.Select(x => new FlightDto(
-            x.Id, x.AircraftId, x.TuneSnapshotId, x.TuneSnapshot != null ? x.TuneSnapshot.Label : null, x.Notes,
+            x.Id, x.AircraftId, x.Aircraft!.Name, x.TuneSnapshotId, x.TuneSnapshot != null ? x.TuneSnapshot.Label : null, x.Notes,
             x.OriginalFileName, x.LogIndex, x.StartedAt, x.DurationMs, x.FirmwareRevision, x.Board,
             x.AvgThrottlePercent, x.MaxThrottlePercent, x.CorruptFrames, x.CreatedAt));
 

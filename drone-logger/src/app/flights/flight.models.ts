@@ -1,6 +1,7 @@
 export interface Flight {
   id: number;
   aircraftId: number;
+  aircraftName: string;
   tuneSnapshotId: number | null;
   tuneLabel: string | null;
   notes: string | null;
@@ -22,6 +23,16 @@ export interface FlightUploadResult {
   flights: Flight[];
   /** True when this exact file was uploaded before; flights are then the existing ones. */
   duplicate: boolean;
+}
+
+export interface FlightFeedPage {
+  flights: Flight[];
+  hasMore: boolean;
+}
+
+/** The date a flight is filed under: the log's start time, or the upload time when the FC had no clock. */
+export function flightDate(f: Flight): string {
+  return f.startedAt ?? f.createdAt;
 }
 
 export interface FlightUpdate {

@@ -1,1 +1,10 @@
-<router-outlet />
+<header class="site">
+  <nav class="nav" aria-label="Main">
+    <a class="brand" routerLink="/">GitDrone</a>
+    <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" ariaCurrentWhenActive="page">Flights</a>
+    <a routerLink="/aircraft" routerLinkActive="active" ariaCurrentWhenActive="page">Hangar</a>
+  </nav>
+</header>
+<main>
+  <router-outlet />
+</main>

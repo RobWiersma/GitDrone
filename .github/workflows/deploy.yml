@@ -39,7 +39,11 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Publish API
-        run: dotnet publish DroneLogger.Api/DroneLogger.Api.csproj -c Release -o publish
+        run: |
+          dotnet publish DroneLogger.Api/DroneLogger.Api.csproj -c Release -o publish
+          # EF Core's design-time package drops MSBuild helper apps in here; they aren't needed at runtime
+          # and their extra runtimeconfig.json can stop App Service from finding the real app.
+          rm -rf publish/BuildHost-*
 
       - name: Copy Angular build into wwwroot
         run: |

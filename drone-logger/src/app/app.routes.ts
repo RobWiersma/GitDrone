@@ -7,9 +7,10 @@ import { TuneCompareComponent } from './tunes/tune-compare.component';
 import { TuneBulkImportComponent } from './tunes/tune-bulk-import.component';
 import { FlightUploadComponent } from './flights/flight-upload.component';
 import { FlightDetailComponent } from './flights/flight-detail.component';
+import { FlightFeedComponent } from './flights/flight-feed.component';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'aircraft' },
+  { path: '', pathMatch: 'full', component: FlightFeedComponent, title: 'Flights' },
   { path: 'aircraft', component: AircraftListComponent, title: 'Hangar' },
   { path: 'aircraft/new', component: AircraftFormComponent, title: 'Add aircraft' },
   { path: 'aircraft/:id', component: AircraftDetailComponent, title: 'Aircraft' },
@@ -19,5 +20,5 @@ export const routes: Routes = [
   { path: 'aircraft/:id/flights/upload', component: FlightUploadComponent, title: 'Upload blackbox log' },
   { path: 'flights/:id', component: FlightDetailComponent, title: 'Flight' },
   { path: 'tunes/compare', component: TuneCompareComponent, title: 'Compare tunes' },
-  { path: '**', redirectTo: 'aircraft' },
+  { path: '**', redirectTo: '' },
 ];

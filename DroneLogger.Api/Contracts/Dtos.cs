@@ -25,7 +25,7 @@ public record TuneCompareResult(
     IReadOnlyList<TuneDiffGroupDto> Groups);
 
 public record FlightDto(
-    int Id, int AircraftId, int? TuneSnapshotId, string? TuneLabel, string? Notes, string OriginalFileName, int LogIndex,
+    int Id, int AircraftId, string AircraftName, int? TuneSnapshotId, string? TuneLabel, string? Notes, string OriginalFileName, int LogIndex,
     DateTime? StartedAt, long DurationMs, string FirmwareRevision, string Board,
     double? AvgThrottlePercent, double? MaxThrottlePercent, int CorruptFrames, DateTime CreatedAt);
 
@@ -43,3 +43,6 @@ public record TuneBulkRequest(IReadOnlyList<TuneBulkItem>? Items);
 
 /// <summary>Status is "created", "duplicate" (same settings as the tune just before it) or "error". Index points into the request.</summary>
 public record TuneBulkItemResult(int Index, string Status, TuneSnapshotDto? Snapshot, int? DuplicateOf, string? Error);
+
+/// <summary>A page of the all-aircraft flight feed. HasMore says whether another page exists after this one.</summary>
+public record FlightFeedPage(IReadOnlyList<FlightDto> Flights, bool HasMore);

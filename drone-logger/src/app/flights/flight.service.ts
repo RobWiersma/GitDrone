@@ -2,18 +2,27 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, delay, of, throwError } from 'rxjs';
 import { API_BASE, USE_MOCK } from '../api.config';
-import { Flight, FlightUpdate, FlightUploadResult } from './flight.models';
+import { Flight, FlightFeedPage, FlightUpdate, FlightUploadResult, flightDate } from './flight.models';
 
 @Injectable({ providedIn: 'root' })
 export class FlightService {
   private http = inject(HttpClient);
 
   private mockStore: Flight[] = [
-    { id: 1, aircraftId: 1, tuneSnapshotId: 3, tuneLabel: 'Updated to 4.5, RPM filter on', notes: 'Smooth, a bit of propwash on dives.',
+    { id: 1, aircraftId: 1, aircraftName: 'Mach 5', tuneSnapshotId: 3, tuneLabel: 'Updated to 4.5, RPM filter on', notes: 'Smooth, a bit of propwash on dives.',
       originalFileName: 'btfl_012.bbl', logIndex: 0, startedAt: '2026-08-22T17:10:00Z', durationMs: 245_000,
       firmwareRevision: 'Betaflight 4.5.0 (c155f5830) STM32F405', board: 'MTKS MATEKF405', avgThrottlePercent: 34.2,
       maxThrottlePercent: 91.5, corruptFrames: 0, createdAt: '2026-08-22T19:00:00Z' },
   ];
+
+  /** All aircraft, newest first. */
+  feed(skip: number, take: number): Observable<FlightFeedPage> {
+    if (USE_MOCK) {
+      const sorted = [...this.mockStore].sort((a, b) => flightDate(b).localeCompare(flightDate(a)));
+      return of({ flights: sorted.slice(skip, skip + take), hasMore: sorted.length > skip + take }).pipe(delay(200));
+    }
+    return this.http.get<FlightFeedPage>(`${API_BASE}/flights`, { params: { skip, take } });
+  }
 
   list(aircraftId: number): Observable<Flight[]> {
     if (USE_MOCK) return of(this.mockStore.filter(f => f.aircraftId === aircraftId)).pipe(delay(200));

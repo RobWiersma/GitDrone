@@ -1,0 +1,7 @@
+.site { background: var(--surface); border-bottom: 1px solid var(--line); }
+.nav { max-width: 68rem; margin: 0 auto; padding: 0 1rem; display: flex; align-items: center; gap: 1.5rem; height: 3.25rem; }
+.nav a { color: var(--muted); text-decoration: none; font-weight: 600; padding: .3rem 0; border-bottom: 2px solid transparent; }
+.nav a:hover { color: var(--ink); }
+.nav a.active { color: var(--ink); border-bottom-color: var(--accent); }
+.nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+.nav .brand { color: var(--ink); font-size: 1.05rem; margin-right: .5rem; border-bottom: 0; }
