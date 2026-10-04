@@ -11,7 +11,7 @@ import { Flight, formatDuration } from './flight.models';
     <section class="panel">
       <div class="bar">
         <h2>Flights</h2>
-        <a class="btn btn-primary" [routerLink]="['/aircraft', aircraftId(), 'flights', 'upload']">Upload blackbox log</a>
+        <a class="btn btn-primary" [routerLink]="['/hangar', aircraftId(), 'flights', 'upload']">Upload blackbox log</a>
       </div>
 
       @switch (state()) {

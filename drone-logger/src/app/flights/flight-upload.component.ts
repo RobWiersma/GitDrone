@@ -15,7 +15,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
   imports: [DatePipe, FormsModule, RouterLink],
   template: `
     <div class="page narrow">
-      <a [routerLink]="['/aircraft', id()]">Back to aircraft</a>
+      <a [routerLink]="['/hangar', id()]">Back to aircraft</a>
       <h1>Upload blackbox log</h1>
       <p class="hint">
         Pick a <code>.bbl</code> or <code>.bfl</code> file from the flight controller (Blackbox tab, "Activate Mass Storage Device Mode")
@@ -35,7 +35,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
             }
           </ul>
           <div class="actions">
-            <a class="btn btn-primary" [routerLink]="['/aircraft', id()]">Done</a>
+            <a class="btn btn-primary" [routerLink]="['/hangar', id()]">Done</a>
             <button class="btn" type="button" (click)="reset()">Upload another</button>
           </div>
         </div>
@@ -68,7 +68,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
           <button class="btn btn-primary" type="button" [disabled]="!canSubmit()" (click)="submit()">
             {{ busy() ? 'Uploading...' : 'Upload' }}
           </button>
-          <a class="btn" [routerLink]="['/aircraft', id()]">Cancel</a>
+          <a class="btn" [routerLink]="['/hangar', id()]">Cancel</a>
         </div>
       }
     </div>

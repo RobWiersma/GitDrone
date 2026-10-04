@@ -11,7 +11,7 @@ import { FlightListComponent } from '../flights/flight-list.component';
   imports: [RouterLink, AircraftImageComponent, TuneTimelineComponent, FlightListComponent],
   template: `
     <div class="page">
-      <a routerLink="/aircraft">Back to hangar</a>
+      <a routerLink="/hangar">Back to hangar</a>
 
       @if (notFound()) {
         <p class="error">That aircraft doesn't exist. It may have been deleted.</p>
@@ -28,7 +28,7 @@ import { FlightListComponent } from '../flights/flight-list.component';
             </dl>
             @if (a.notes) { <p class="notes">{{ a.notes }}</p> }
             <div class="actions">
-              <a class="btn" [routerLink]="['/aircraft', a.id, 'edit']">Edit</a>
+              <a class="btn" [routerLink]="['/hangar', a.id, 'edit']">Edit</a>
               <button class="btn btn-danger" type="button" (click)="remove(a)">Delete</button>
             </div>
           </div>
@@ -84,6 +84,6 @@ export class AircraftDetailComponent {
 
   remove(a: Aircraft) {
     if (!confirm(`Delete ${a.name} and all of its tunes and flights? This can't be undone.`)) return;
-    this.service.remove(a.id).subscribe(() => this.router.navigate(['/aircraft']));
+    this.service.remove(a.id).subscribe(() => this.router.navigate(['/hangar']));
   }
 }

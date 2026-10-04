@@ -59,7 +59,7 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
       <div class="actions">
         <button class="btn btn-primary" type="submit" [disabled]="saving()">{{ saving() ? 'Saving...' : 'Save aircraft' }}</button>
-        <a class="btn" [routerLink]="isEdit() ? ['/aircraft', id()] : ['/aircraft']">Cancel</a>
+        <a class="btn" [routerLink]="isEdit() ? ['/hangar', id()] : ['/hangar']">Cancel</a>
       </div>
     </form>
   `,
@@ -147,7 +147,7 @@ export class AircraftFormComponent {
     this.saving.set(true);
     this.error.set('');
     this.service.save(this.isEdit() ? this.id() : null, this.form.getRawValue(), this.imageFile, this.imageRemoved).subscribe({
-      next: a => this.router.navigate(['/aircraft', a.id]),
+      next: a => this.router.navigate(['/hangar', a.id]),
       error: () => {
         this.saving.set(false);
         this.error.set('Could not save. Check your connection and try again.');

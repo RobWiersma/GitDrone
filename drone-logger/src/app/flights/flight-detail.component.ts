@@ -13,7 +13,7 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
   template: `
     <div class="page narrow">
       @if (flight(); as f) {
-        <a [routerLink]="['/aircraft', f.aircraftId]">Back to aircraft</a>
+        <a [routerLink]="['/hangar', f.aircraftId]">Back to aircraft</a>
         <h1>
           @if (f.startedAt) { Flight on {{ f.startedAt | date: 'd MMM y, HH:mm' }} } @else { Flight {{ f.logIndex + 1 }} of {{ f.originalFileName }} }
         </h1>
@@ -54,12 +54,12 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
         <div class="actions">
           <button class="btn btn-primary" type="button" [disabled]="busy()" (click)="save(f)">Save</button>
           @if (f.tuneSnapshotId) {
-            <a class="btn" [routerLink]="['/aircraft', f.aircraftId]">View tune history</a>
+            <a class="btn" [routerLink]="['/hangar', f.aircraftId]">View tune history</a>
           }
           <button class="btn btn-danger" type="button" (click)="remove(f)">Delete flight</button>
         </div>
       } @else if (notFound()) {
-        <a routerLink="/aircraft">Back to hangar</a>
+        <a routerLink="/hangar">Back to hangar</a>
         <p class="error">That flight doesn't exist. It may have been deleted.</p>
       } @else {
         <p class="hint">Loading flight...</p>
@@ -123,6 +123,6 @@ export class FlightDetailComponent {
 
   remove(f: Flight) {
     if (!confirm('Delete this flight? This can\'t be undone.')) return;
-    this.service.remove(f.id).subscribe(() => this.router.navigate(['/aircraft', f.aircraftId]));
+    this.service.remove(f.id).subscribe(() => this.router.navigate(['/hangar', f.aircraftId]));
   }
 }

@@ -16,9 +16,9 @@ const KIND_LABEL: Record<TuneDiffKind, string> = { changed: 'Changed', added: 'N
   template: `
     <div class="page">
       @if (result(); as r) {
-        <a [routerLink]="['/aircraft', r.to.aircraftId]">Back to {{ aircraftName(r.to.aircraftId) }}</a>
+        <a [routerLink]="['/hangar', r.to.aircraftId]">Back to {{ aircraftName(r.to.aircraftId) }}</a>
       } @else {
-        <a routerLink="/aircraft">Back to hangar</a>
+        <a routerLink="/hangar">Back to hangar</a>
       }
       <h1>Compare tunes</h1>
 

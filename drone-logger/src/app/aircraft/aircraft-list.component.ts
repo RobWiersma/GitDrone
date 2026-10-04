@@ -12,7 +12,7 @@ import { AircraftImageComponent } from './aircraft-image.component';
     <div class="page">
       <header class="bar">
         <h1>Hangar</h1>
-        <a class="btn btn-primary" routerLink="/aircraft/new">Add aircraft</a>
+        <a class="btn btn-primary" routerLink="/hangar/new">Add aircraft</a>
       </header>
 
       @if (failed()) {
@@ -23,13 +23,13 @@ import { AircraftImageComponent } from './aircraft-image.component';
         <div class="panel empty">
           <h2>No aircraft yet</h2>
           <p>Add your first quad to start keeping its tune history.</p>
-          <a class="btn btn-primary" routerLink="/aircraft/new">Add aircraft</a>
+          <a class="btn btn-primary" routerLink="/hangar/new">Add aircraft</a>
         </div>
       } @else {
         <ul class="grid">
           @for (a of aircraft(); track a.id) {
             <li>
-              <a class="card" [routerLink]="['/aircraft', a.id]">
+              <a class="card" [routerLink]="['/hangar', a.id]">
                 <app-aircraft-image [src]="a.imageUrl" [alt]="a.name" />
                 <div class="body">
                   <h2>{{ a.name }}</h2>

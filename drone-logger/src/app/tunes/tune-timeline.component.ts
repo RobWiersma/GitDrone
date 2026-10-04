@@ -13,8 +13,8 @@ import { TuneRawComponent } from './tune-raw.component';
       <div class="bar">
         <h2>Tune history</h2>
         <div class="bar-actions">
-          <a class="btn" [routerLink]="['/aircraft', aircraftId(), 'tunes', 'bulk']">Bulk import</a>
-          <a class="btn btn-primary" [routerLink]="['/aircraft', aircraftId(), 'tunes', 'import']">Import tune</a>
+          <a class="btn" [routerLink]="['/hangar', aircraftId(), 'tunes', 'bulk']">Bulk import</a>
+          <a class="btn btn-primary" [routerLink]="['/hangar', aircraftId(), 'tunes', 'import']">Import tune</a>
         </div>
       </div>
 

@@ -10,7 +10,7 @@ const MAX_FILE_BYTES = 1024 * 1024;
   imports: [FormsModule, RouterLink],
   template: `
     <div class="page narrow">
-      <a [routerLink]="['/aircraft', id()]">Back to aircraft</a>
+      <a [routerLink]="['/hangar', id()]">Back to aircraft</a>
       <h1>Import tune</h1>
       <p class="hint">In the Betaflight Configurator CLI, run <code>diff all</code>, copy the output, and paste it below. You can also load a saved .txt file.</p>
 
@@ -56,7 +56,7 @@ const MAX_FILE_BYTES = 1024 * 1024;
         <button class="btn btn-primary" type="button" [disabled]="!canSubmit()" (click)="submit()">
           {{ busy() ? 'Saving...' : 'Save tune' }}
         </button>
-        <a class="btn" [routerLink]="['/aircraft', id()]">Cancel</a>
+        <a class="btn" [routerLink]="['/hangar', id()]">Cancel</a>
       </div>
     </div>
   `,
@@ -118,7 +118,7 @@ export class TuneImportComponent {
             this.busy.set(false);
             this.notice.set(`This tune is identical to an existing snapshot (#${result.duplicateOf}), so nothing was added.`);
           } else {
-            this.router.navigate(['/aircraft', this.id()]);
+            this.router.navigate(['/hangar', this.id()]);
           }
         },
         error: () => {

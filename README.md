@@ -20,14 +20,15 @@ ASP.NET Core API when the backend is ready.
 
 | Route                        | Component                  |
 |------------------------------|----------------------------|
-| /aircraft                    | AircraftListComponent      |
-| /aircraft/new                | AircraftFormComponent      |
-| /aircraft/:id                | AircraftDetailComponent    |
-| /aircraft/:id/edit           | AircraftFormComponent      |
-| /aircraft/:id/tunes/import   | TuneImportComponent        |
-| /aircraft/:id/tunes/bulk     | TuneBulkImportComponent    |
+| /                            | FlightFeedComponent        |
+| /hangar                      | AircraftListComponent      |
+| /hangar/new                  | AircraftFormComponent      |
+| /hangar/:id                  | AircraftDetailComponent    |
+| /hangar/:id/edit             | AircraftFormComponent      |
+| /hangar/:id/tunes/import     | TuneImportComponent        |
+| /hangar/:id/tunes/bulk       | TuneBulkImportComponent    |
 | /tunes/compare?from=&to=     | TuneCompareComponent       |
-| /aircraft/:id/flights/upload | FlightUploadComponent      |
+| /hangar/:id/flights/upload   | FlightUploadComponent      |
 | /flights/:id                 | FlightDetailComponent      |
 
 ## API contract

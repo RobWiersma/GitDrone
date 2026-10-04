@@ -22,7 +22,7 @@ const PAGE_SIZE = 50;
         <div class="panel empty">
           <h2>No flights yet</h2>
           <p>Open an aircraft in the hangar and upload a blackbox log to see it here.</p>
-          <a class="btn btn-primary" routerLink="/aircraft">Go to hangar</a>
+          <a class="btn btn-primary" routerLink="/hangar">Go to hangar</a>
         </div>
       } @else {
         @for (day of days(); track day.key) {

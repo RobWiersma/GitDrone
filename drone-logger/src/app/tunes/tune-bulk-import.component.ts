@@ -44,7 +44,7 @@ function inspect(text: string) {
   imports: [DatePipe, RouterLink],
   template: `
     <div class="page">
-      <a [routerLink]="['/aircraft', id()]">Back to aircraft</a>
+      <a [routerLink]="['/hangar', id()]">Back to aircraft</a>
       <h1>Bulk import tunes</h1>
       <p class="hint">
         Pick your saved CLI backups (<code>BTFL_cli_backup_*.txt</code>) or a whole folder of them. Each one becomes a
@@ -142,13 +142,13 @@ function inspect(text: string) {
 
         <div class="actions">
           @if (summary()) {
-            <a class="btn btn-primary" [routerLink]="['/aircraft', id()]">View tune history</a>
+            <a class="btn btn-primary" [routerLink]="['/hangar', id()]">View tune history</a>
           } @else {
             <button class="btn btn-primary" type="button" [disabled]="selectedCount() === 0 || busy()" (click)="submit()">
               {{ busy() ? 'Importing...' : 'Import ' + selectedCount() + ' ' + (selectedCount() === 1 ? 'tune' : 'tunes') }}
             </button>
           }
-          <a class="btn" [routerLink]="['/aircraft', id()]">Cancel</a>
+          <a class="btn" [routerLink]="['/hangar', id()]">Cancel</a>
         </div>
       }
     </div>
