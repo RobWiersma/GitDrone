@@ -2,3 +2,6 @@ bin/
 obj/
 App_Data/
 .vs/
+# Real blackbox logs carry craft names and FC serials; keep them local.
+samples/*.bbl
+samples/*.bfl
