@@ -19,20 +19,27 @@ const RESOLUTIONS = [
 const FPS = [24, 25, 30, 50, 60];
 
 const DEFAULT_PATH_COLORS = { pathRecentColor: '#9be564', pathOldColor: '#2c4a1f' };
+const DEFAULT_STICK_COLORS = { stickDotColor: '#ff5a5a', stickTrailColor: '#9a9a9a', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
+const DEFAULT_COLORS = { ...DEFAULT_PATH_COLORS, ...DEFAULT_STICK_COLORS };
+type ColorKey = keyof typeof DEFAULT_COLORS;
 const COLORS_KEY = 'gitdrone-overlay-path-colors';
 
-/** Mini map colours remembered in this browser; defaults when nothing is stored or storage is blocked. */
-function readPathColors(): typeof DEFAULT_PATH_COLORS {
+/** Overlay colours remembered in this browser; each falls back to its default when missing, invalid or storage is blocked. */
+function readColors(): typeof DEFAULT_COLORS {
+  const colors = { ...DEFAULT_COLORS };
   try {
     const saved = JSON.parse(localStorage.getItem(COLORS_KEY) ?? 'null');
-    const ok = (v: unknown) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
-    if (saved && ok(saved.pathRecentColor) && ok(saved.pathOldColor)) return { pathRecentColor: saved.pathRecentColor, pathOldColor: saved.pathOldColor };
-  } catch { /* fall through to defaults */ }
-  return { ...DEFAULT_PATH_COLORS };
+    for (const key of Object.keys(colors) as ColorKey[]) {
+      const v: unknown = saved?.[key];
+      if (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) colors[key] = v;
+    }
+  } catch { /* defaults */ }
+  return colors;
 }
 
-function savePathColors(o: { pathRecentColor: string; pathOldColor: string }) {
-  try { localStorage.setItem(COLORS_KEY, JSON.stringify({ pathRecentColor: o.pathRecentColor, pathOldColor: o.pathOldColor })); } catch { /* not remembered */ }
+function saveColors(o: typeof DEFAULT_COLORS) {
+  const colors = Object.fromEntries((Object.keys(DEFAULT_COLORS) as ColorKey[]).map(k => [k, o[k]]));
+  try { localStorage.setItem(COLORS_KEY, JSON.stringify(colors)); } catch { /* not remembered */ }
 }
 
 @Component({
@@ -99,13 +106,24 @@ function savePathColors(o: { pathRecentColor: string; pathOldColor: string }) {
               <label class="check"><input type="checkbox" [ngModel]="opts().showBattery" (ngModelChange)="set('showBattery', $event)" [disabled]="!data()?.battery" /> Battery</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data()?.sticks" /> Sticks</label>
               <label class="check indent"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" [disabled]="!data()?.sticks || !opts().showSticks" /> Stick trails (motion blur)</label>
+              <div class="colors indent">
+                <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)"
+                       [disabled]="!data()?.sticks || !opts().showSticks" /> Dot</label>
+                <label class="color"><input type="color" [ngModel]="opts().stickTrailColor" (ngModelChange)="setColor('stickTrailColor', $event)"
+                       [disabled]="!data()?.sticks || !opts().showSticks || !opts().stickTrails" /> Trail</label>
+                <label class="color"><input type="color" [ngModel]="opts().stickBoxColor" (ngModelChange)="setColor('stickBoxColor', $event)"
+                       [disabled]="!data()?.sticks || !opts().showSticks" /> Background</label>
+                <label class="color"><input type="color" [ngModel]="opts().stickCrossColor" (ngModelChange)="setColor('stickCrossColor', $event)"
+                       [disabled]="!data()?.sticks || !opts().showSticks" /> Crosshair</label>
+                <button class="link" type="button" (click)="resetColors(stickColors)" [disabled]="!opts().showSticks">Reset</button>
+              </div>
               <label class="check"><input type="checkbox" [ngModel]="opts().showMap" (ngModelChange)="set('showMap', $event)" [disabled]="!data()?.track" /> Mini map</label>
               <div class="colors indent">
                 <label class="color"><input type="color" [ngModel]="opts().pathRecentColor" (ngModelChange)="setColor('pathRecentColor', $event)"
                        [disabled]="!data()?.track || !opts().showMap" /> Recent path</label>
                 <label class="color"><input type="color" [ngModel]="opts().pathOldColor" (ngModelChange)="setColor('pathOldColor', $event)"
                        [disabled]="!data()?.track || !opts().showMap" /> Older path</label>
-                <button class="link" type="button" (click)="resetColors()" [disabled]="!opts().showMap">Reset</button>
+                <button class="link" type="button" (click)="resetColors(pathColors)" [disabled]="!opts().showMap">Reset</button>
               </div>
               <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" /> Flight timer</label>
             </fieldset>
@@ -226,7 +244,7 @@ export class FlightOverlayComponent {
   end = signal(0);
   opts = signal<OverlayOptions>({
     showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true,
-    ...readPathColors(),
+    ...readColors(),
     stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh',
   });
   private units = inject(UnitsService);
@@ -297,14 +315,18 @@ export class FlightOverlayComponent {
     saveFont('', null);
   }
 
-  setColor(key: 'pathRecentColor' | 'pathOldColor', value: string) {
+  protected readonly pathColors = DEFAULT_PATH_COLORS;
+  protected readonly stickColors = DEFAULT_STICK_COLORS;
+
+  setColor(key: ColorKey, value: string) {
     this.set(key, value);
-    savePathColors(this.opts());
+    saveColors(this.opts());
   }
 
-  resetColors() {
-    this.opts.update(o => ({ ...o, ...DEFAULT_PATH_COLORS }));
-    savePathColors(this.opts());
+  /** Puts one group (mini map or sticks) back to its defaults. */
+  resetColors(defaults: Partial<typeof DEFAULT_COLORS>) {
+    this.opts.update(o => ({ ...o, ...defaults }));
+    saveColors(this.opts());
   }
 
   setStickMode(v: number) {
