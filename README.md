@@ -78,6 +78,30 @@ Flights with GPS get distance, top speed, max height above takeoff and furthest 
 plus a map (Leaflet + OpenStreetMap tiles) with the path coloured by speed. `POST /api/flights/{id}/reprocess`
 re-reads the stored log file, e.g. after a decoder change. `GET /api/flights/{id}/track` returns the path.
 
+## Video overlay
+
+Each flight page has **Export video overlay** (`/flights/:id/overlay`): a transparent HUD video to put on a
+track above your footage in Premiere Pro or After Effects. It shows speed and acceleration, altitude, distance
+from home, satellites, battery (pack and per-cell voltage, amps, mAh used, watts), both sticks in
+Blackbox Explorer style (modes 1–4), a flight timer and a mini map, and can draw everything with your goggles'
+Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format) including Betaflight's own icons.
+
+**How it renders.** Everything happens in the browser; nothing is uploaded. Each frame is drawn on a canvas
+straight from the decoded log data (no playback, no screen capture), encoded as a PNG, and written into a
+QuickTime `.mov` with the PNG codec, which keeps the alpha channel so the overlay is transparent without
+keying. In Chrome and Edge the file streams straight to disk, so long or 4K exports don't fill up memory.
+
+**Speed.** Rendering isn't tied to playback, so it runs faster than real time. Measured at 1080p: about
+21 ms per frame, so a 7-minute flight at 30 fps (≈12,750 frames) renders in roughly 4½ minutes. Higher
+resolutions and frame rates take proportionally longer (4K has 4× the pixels per frame), and the page shows a
+live ETA while it works.
+
+**Size.** The video is lossless, so it's large: about 170 KB per 1080p frame, roughly 2.2 GB for that
+7-minute flight. Your editor's final export brings it back to normal size.
+
+In Premiere: import the `.mov`, put it on a track above the footage, and slide it so the timer starts when the
+quad arms. If it shows black instead of transparent, set Interpret Footage → Alpha Channel to Straight.
+
 ## Local development
 
 Run the API (`dotnet run --launch-profile https` in `DroneLogger.Api`) and `ng serve` in `drone-logger`.

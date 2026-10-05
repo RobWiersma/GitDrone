@@ -81,6 +81,7 @@ const FPS = [24, 25, 30, 50, 60];
               <label class="check"><input type="checkbox" [ngModel]="opts().showSpeed" (ngModelChange)="set('showSpeed', $event)" [disabled]="!data()?.track" /> Speed, height, distance</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showBattery" (ngModelChange)="set('showBattery', $event)" [disabled]="!data()?.battery" /> Battery</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data()?.sticks" /> Sticks</label>
+              <label class="check indent"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" [disabled]="!data()?.sticks || !opts().showSticks" /> Stick trails (motion blur)</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showMap" (ngModelChange)="set('showMap', $event)" [disabled]="!data()?.track" /> Mini map</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" /> Flight timer</label>
             </fieldset>
@@ -157,6 +158,7 @@ const FPS = [24, 25, 30, 50, 60];
     .check { display: flex; align-items: center; justify-content: flex-start; gap: .45rem; font-weight: normal; margin: .2rem 0; }
     /* The site-wide .field input rule makes inputs full width; checkboxes shouldn't be. */
     .check input { width: auto; margin: 0; }
+    .check.indent { margin-left: 1.6rem; }
     fieldset { border: 0; padding: 0; margin: 0 0 1rem; }
     legend { font-weight: 600; margin-bottom: .2rem; }
     .range { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
@@ -194,7 +196,7 @@ export class FlightOverlayComponent {
   start = signal(0);
   end = signal(0);
   opts = signal<OverlayOptions>({
-    showSticks: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true,
+    showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true,
     stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh',
   });
   private units = inject(UnitsService);
