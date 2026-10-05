@@ -66,7 +66,7 @@ code { background: var(--wash); padding: .05rem .3rem; border-radius: 4px; font-
 /* Numbers that should line up and read like an on-screen display. */
 .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
-.btn { display: inline-flex; align-items: center; gap: .4rem; padding: .55rem 1rem; border: 1px solid var(--line);
+.btn { position: relative; /* contains visually-hidden inputs inside button labels */ display: inline-flex; align-items: center; gap: .4rem; padding: .55rem 1rem; border: 1px solid var(--line);
        background: var(--surface); color: var(--ink); border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer;
        text-decoration: none; transition: border-color .15s, background-color .15s, transform .05s; }
 .btn:hover { border-color: var(--muted); background: var(--raised); }
@@ -85,7 +85,8 @@ code { background: var(--wash); padding: .05rem .3rem; border-radius: 4px; font-
 
 .hint { color: var(--muted); margin: .25rem 0 0; }
 .error { color: var(--danger); margin: .25rem 0 0; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
+           clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---- Leaflet, themed ---- */
 .leaflet-container { background: var(--wash); font: inherit; }

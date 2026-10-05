@@ -1,4 +1,4 @@
-import { BatteryPoint, StickPoint, TrackPoint, msToKmh } from './flight.models';
+import { BatteryPoint, SpeedUnit, StickPoint, TrackPoint, speedFromMs } from './flight.models';
 import { MODES, StickMode, sampleSticks, stickAxes } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
@@ -20,20 +20,22 @@ export interface OverlayOptions {
   panelOpacity: number;
   /** Betaflight OSD font to draw text with; null uses the built-in monospace font. */
   font: GlyphFont | null;
+  speedUnit: SpeedUnit;
 }
 
 const ACCENT = '#9be564';
 const FONT = 'ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace';
 
-/** The OSD font for the frame being drawn (set at the start of draw). */
+/** The OSD font and speed unit for the frame being drawn (set at the start of draw). */
 let glyphs: GlyphFont | null = null;
+let speedUnit: SpeedUnit = 'kmh';
 
 /** Unit strings: Betaflight's own symbols with an OSD font, plain text otherwise. */
 const units = () => glyphs
-  ? { kph: SYM.kph, volt: SYM.volt, perCell: SYM.volt, amp: SYM.amp, mah: SYM.mah, watt: SYM.watt, m: SYM.m,
-      alt: SYM.alt, home: SYM.home, fly: SYM.fly, homeMark: SYM.home }
-  : { kph: 'km/h', volt: 'V', perCell: ' V/cell', amp: ' A', mah: ' mAh', watt: ' W', m: ' m',
-      alt: '▲ ', home: '⌂ ', fly: '', homeMark: 'H' };
+  ? { kph: speedUnit === 'mph' ? SYM.mph : SYM.kph, volt: SYM.volt, perCell: SYM.volt, amp: SYM.amp, mah: SYM.mah, watt: SYM.watt, m: SYM.m,
+      alt: SYM.alt, home: SYM.home, fly: SYM.fly, homeMark: SYM.home, sat: SYM.sat }
+  : { kph: speedUnit === 'mph' ? 'mph' : 'km/h', volt: 'V', perCell: ' V/cell', amp: ' A', mah: ' mAh', watt: ' W', m: ' m',
+      alt: '▲ ', home: '⌂ ', fly: '', homeMark: 'H', sat: 'SAT ' };
 
 /** Betaflight battery icon for a per-cell voltage (3.3 V empty .. 4.2 V full). */
 const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.round(((cell - 3.3) / 0.9) * 6)))];
@@ -89,6 +91,7 @@ export class OverlayRenderer {
     const m = 48 * u;
     ctx.clearRect(0, 0, W, H);
     glyphs = o.font;
+    speedUnit = o.speedUnit;
 
     if (o.showTimer) this.drawTimer(ctx, t, m, u, o);
     if (o.showMap && this.mapXY.length > 1) this.drawMap(ctx, t, W - m - 300 * u, m, 300 * u, u, o);
@@ -108,15 +111,19 @@ export class OverlayRenderer {
   private drawSpeed(ctx: CanvasRenderingContext2D, t: number, x: number, bottom: number, u: number, o: OverlayOptions) {
     const i = nearest(this.trackTimes, t);
     const p = this.data.track!.points[i];
-    const w = 330 * u, h = 240 * u, y = bottom - h;
+    // Same width as the battery panel. Line 1: speed and acceleration; line 2: altitude, home distance, satellites.
+    const w = 400 * u, h = 160 * u, y = bottom - h;
     panel(ctx, x, y, w, h, 22 * u, o.panelOpacity);
-    if (!glyphs) label(ctx, 'SPEED', x + 26 * u, y + 40 * u, 20 * u);
+    if (!glyphs) label(ctx, 'SPEED', x + 26 * u, y + 36 * u, 20 * u);
     const U = units();
-    const kmh = msToKmh(p[4]).toFixed(0);
-    text(ctx, kmh, x + 26 * u, y + 140 * u, 108 * u, 'left', 800);
-    text(ctx, U.kph, x + 26 * u + measure(ctx, kmh, 108 * u, 800) + 12 * u, y + 140 * u, glyphs ? 44 * u : 30 * u, 'left', 600, 0.85);
-    text(ctx, `${U.alt}${p[3].toFixed(0)}${U.m}`, x + 26 * u, y + 208 * u, 32 * u, 'left', 700);
-    text(ctx, `${U.home}${this.homeDist[i].toFixed(0)}${U.m}`, x + 190 * u, y + 208 * u, 32 * u, 'left', 700);
+    const speed = speedFromMs(p[4], o.speedUnit).toFixed(0);
+    text(ctx, speed, x + 26 * u, y + 96 * u, 54 * u, 'left', 800);
+    text(ctx, U.kph, x + 26 * u + measure(ctx, speed, 54 * u, 800) + 10 * u, y + 96 * u, glyphs ? 30 * u : 24 * u, 'left', 600, 0.85);
+    if (p[6] !== undefined) text(ctx, `${(p[6] / 9.81).toFixed(1)}G`, x + w - 26 * u, y + 96 * u, 32 * u, 'right', 700);
+    // Home sits a little right of centre: the altitude reading on the left is usually the wider of the two neighbours.
+    text(ctx, `${U.alt}${p[3].toFixed(0)}${U.m}`, x + 26 * u, y + 140 * u, 26 * u, 'left', 700);
+    text(ctx, `${U.home}${this.homeDist[i].toFixed(0)}${U.m}`, x + w * 0.55, y + 140 * u, 26 * u, 'center', 700);
+    if (p[5] !== undefined) text(ctx, `${U.sat}${p[5]}`, x + w - 26 * u, y + 140 * u, 26 * u, 'right', 700);
   }
 
   private drawBattery(ctx: CanvasRenderingContext2D, t: number, right: number, bottom: number, u: number, o: OverlayOptions) {
@@ -124,22 +131,33 @@ export class OverlayRenderer {
     const i = nearest(this.batteryTimes, t);
     const [, v, a] = bat.points[i];
     const cell = v / bat.cells;
-    const w = 330 * u, h = 240 * u, x = right - w, y = bottom - h;
+    // Two lines: icon, pack voltage and per-cell average; then amps, mAh used and watts.
+    const w = 400 * u, h = a !== null ? 128 * u : 86 * u, x = right - w, y = bottom - h;
     panel(ctx, x, y, w, h, 22 * u, o.panelOpacity);
     const U = units();
-    // With an OSD font the label gets Betaflight's own battery-level icon.
-    label(ctx, glyphs ? `${batteryIcon(cell)} ${bat.cells}S` : `BATTERY ${bat.cells}S`, x + 26 * u, y + 40 * u, glyphs ? 28 * u : 20 * u);
     const low = cell < 3.5;
     const warn = low ? '#ffb340' : undefined;
+    const line1 = y + 60 * u;
+
+    // Battery-level icon: Betaflight's own glyph with an OSD font, a drawn one otherwise.
+    let vx = x + 26 * u;
+    if (glyphs) {
+      text(ctx, batteryIcon(cell), vx, line1, 36 * u, 'left', 700);
+      vx += measure(ctx, batteryIcon(cell), 36 * u, 700) + 6 * u;
+    } else {
+      drawBatteryIcon(ctx, vx, line1 - 32 * u, 18 * u, 34 * u, cell, warn);
+      vx += 32 * u;
+    }
     const volts = v.toFixed(1);
-    text(ctx, volts, x + 26 * u, y + 108 * u, 72 * u, 'left', 800, 1, warn);
-    text(ctx, U.volt, x + 26 * u + measure(ctx, volts, 72 * u, 800) + 10 * u, y + 108 * u, glyphs ? 44 * u : 30 * u, 'left', 600, 0.85);
-    // Per-cell on its own line so it never collides with the big pack voltage.
-    text(ctx, `${cell.toFixed(2)}${U.perCell}`, x + 26 * u, y + 146 * u, 26 * u, 'left', 600, 0.9, warn);
+    text(ctx, volts, vx, line1, 36 * u, 'left', 800, 1, warn);
+    text(ctx, U.volt, vx + measure(ctx, volts, 36 * u, 800) + 8 * u, line1, glyphs ? 28 * u : 22 * u, 'left', 600, 0.85);
+    text(ctx, `${cell.toFixed(2)}${U.perCell}`, x + w - 26 * u, line1, 24 * u, 'right', 600, 0.9, warn);
+
     if (a !== null) {
-      text(ctx, `${a.toFixed(1)}${U.amp}`, x + 26 * u, y + 188 * u, 32 * u, 'left', 700);
-      text(ctx, `${Math.round(v * a)}${U.watt}`, x + w - 26 * u, y + 188 * u, 32 * u, 'right', 700);
-      text(ctx, `${Math.round(this.mahAt[i])}${U.mah}`, x + 26 * u, y + 222 * u, 26 * u, 'left', 600, 0.9);
+      const line2 = y + 106 * u;
+      text(ctx, `${a.toFixed(1)}${U.amp}`, x + 26 * u, line2, 24 * u, 'left', 700);
+      text(ctx, `${Math.round(this.mahAt[i])}${U.mah}`, x + w / 2, line2, 24 * u, 'center', 700);
+      text(ctx, `${Math.round(v * a)}${U.watt}`, x + w - 26 * u, line2, 24 * u, 'right', 700);
     }
   }
 
@@ -219,6 +237,27 @@ export class OverlayRenderer {
 }
 
 // ---------- drawing helpers ----------
+
+/** Upright battery outline with a fill that drains from 4.2 V to 3.3 V per cell (for the built-in font). */
+function drawBatteryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, cell: number, warn?: string) {
+  const level = Math.max(0, Math.min(1, (cell - 3.3) / 0.9));
+  const cap = h * 0.12, line = Math.max(1.5, w * 0.12), inset = line * 1.6;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  // Dark halo first so the icon reads on bright footage, like the text outline.
+  ctx.strokeStyle = 'rgba(0,0,0,.75)';
+  ctx.lineWidth = line * 2.4;
+  ctx.strokeRect(x, y + cap, w, h - cap);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = line;
+  ctx.strokeRect(x, y + cap, w, h - cap);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x + w * 0.3, y, w * 0.4, cap);
+  const inner = h - cap - inset * 2;
+  ctx.fillStyle = warn ?? '#ffffff';
+  ctx.fillRect(x + inset, y + cap + inset + inner * (1 - level), w - inset * 2, inner * level);
+  ctx.restore();
+}
 
 function panel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, opacity: number) {
   if (opacity <= 0) return;

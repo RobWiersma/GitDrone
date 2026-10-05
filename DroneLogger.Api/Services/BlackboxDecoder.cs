@@ -3,7 +3,9 @@ using System.Text;
 
 namespace DroneLogger.Api.Services;
 
-public record GpsSample(long TimeUs, double Lat, double Lon, double AltitudeM, double SpeedMs, int Satellites);
+/// <summary>VelN/E/D are GPS velocity in m/s (north, east, down); null on firmware that doesn't log GPS_velned.</summary>
+public record GpsSample(long TimeUs, double Lat, double Lon, double AltitudeM, double SpeedMs, int Satellites,
+    double? VelN = null, double? VelE = null, double? VelD = null);
 
 /// <summary>Stick positions from rcCommand: roll/pitch/yaw are -500..500, throttle is 1000..2000 (Betaflight 4.x+).</summary>
 public record StickSample(long TimeUs, int Roll, int Pitch, int Yaw, int Throttle);
@@ -427,12 +429,14 @@ public static class BlackboxDecoder
             if (lat == 0 && lon == 0) return; // no fix yet
             if (Math.Abs(lat) > 90 || Math.Abs(lon) > 180) return;
 
+            double? Vel(string n) => Idx(n) >= 0 ? Get(Idx(n)) / 100.0 : null; // cm/s
             gps.Add(new GpsSample(
                 Get(Idx("time")),
                 lat, lon,
                 Get(Idx("GPS_altitude")) / 10.0,  // decimetres
                 Get(Idx("GPS_speed")) / 100.0,    // cm/s
-                (int)Get(Idx("GPS_numSat"))));
+                (int)Get(Idx("GPS_numSat")),
+                Vel("GPS_velned[0]"), Vel("GPS_velned[1]"), Vel("GPS_velned[2]")));
         }
 
         private bool ShouldHaveFrame(long frameIndex) =>

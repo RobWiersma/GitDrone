@@ -7,6 +7,7 @@ import { Flight } from './flight.models';
 import { OverlayData, OverlayOptions, OverlayRenderer } from './overlay-renderer';
 import { MovWriter, canSaveToDisk, diskMovWriter, memoryMovWriter } from './mov-writer';
 import { GlyphFont, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font';
+import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 
@@ -194,8 +195,9 @@ export class FlightOverlayComponent {
   end = signal(0);
   opts = signal<OverlayOptions>({
     showSticks: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true,
-    stickMode: readStickMode(), panelOpacity: 0.35, font: null,
+    stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh',
   });
+  private units = inject(UnitsService);
 
   previewTime = signal(0);
   previewClock = computed(() => clock(this.previewTime()));
@@ -232,6 +234,7 @@ export class FlightOverlayComponent {
 
     loadSavedFont().then(f => this.font.set(f));
     effect(() => { const f = this.font(); this.opts.update(o => ({ ...o, font: f })); });
+    effect(() => { const u = this.units.speed(); this.opts.update(o => ({ ...o, speedUnit: u })); });
 
     // Redraw the preview whenever anything it shows changes.
     afterNextRender(() => this.drawPreview());

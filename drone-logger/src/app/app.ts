@@ -4,6 +4,7 @@ import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } fro
 import { filter, map } from 'rxjs';
 import { ThemeService } from './theme.service';
 import { AuthService } from './auth.service';
+import { UnitsService } from './units.service';
 
 @Component({
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
@@ -14,6 +15,7 @@ import { AuthService } from './auth.service';
 export class App {
   readonly theme = inject(ThemeService);
   readonly auth = inject(AuthService);
+  readonly units = inject(UnitsService);
   readonly themeLabel = computed(() => ({ system: 'System', dark: 'Dark', light: 'Light' })[this.theme.preference()]);
 
   private url = toSignal(inject(Router).events.pipe(

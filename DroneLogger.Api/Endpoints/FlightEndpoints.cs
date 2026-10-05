@@ -199,7 +199,7 @@ public static class FlightEndpoints
     }
 
     /// <summary>Bumped whenever WithLogData starts storing something new, so older flights rebuild themselves.</summary>
-    private const int CurrentDataVersion = 3; // 2: sticks, 3: battery and average speed
+    private const int CurrentDataVersion = 4; // 2: sticks, 3: battery and average speed, 4: satellites and acceleration in the track
 
     /// <summary>Rebuilds track and sticks from the stored log when a flight predates the current data version.</summary>
     private static async Task EnsureCurrentAsync(int id, AppDbContext db, LogStore store, CancellationToken ct)

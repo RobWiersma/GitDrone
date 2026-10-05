@@ -22,6 +22,10 @@
         <a class="link" [href]="signInHref()">Sign in</a>
       }
     </span>
+    <button class="theme units" type="button" (click)="units.toggle()"
+            [attr.aria-label]="'Speed in ' + units.speedLabel() + '. Switch to ' + (units.speed() === 'kmh' ? 'mph' : 'km/h')">
+      {{ units.speedLabel() }}
+    </button>
     <button class="theme" type="button" (click)="theme.cycle()" [attr.aria-label]="'Theme: ' + themeLabel() + '. Change theme'"
             [title]="'Theme: ' + themeLabel()">
       @switch (theme.preference()) {

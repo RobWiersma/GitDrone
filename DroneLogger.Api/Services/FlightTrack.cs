@@ -36,6 +36,7 @@ public static class FlightTrack
             maxFromHome = Math.Max(maxFromHome, Haversine(origin.Lat, origin.Lon, p.Lat, p.Lon));
         }
 
+        var accel = Acceleration(gps);
         var stride = (int)Math.Ceiling(gps.Count / (double)MaxPoints);
         var t0 = log.FirstTimeUs; // same clock as the stick data, so playback lines up
         var sb = new StringBuilder();
@@ -46,9 +47,10 @@ public static class FlightTrack
         {
             var p = gps[i];
             if (i > 0) sb.Append(',');
-            // [seconds since log start, lat, lon, height above takeoff (m), ground speed (m/s)]
+            // [seconds since log start, lat, lon, height above takeoff (m), ground speed (m/s), satellites, acceleration (m/s²)]
             sb.Append('[').Append(F((p.TimeUs - t0) / 1e6, 1)).Append(',').Append(F(p.Lat, 7)).Append(',').Append(F(p.Lon, 7))
-              .Append(',').Append(F(p.AltitudeM - baseAlt, 1)).Append(',').Append(F(p.SpeedMs, 1)).Append(']');
+              .Append(',').Append(F(p.AltitudeM - baseAlt, 1)).Append(',').Append(F(p.SpeedMs, 1))
+              .Append(',').Append(p.Satellites).Append(',').Append(F(accel[i], 1)).Append(']');
         }
         sb.Append("]}");
 
@@ -56,6 +58,31 @@ public static class FlightTrack
         var summary = new GpsSummary(Math.Round(distance), Math.Round(maxSpeed, 1), Math.Round(avgSpeed, 1), Math.Round(maxHeight, 1), Math.Round(maxFromHome),
             log.Home?.Lat, log.Home?.Lon);
         return (summary, sb.ToString());
+    }
+
+    /// <summary>
+    /// Acceleration in m/s² at each GPS sample, from the change in velocity across a 0.5 s window centred on it.
+    /// With GPS_velned this is the full 3D vector, so turns count as well as speeding up and braking; without it,
+    /// only the change in ground speed. The window smooths out GPS jitter, which would otherwise look like spikes.
+    /// </summary>
+    private static double[] Acceleration(IReadOnlyList<GpsSample> gps)
+    {
+        const long halfWindowUs = 250_000;
+        var hasVector = gps.All(p => p.VelN is not null && p.VelE is not null && p.VelD is not null);
+        var result = new double[gps.Count];
+        int lo = 0, hi = 0;
+        for (var i = 0; i < gps.Count; i++)
+        {
+            while (gps[i].TimeUs - gps[lo].TimeUs > halfWindowUs) lo++;
+            while (hi + 1 < gps.Count && gps[hi + 1].TimeUs - gps[i].TimeUs <= halfWindowUs) hi++;
+            var dt = (gps[hi].TimeUs - gps[lo].TimeUs) / 1e6;
+            if (dt <= 0) continue;
+            var a = gps[lo]; var b = gps[hi];
+            result[i] = hasVector
+                ? Math.Sqrt(Math.Pow(b.VelN!.Value - a.VelN!.Value, 2) + Math.Pow(b.VelE!.Value - a.VelE!.Value, 2) + Math.Pow(b.VelD!.Value - a.VelD!.Value, 2)) / dt
+                : Math.Abs(b.SpeedMs - a.SpeedMs) / dt;
+        }
+        return result;
     }
 
     /// <summary>{"points":[[t,roll,pitch,yaw,throttle],...]}, t in seconds since log start. Null without stick fields.</summary>

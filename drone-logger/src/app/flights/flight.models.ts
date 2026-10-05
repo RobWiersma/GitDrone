@@ -52,8 +52,11 @@ export interface FlightBatterySeries {
   points: BatteryPoint[];
 }
 
-/** [seconds since log start, lat, lon, height above takeoff (m), ground speed (m/s)] */
-export type TrackPoint = [number, number, number, number, number];
+/**
+ * [seconds since log start, lat, lon, height above takeoff (m), ground speed (m/s), satellites, acceleration (m/s²)].
+ * The last two arrive with data version 4; older tracks rebuild themselves on first request.
+ */
+export type TrackPoint = [number, number, number, number, number, number?, number?];
 
 /** [seconds since log start, roll, pitch, yaw (-500..500), throttle (1000..2000)], Betaflight rcCommand at 25 Hz. */
 export type StickPoint = [number, number, number, number, number];
@@ -73,6 +76,9 @@ export function formatDistance(m: number): string {
 }
 
 export const msToKmh = (ms: number) => ms * 3.6;
+
+export type SpeedUnit = 'kmh' | 'mph';
+export const speedFromMs = (ms: number, unit: SpeedUnit) => (unit === 'mph' ? ms * 2.236936 : ms * 3.6);
 
 export interface FlightUploadResult {
   flights: Flight[];

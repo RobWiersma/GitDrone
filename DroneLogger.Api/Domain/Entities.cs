@@ -80,7 +80,7 @@ public class Flight
     public double? MaxDistanceM { get; set; }
     public double? HomeLat { get; set; }
     public double? HomeLon { get; set; }
-    /// <summary>{"home":[lat,lon]|null,"points":[[t,lat,lon,heightAboveTakeoff,speed],...]}, see FlightTrack.</summary>
+    /// <summary>{"home":[lat,lon]|null,"points":[[t,lat,lon,heightAboveTakeoff,speed,sats,accel],...]}, see FlightTrack.</summary>
     public string? TrackJson { get; set; }
     /// <summary>{"points":[[t,roll,pitch,yaw,throttle],...]} at 25 Hz, see FlightTrack.BuildSticks.</summary>
     public string? SticksJson { get; set; }

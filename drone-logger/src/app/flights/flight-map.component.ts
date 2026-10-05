@@ -1,22 +1,29 @@
 import { Component, ElementRef, OnDestroy, afterNextRender, computed, effect, inject, input, model, signal, viewChild } from '@angular/core';
 import * as L from 'leaflet';
-import { FlightTrack, TrackPoint, msToKmh } from './flight.models';
+import { FlightTrack, SpeedUnit, TrackPoint, speedFromMs } from './flight.models';
 import { ThemeService } from '../theme.service';
+import { UnitsService } from '../units.service';
 
 /**
- * Speed bands, km/h. Fixed (not scaled per flight) so colours mean the same thing on every flight.
+ * Speed bands. Fixed (not scaled per flight) so colours mean the same thing on every flight. Each unit gets
+ * round thresholds of its own (15/30/45/60 km/h, 10/20/30/40 mph) rather than awkward converted numbers.
  * One-hue blue ramp where faster always means more contrast with the map: darker on light tiles, brighter on
  * dark tiles. Both validated as ordinal ramps against their surface.
  */
-const BANDS = [
-  { upTo: 15, light: '#6da7ec', dark: '#1c5cab', label: 'under 15' },
-  { upTo: 30, light: '#3987e5', dark: '#2a78d6', label: '15–30' },
-  { upTo: 45, light: '#256abf', dark: '#5598e7', label: '30–45' },
-  { upTo: 60, light: '#184f95', dark: '#86b6ef', label: '45–60' },
-  { upTo: Infinity, light: '#0d366b', dark: '#cde2fb', label: '60+' },
+const COLORS = [
+  { light: '#6da7ec', dark: '#1c5cab' },
+  { light: '#3987e5', dark: '#2a78d6' },
+  { light: '#256abf', dark: '#5598e7' },
+  { light: '#184f95', dark: '#86b6ef' },
+  { light: '#0d366b', dark: '#cde2fb' },
 ];
+const STEPS: Record<SpeedUnit, number[]> = { kmh: [15, 30, 45, 60], mph: [10, 20, 30, 40] };
 
-const bandOf = (p: TrackPoint) => BANDS.findIndex(b => msToKmh(p[4]) < b.upTo);
+function bandsFor(unit: SpeedUnit) {
+  const s = STEPS[unit];
+  const labels = [`under ${s[0]}`, `${s[0]}–${s[1]}`, `${s[1]}–${s[2]}`, `${s[2]}–${s[3]}`, `${s[3]}+`];
+  return COLORS.map((c, i) => ({ ...c, upTo: s[i] ?? Infinity, label: labels[i] }));
+}
 
 /** Leaflet draws on canvas, so CSS variables have to be resolved to real colours. */
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -26,7 +33,7 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
   template: `
     <div #map class="map" role="region" aria-label="Map of the flight path, coloured by ground speed"></div>
     <div class="legend" role="group" aria-label="Speed legend">
-      <span class="title">Speed, km/h</span>
+      <span class="title">Speed, {{ units.speedLabel() }}</span>
       @for (b of bands(); track b.label) {
         <span class="item"><span class="swatch" [style.background]="b.color"></span>{{ b.label }}</span>
       }
@@ -49,7 +56,9 @@ export class FlightMapComponent implements OnDestroy {
   hoverIndex = model<number | null>(null);
 
   private theme = inject(ThemeService);
-  readonly bands = computed(() => BANDS.map(b => ({ label: b.label, color: this.theme.dark() ? b.dark : b.light })));
+  readonly units = inject(UnitsService);
+  private rawBands = computed(() => bandsFor(this.units.speed()));
+  readonly bands = computed(() => this.rawBands().map(b => ({ label: b.label, color: this.theme.dark() ? b.dark : b.light })));
 
   private host = viewChild.required<ElementRef<HTMLDivElement>>('map');
   private map?: L.Map;
@@ -82,6 +91,7 @@ export class FlightMapComponent implements OnDestroy {
     effect(() => {
       const t = this.track();
       this.theme.dark(); // redraw with the other palette when the theme changes
+      this.units.speed(); // or the bands when the speed unit changes
       if (this.ready()) this.draw(t);
     });
 
@@ -108,7 +118,8 @@ export class FlightMapComponent implements OnDestroy {
     // Consecutive points in the same speed band share one polyline, which keeps the layer count low.
     const runs: { band: number; coords: L.LatLngExpression[] }[] = [];
     for (let i = 1; i < pts.length; i++) {
-      const band = bandOf(pts[i]);
+      const speed = speedFromMs(pts[i][4], this.units.speed());
+      const band = this.rawBands().findIndex(b => speed < b.upTo);
       const last = runs.at(-1);
       if (last && last.band === band) last.coords.push([pts[i][1], pts[i][2]]);
       else runs.push({ band, coords: [[pts[i - 1][1], pts[i - 1][2]], [pts[i][1], pts[i][2]]] });

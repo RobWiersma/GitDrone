@@ -3,13 +3,14 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
-import { BatteryPoint, Flight, FlightTrack, StickPoint, formatDistance, formatDuration, msToKmh } from './flight.models';
+import { BatteryPoint, Flight, FlightTrack, StickPoint, formatDistance, formatDuration } from './flight.models';
 import { FlightMapComponent } from './flight-map.component';
 import { ChartSeries, FlightProfileComponent, clock, nearest } from './flight-profile.component';
 import { FlightPlaybackComponent, Readout } from './flight-playback.component';
 import { TuneService } from '../tunes/tune.service';
 import { TuneSnapshotSummary } from '../tunes/tune.models';
 import { AuthService } from '../auth.service';
+import { UnitsService } from '../units.service';
 
 @Component({
   selector: 'app-flight-detail',
@@ -25,9 +26,9 @@ import { AuthService } from '../auth.service';
         @if (f.hasGps) {
           <ul class="headline" aria-label="Flight summary">
             <li><span class="lbl">Distance</span><span class="num">{{ distanceValue(f) }}<small>{{ distanceUnit(f) }}</small></span></li>
-            <li><span class="lbl">Top speed</span><span class="num">{{ kmh(f.maxSpeedMs) }}<small>km/h</small></span></li>
+            <li><span class="lbl">Top speed</span><span class="num">{{ speed(f.maxSpeedMs) }}<small>{{ units.speedLabel() }}</small></span></li>
             @if (f.avgSpeedMs !== null) {
-              <li><span class="lbl">Avg speed</span><span class="num">{{ kmh(f.avgSpeedMs) }}<small>km/h</small></span></li>
+              <li><span class="lbl">Avg speed</span><span class="num">{{ speed(f.avgSpeedMs) }}<small>{{ units.speedLabel() }}</small></span></li>
             }
             <li><span class="lbl">Max height</span><span class="num">{{ f.maxHeightM | number: '1.0-0' }}<small>m</small></span></li>
             <li><span class="lbl">Furthest from home</span><span class="num">{{ f.maxDistanceM | number: '1.0-0' }}<small>m</small></span></li>
@@ -209,6 +210,7 @@ import { AuthService } from '../auth.service';
 })
 export class FlightDetailComponent {
   readonly auth = inject(AuthService);
+  readonly units = inject(UnitsService);
   id = input.required<number, unknown>({ transform: numberAttribute });
 
   private service = inject(FlightService);
@@ -246,7 +248,7 @@ export class FlightDetailComponent {
     const tp = this.track()?.points;
     if (tp?.length) {
       const p = tp[nearest(this.trackTimes(), t)];
-      out.push({ label: 'Speed', value: msToKmh(p[4]).toFixed(0), unit: 'km/h' });
+      out.push({ label: 'Speed', value: this.units.fromMs(p[4]).toFixed(0), unit: this.units.speedLabel() });
       out.push({ label: 'Height', value: p[3].toFixed(0), unit: 'm' });
     }
     const bp = this.battery();
@@ -270,7 +272,7 @@ export class FlightDetailComponent {
     const tp = this.track()?.points;
     if (tp?.length) {
       out.push({ key: 'height', title: 'Height above takeoff', unit: 'm', times: this.trackTimes(), values: tp.map(p => p[3]) });
-      out.push({ key: 'speed', title: 'Ground speed', unit: 'km/h', times: this.trackTimes(), values: tp.map(p => msToKmh(p[4])) });
+      out.push({ key: 'speed', title: 'Ground speed', unit: this.units.speedLabel(), times: this.trackTimes(), values: tp.map(p => this.units.fromMs(p[4])) });
     }
     const bp = this.battery();
     if (bp?.length) {
@@ -381,8 +383,8 @@ export class FlightDetailComponent {
     return f.distanceM === null ? '' : formatDistance(f.distanceM).split(' ')[1];
   }
 
-  kmh(ms: number | null) {
-    return ms === null ? '' : msToKmh(ms).toFixed(0);
+  speed(ms: number | null) {
+    return ms === null ? '' : this.units.fromMs(ms).toFixed(0);
   }
 
   save(f: Flight) {
