@@ -54,6 +54,34 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.UseCors("frontend");
 
+// Anyone can look; only signed-in users can change anything. On Azure, App Service Authentication signs people in
+// and passes who they are in X-MS-CLIENT-PRINCIPAL-* headers (it strips any a client tries to send itself).
+// Locally there is no sign-in, so Development counts as signed in.
+var devSignedIn = app.Environment.IsDevelopment();
+static bool IsSignedIn(HttpContext http, bool dev) =>
+    dev || !string.IsNullOrEmpty(http.Request.Headers["X-MS-CLIENT-PRINCIPAL-ID"]);
+
+app.Use(async (http, next) =>
+{
+    var method = http.Request.Method;
+    var readOnly = HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method);
+    if (!readOnly && http.Request.Path.StartsWithSegments("/api") && !IsSignedIn(http, devSignedIn))
+    {
+        http.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await http.Response.WriteAsJsonAsync(new { error = "Sign in to make changes." });
+        return;
+    }
+    await next();
+});
+
+app.MapGet("/api/me", (HttpContext http) => new
+{
+    signedIn = IsSignedIn(http, devSignedIn),
+    name = devSignedIn ? "Local" : http.Request.Headers["X-MS-CLIENT-PRINCIPAL-NAME"].ToString(),
+    // Sign-in and sign-out links only exist where App Service Authentication is running.
+    canSignOut = !devSignedIn,
+});
+
 // The built Angular app is copied into wwwroot at deploy time, so the site and the API share one origin.
 // index.html must be revalidated on every load, or browsers keep running the previous deploy's scripts.
 // The scripts and styles it points at have content hashes in their names, so those can be cached for good.

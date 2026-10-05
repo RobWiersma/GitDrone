@@ -9,13 +9,16 @@
 .link:hover { color: var(--nav-ink); }
 .link.active { color: var(--nav-ink); border-bottom-color: var(--nav-accent); }
 .nav a:focus-visible, .theme:focus-visible { outline: 2px solid var(--nav-accent); outline-offset: 3px; border-radius: 4px; }
-.theme { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; background: transparent; color: var(--nav-muted);
+.account { margin-left: auto; display: inline-flex; align-items: center; gap: .75rem; font-size: .88rem; }
+.who { color: var(--nav-muted); max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme { display: inline-flex; align-items: center; gap: .4rem; background: transparent; color: var(--nav-muted);
          border: 1px solid rgb(255 255 255 / .14); border-radius: 999px; padding: .3rem .7rem; font: inherit; font-size: .85rem;
          font-weight: 600; cursor: pointer; }
 .theme:hover { color: var(--nav-ink); border-color: rgb(255 255 255 / .3); }
 .theme svg { width: 1rem; height: 1rem; }
 @media (max-width: 30rem) {
   .nav { gap: 1rem; }
+  .who { display: none; }
   .theme-label { display: none; }
   /* Visually hidden but still the link's name for screen readers. */
   .brand span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

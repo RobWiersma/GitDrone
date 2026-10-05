@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { AircraftService } from './aircraft.service';
 import { Aircraft } from './aircraft.models';
 import { AircraftImageComponent } from './aircraft-image.component';
+import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-aircraft-list',
@@ -12,7 +13,7 @@ import { AircraftImageComponent } from './aircraft-image.component';
     <div class="page">
       <header class="bar">
         <h1>Hangar</h1>
-        <a class="btn btn-primary" routerLink="/hangar/new">Add aircraft</a>
+        @if (auth.canEdit()) { <a class="btn btn-primary" routerLink="/hangar/new">Add aircraft</a> }
       </header>
 
       @if (failed()) {
@@ -23,7 +24,7 @@ import { AircraftImageComponent } from './aircraft-image.component';
         <div class="panel empty">
           <h2>No aircraft yet</h2>
           <p>Add your first quad to start keeping its tune history.</p>
-          <a class="btn btn-primary" routerLink="/hangar/new">Add aircraft</a>
+          @if (auth.canEdit()) { <a class="btn btn-primary" routerLink="/hangar/new">Add aircraft</a> }
         </div>
       } @else {
         <ul class="grid">
@@ -67,6 +68,7 @@ import { AircraftImageComponent } from './aircraft-image.component';
   `],
 })
 export class AircraftListComponent {
+  readonly auth = inject(AuthService);
   aircraft = signal<Aircraft[] | null>(null);
   failed = signal(false);
 

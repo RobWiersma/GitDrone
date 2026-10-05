@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { TuneService } from './tune.service';
 import { TuneSnapshotSummary } from './tune.models';
 import { TuneRawComponent } from './tune-raw.component';
+import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-tune-timeline',
@@ -12,10 +13,12 @@ import { TuneRawComponent } from './tune-raw.component';
     <section class="panel">
       <div class="bar">
         <h2>Tune history</h2>
-        <div class="bar-actions">
-          <a class="btn" [routerLink]="['/hangar', aircraftId(), 'tunes', 'bulk']">Bulk import</a>
-          <a class="btn btn-primary" [routerLink]="['/hangar', aircraftId(), 'tunes', 'import']">Import tune</a>
-        </div>
+        @if (auth.canEdit()) {
+          <div class="bar-actions">
+            <a class="btn" [routerLink]="['/hangar', aircraftId(), 'tunes', 'bulk']">Bulk import</a>
+            <a class="btn btn-primary" [routerLink]="['/hangar', aircraftId(), 'tunes', 'import']">Import tune</a>
+          </div>
+        }
       </div>
 
       @switch (state()) {
@@ -72,6 +75,7 @@ import { TuneRawComponent } from './tune-raw.component';
   `],
 })
 export class TuneTimelineComponent {
+  readonly auth = inject(AuthService);
   aircraftId = input.required<number>();
 
   private tunes = inject(TuneService);

@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
 import { Flight, formatDistance, formatDuration } from './flight.models';
 import { FlightThumbComponent } from './flight-thumb.component';
+import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-flight-list',
@@ -12,7 +13,9 @@ import { FlightThumbComponent } from './flight-thumb.component';
     <section class="panel">
       <div class="bar">
         <h2>Flights</h2>
-        <a class="btn btn-primary" [routerLink]="['/hangar', aircraftId(), 'flights', 'upload']">Upload blackbox log</a>
+        @if (auth.canEdit()) {
+          <a class="btn btn-primary" [routerLink]="['/hangar', aircraftId(), 'flights', 'upload']">Upload blackbox log</a>
+        }
       </div>
 
       @switch (state()) {
@@ -80,6 +83,7 @@ import { FlightThumbComponent } from './flight-thumb.component';
   `],
 })
 export class FlightListComponent {
+  readonly auth = inject(AuthService);
   aircraftId = input.required<number>();
 
   private service = inject(FlightService);

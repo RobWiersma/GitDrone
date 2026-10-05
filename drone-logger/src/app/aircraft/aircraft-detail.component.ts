@@ -5,6 +5,7 @@ import { Aircraft } from './aircraft.models';
 import { AircraftImageComponent } from './aircraft-image.component';
 import { TuneTimelineComponent } from '../tunes/tune-timeline.component';
 import { FlightListComponent } from '../flights/flight-list.component';
+import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-aircraft-detail',
@@ -27,10 +28,12 @@ import { FlightListComponent } from '../flights/flight-list.component';
               }
             </dl>
             @if (a.notes) { <p class="notes">{{ a.notes }}</p> }
-            <div class="actions">
-              <a class="btn" [routerLink]="['/hangar', a.id, 'edit']">Edit</a>
-              <button class="btn btn-danger" type="button" (click)="remove(a)">Delete</button>
-            </div>
+            @if (auth.canEdit()) {
+              <div class="actions">
+                <a class="btn" [routerLink]="['/hangar', a.id, 'edit']">Edit</a>
+                <button class="btn btn-danger" type="button" (click)="remove(a)">Delete</button>
+              </div>
+            }
           </div>
         </div>
 
@@ -52,6 +55,7 @@ import { FlightListComponent } from '../flights/flight-list.component';
   `],
 })
 export class AircraftDetailComponent {
+  readonly auth = inject(AuthService);
   id = input.required<number, unknown>({ transform: numberAttribute });
 
   private service = inject(AircraftService);

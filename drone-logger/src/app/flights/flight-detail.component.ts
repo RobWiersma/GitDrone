@@ -9,6 +9,7 @@ import { ChartSeries, FlightProfileComponent, clock, nearest } from './flight-pr
 import { FlightPlaybackComponent, Readout } from './flight-playback.component';
 import { TuneService } from '../tunes/tune.service';
 import { TuneSnapshotSummary } from '../tunes/tune.models';
+import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-flight-detail',
@@ -125,13 +126,19 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
           <dt>GPS</dt>
           <dd>
             {{ f.hasGps ? 'Recorded' : 'Not in this log' }}
-            @if (!f.hasGps) {
+            @if (!f.hasGps && auth.canEdit()) {
               <button class="link" type="button" [disabled]="busy()" (click)="reprocess(f)">Re-read log file</button>
             }
           </dd>
         </dl>
 
         <h2>Tune and notes</h2>
+        @if (!auth.canEdit()) {
+          <dl class="panel stats">
+            <dt>Tune</dt><dd>{{ f.tuneLabel ?? 'None linked' }}</dd>
+            <dt>Notes</dt><dd class="notes">{{ f.notes || 'None' }}</dd>
+          </dl>
+        } @else {
         <div class="field">
           <label for="tune">Tune flown</label>
           <select id="tune" [(ngModel)]="tuneChoice">
@@ -155,6 +162,7 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
           }
           <button class="btn btn-danger" type="button" (click)="remove(f)">Delete flight</button>
         </div>
+        }
       } @else if (notFound()) {
         <a routerLink="/hangar">Back to hangar</a>
         <p class="error">That flight doesn't exist. It may have been deleted.</p>
@@ -196,9 +204,11 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
     .link { margin-left: .5rem; background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
     .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+    .notes { white-space: pre-wrap; }
   `],
 })
 export class FlightDetailComponent {
+  readonly auth = inject(AuthService);
   id = input.required<number, unknown>({ transform: numberAttribute });
 
   private service = inject(FlightService);
