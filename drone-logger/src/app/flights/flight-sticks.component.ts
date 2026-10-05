@@ -1,54 +1,8 @@
 import { Component, computed, input, signal } from '@angular/core';
 import { StickPoint } from './flight.models';
+import { AXIS_LABELS, Axis, MODES, StickMode, readStickMode, sampleSticks, saveStickMode, stickAxes } from './stick-math';
 
-type Axis = 'roll' | 'pitch' | 'yaw' | 'throttle';
-type Mode = 1 | 2 | 3 | 4;
-
-/** Which axis each stick moves, per transmitter mode: [left x, left y, right x, right y]. */
-const MODES: Record<Mode, [Axis, Axis, Axis, Axis]> = {
-  1: ['yaw', 'pitch', 'roll', 'throttle'],
-  2: ['yaw', 'throttle', 'roll', 'pitch'],
-  3: ['roll', 'pitch', 'yaw', 'throttle'],
-  4: ['roll', 'throttle', 'yaw', 'pitch'],
-};
-
-const LABELS: Record<Axis, string> = { roll: 'Roll', pitch: 'Pitch', yaw: 'Yaw', throttle: 'Thr' };
-const MODE_KEY = 'gitdrone-stick-mode';
 const TRAIL_S = 0.6;
-
-/** Values at time t, linearly interpolated between the 25 Hz samples. */
-function sample(points: StickPoint[], t: number): StickPoint {
-  if (t <= points[0][0]) return points[0];
-  if (t >= points.at(-1)![0]) return points.at(-1)!;
-  let lo = 0, hi = points.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (points[mid][0] < t) lo = mid; else hi = mid;
-  }
-  const a = points[lo], b = points[hi];
-  const f = (t - a[0]) / (b[0] - a[0] || 1);
-  return a.map((v, i) => v + (b[i] - v) * f) as StickPoint;
-}
-
-/** Stick positions as -1..1 on each axis. Up and right are positive. */
-function axes(p: StickPoint) {
-  return {
-    roll: p[1] / 500,
-    pitch: p[2] / 500,
-    // Betaflight stores rcCommand[YAW] inverted relative to the stick, so flip it back for display.
-    yaw: -p[3] / 500,
-    throttle: (p[4] - 1500) / 500,
-  };
-}
-
-function readMode(): Mode {
-  try {
-    const v = Number(localStorage.getItem(MODE_KEY));
-    return v === 1 || v === 3 || v === 4 ? v : 2;
-  } catch {
-    return 2;
-  }
-}
 
 const SIZE = 132; // px, each gimbal
 const PAD = 12;
@@ -110,19 +64,19 @@ export class FlightSticksComponent {
 
   readonly size = SIZE;
   readonly pad = PAD;
-  readonly modes: Mode[] = [1, 2, 3, 4];
-  mode = signal<Mode>(readMode());
+  readonly modes: StickMode[] = [1, 2, 3, 4];
+  mode = signal<StickMode>(readStickMode());
 
   gimbals = computed(() => {
     const pts = this.points();
     const t = this.time();
-    const now = axes(sample(pts, t));
+    const now = stickAxes(sampleSticks(pts, t));
     const r = SIZE / 2 - PAD;
     const toXY = (x: number, y: number) => [SIZE / 2 + x * r, SIZE / 2 - y * r] as const;
 
     // Recent positions for the trail, sampled every 40 ms.
-    const history: ReturnType<typeof axes>[] = [];
-    for (let dt = TRAIL_S; dt > 0; dt -= 0.04) history.push(axes(sample(pts, Math.max(0, t - dt))));
+    const history: ReturnType<typeof stickAxes>[] = [];
+    for (let dt = TRAIL_S; dt > 0; dt -= 0.04) history.push(stickAxes(sampleSticks(pts, Math.max(0, t - dt))));
     history.push(now);
 
     const sign = (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`;
@@ -136,13 +90,13 @@ export class FlightSticksComponent {
       const [x, y] = toXY(now[g.x as Axis], now[g.y as Axis]);
       const trail = history.map(a => toXY(a[g.x as Axis], a[g.y as Axis]).join(',')).join(' ');
       // Vertical axis first, matching how pilots say it ("throttle/yaw").
-      const values = [g.y as Axis, g.x as Axis].map(axis => ({ name: LABELS[axis], text: text(axis) }));
+      const values = [g.y as Axis, g.x as Axis].map(axis => ({ name: AXIS_LABELS[axis], text: text(axis) }));
       return { side: g.side, x, y, trail, values };
     });
   });
 
-  setMode(m: Mode) {
+  setMode(m: StickMode) {
     this.mode.set(m);
-    try { localStorage.setItem(MODE_KEY, String(m)); } catch { /* not persisted */ }
+    saveStickMode(m);
   }
 }

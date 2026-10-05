@@ -73,7 +73,10 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
 
         @if (sticks() || track() || battery()) {
           <section class="panel" aria-labelledby="playback-heading">
-            <h2 id="playback-heading">Playback</h2>
+            <div class="panel-head">
+              <h2 id="playback-heading">Playback</h2>
+              <a class="btn" [routerLink]="['/flights', f.id, 'overlay']">Export video overlay</a>
+            </div>
             <app-flight-playback [duration]="seconds()" [sticks]="sticks()" [readouts]="readouts()"
                                  [(time)]="scrubTime" [(playing)]="playing" />
           </section>
@@ -166,6 +169,8 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
     h2 { margin: 1.5rem 0 .75rem; }
     .panel { margin-bottom: 1rem; }
     .panel h2 { margin: 0 0 .75rem; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: .75rem; }
+    .panel-head h2 { margin: 0; }
     .stats { display: grid; grid-template-columns: max-content 1fr; gap: .45rem 1.25rem; margin: 0; }
     .stats dt { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: .15rem; }
     dt { color: var(--muted); }

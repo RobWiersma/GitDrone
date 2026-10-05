@@ -18,6 +18,7 @@ export const routes: Routes = [
   { path: 'hangar/:id/tunes/bulk', component: TuneBulkImportComponent, title: 'Bulk import tunes' },
   { path: 'hangar/:id/flights/upload', component: FlightUploadComponent, title: 'Upload blackbox log' },
   // Lazy: this page pulls in Leaflet, which nothing else needs.
+  { path: 'flights/:id/overlay', loadComponent: () => import('./flights/flight-overlay.component').then(m => m.FlightOverlayComponent), title: 'Video overlay' },
   { path: 'flights/:id', loadComponent: () => import('./flights/flight-detail.component').then(m => m.FlightDetailComponent), title: 'Flight' },
   { path: 'tunes/compare', component: TuneCompareComponent, title: 'Compare tunes' },
 
