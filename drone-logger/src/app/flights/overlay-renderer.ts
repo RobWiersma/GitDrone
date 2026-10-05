@@ -23,6 +23,8 @@ export interface OverlayOptions {
   /** Stick colours (#rrggbb): the position dot and its motion-blur trail. */
   stickDotColor: string;
   stickTrailColor: string;
+  /** Trail opacity multiplier: 1 is the default look, 0.25 faint, 2 strong. */
+  stickTrailIntensity: number;
   /** Stick box fill and crosshair (#rrggbb); their transparency stays fixed. */
   stickBoxColor: string;
   stickCrossColor: string;
@@ -202,7 +204,7 @@ export class OverlayRenderer {
       const r = size / 2 - dot - 3 * u;
       const at = (a: ReturnType<typeof stickAxes>) => [g.left + size / 2 + a[g.ax] * r, top + size / 2 - a[g.ay] * r] as const;
       const [kx, ky] = at(now);
-      if (o.stickTrails) this.drawTrail(ctx, t, at, g.left, top, size, dot, u, safeColor(o.stickTrailColor, '#9a9a9a'));
+      if (o.stickTrails) this.drawTrail(ctx, t, at, g.left, top, size, dot, u, safeColor(o.stickTrailColor, '#9a9a9a'), o.stickTrailIntensity ?? 1);
       ctx.fillStyle = safeColor(o.stickDotColor, '#ff5a5a');
       ctx.beginPath(); ctx.arc(kx, ky, dot, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
@@ -214,7 +216,7 @@ export class OverlayRenderer {
    * with age, softened with a blur filter. Clipped to the stick box so the blur never bleeds past its edge.
    */
   private drawTrail(ctx: CanvasRenderingContext2D, t: number, at: (a: ReturnType<typeof stickAxes>) => readonly [number, number],
-                    left: number, top: number, size: number, dot: number, u: number, color: string) {
+                    left: number, top: number, size: number, dot: number, u: number, color: string, intensity: number) {
     const TRAIL_S = 0.35, STEPS = 21; // 60 steps a second, so fast flicks still draw a smooth curve
     const pts: (readonly [number, number])[] = [];
     for (let k = STEPS; k >= 0; k--) pts.push(at(stickAxes(sampleSticks(this.data.sticks!, Math.max(0, t - (TRAIL_S * k) / STEPS)))));
@@ -222,13 +224,14 @@ export class OverlayRenderer {
     ctx.beginPath();
     ctx.roundRect(left, top, size, size, 14 * u);
     ctx.clip();
-    ctx.filter = `blur(${Math.max(1, 3.5 * u)}px)`;
+    ctx.filter = `blur(${Math.max(1, 2.5 * u)}px)`;
     ctx.strokeStyle = color;
     ctx.lineCap = 'round';
     for (let k = 1; k < pts.length; k++) {
       const age = k / (pts.length - 1); // 0 = oldest, 1 = newest
-      ctx.globalAlpha = 0.75 * age * age;
-      ctx.lineWidth = dot * 2 * (0.35 + 0.65 * age);
+      ctx.globalAlpha = Math.min(1, 0.75 * intensity * age * age);
+      // At most 60% of the dot's width, so the streak stays tucked inside the dot's outline instead of fanning out behind it.
+      ctx.lineWidth = dot * 2 * (0.2 + 0.4 * age);
       ctx.beginPath();
       ctx.moveTo(pts[k - 1][0], pts[k - 1][1]);
       ctx.lineTo(pts[k][0], pts[k][1]);

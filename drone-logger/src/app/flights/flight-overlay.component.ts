@@ -37,6 +37,16 @@ function readColors(): typeof DEFAULT_COLORS {
   return colors;
 }
 
+const TRAIL_KEY = 'gitdrone-overlay-trail-intensity';
+
+function readTrailIntensity(): number {
+  try {
+    const v = Number(localStorage.getItem(TRAIL_KEY));
+    if (v >= 0.25 && v <= 2) return v;
+  } catch { /* default */ }
+  return 1;
+}
+
 function saveColors(o: typeof DEFAULT_COLORS) {
   const colors = Object.fromEntries((Object.keys(DEFAULT_COLORS) as ColorKey[]).map(k => [k, o[k]]));
   try { localStorage.setItem(COLORS_KEY, JSON.stringify(colors)); } catch { /* not remembered */ }
@@ -106,6 +116,11 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               <label class="check"><input type="checkbox" [ngModel]="opts().showBattery" (ngModelChange)="set('showBattery', $event)" [disabled]="!data()?.battery" /> Battery</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data()?.sticks" /> Sticks</label>
               <label class="check indent"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" [disabled]="!data()?.sticks || !opts().showSticks" /> Stick trails (motion blur)</label>
+              <div class="field indent trail">
+                <label for="trail-intensity">Trail intensity: {{ (opts().stickTrailIntensity * 100).toFixed(0) }}%</label>
+                <input id="trail-intensity" type="range" min="0.25" max="2" step="0.05" [ngModel]="opts().stickTrailIntensity"
+                       (ngModelChange)="setTrailIntensity(+$event)" [disabled]="busy() || !data()?.sticks || !opts().showSticks || !opts().stickTrails" />
+              </div>
               <div class="colors indent">
                 <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)"
                        [disabled]="!data()?.sticks || !opts().showSticks" /> Dot</label>
@@ -201,6 +216,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     /* The site-wide .field input rule makes inputs full width; checkboxes shouldn't be. */
     .check input { width: auto; margin: 0; }
     .check.indent { margin-left: 1.6rem; }
+    .field.trail { margin: .2rem 0 .3rem 1.6rem; font-size: .92rem; }
+    .field.trail label { font-weight: normal; }
     .colors { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: .2rem 0 .3rem 1.6rem; font-size: .92rem; }
     .color { display: inline-flex; align-items: center; gap: .4rem; font-weight: normal; }
     /* Colour wells: override the site-wide full-width input rule. */
@@ -244,7 +261,7 @@ export class FlightOverlayComponent {
   end = signal(0);
   opts = signal<OverlayOptions>({
     showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true,
-    ...readColors(),
+    ...readColors(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh',
   });
   private units = inject(UnitsService);
@@ -321,6 +338,11 @@ export class FlightOverlayComponent {
   setColor(key: ColorKey, value: string) {
     this.set(key, value);
     saveColors(this.opts());
+  }
+
+  setTrailIntensity(value: number) {
+    this.set('stickTrailIntensity', value);
+    try { localStorage.setItem(TRAIL_KEY, String(value)); } catch { /* not remembered */ }
   }
 
   /** Puts one group (mini map or sticks) back to its defaults. */
