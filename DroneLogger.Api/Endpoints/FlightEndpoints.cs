@@ -23,6 +23,7 @@ public static class FlightEndpoints
         f.MapGet("/", Feed);
         f.MapGet("/{id:int}", Get);
         f.MapGet("/{id:int}/track", Track);
+        f.MapGet("/{id:int}/sticks", Sticks);
         f.MapPost("/{id:int}/reprocess", Reprocess);
         f.MapPut("/{id:int}", Update);
         f.MapDelete("/{id:int}", Delete);
@@ -137,7 +138,7 @@ public static class FlightEndpoints
                 MaxThrottlePercent = Round(log.MaxThrottlePercent),
                 CorruptFrames = log.CorruptFrames,
                 CreatedAt = now,
-            }.WithGps(log);
+            }.WithLogData(log);
         }).ToList();
 
         try
@@ -160,8 +161,9 @@ public static class FlightEndpoints
     /// The stored GPS track, or 404 when the flight has none. <paramref name="max"/> thins it to roughly that many
     /// points (always keeping the last), for thumbnails.
     /// </summary>
-    private static async Task<IResult> Track(int id, int? max, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> Track(int id, int? max, AppDbContext db, LogStore store, CancellationToken ct)
     {
+        await EnsureCurrentAsync(id, db, store, ct);
         var json = await db.Flights.AsNoTracking().Where(x => x.Id == id).Select(x => x.TrackJson).FirstOrDefaultAsync(ct);
         if (json is null) return Results.NotFound();
         if (max is not { } limit || limit < 2) return Results.Content(json, "application/json");
@@ -177,6 +179,29 @@ public static class FlightEndpoints
             node["points"] = kept;
         }
         return Results.Content(node.ToJsonString(), "application/json");
+    }
+
+    /// <summary>Stick positions for playback, or 404 when the log has no rcCommand fields.</summary>
+    private static async Task<IResult> Sticks(int id, AppDbContext db, LogStore store, CancellationToken ct)
+    {
+        await EnsureCurrentAsync(id, db, store, ct);
+        var json = await db.Flights.AsNoTracking().Where(x => x.Id == id).Select(x => x.SticksJson).FirstOrDefaultAsync(ct);
+        return json is null ? Results.NotFound() : Results.Content(json, "application/json");
+    }
+
+    /// <summary>Bumped whenever WithLogData starts storing something new, so older flights rebuild themselves.</summary>
+    private const int CurrentDataVersion = 2;
+
+    /// <summary>Rebuilds track and sticks from the stored log when a flight predates the current data version.</summary>
+    private static async Task EnsureCurrentAsync(int id, AppDbContext db, LogStore store, CancellationToken ct)
+    {
+        var flight = await db.Flights.FirstOrDefaultAsync(x => x.Id == id && x.DataVersion < CurrentDataVersion, ct);
+        if (flight is null) return;
+        var bytes = await store.ReadAsync(flight.StoredFileName, ct);
+        var log = bytes is null ? null : BlackboxDecoder.Decode(bytes).FirstOrDefault(l => l.Index == flight.LogIndex);
+        if (log is null) return; // file gone: keep whatever is stored
+        flight.WithLogData(log);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>Re-reads the stored log file, e.g. to pick up GPS for flights uploaded before the decoder handled it.</summary>
@@ -195,13 +220,15 @@ public static class FlightEndpoints
         flight.AvgThrottlePercent = Round(log.AvgThrottlePercent);
         flight.MaxThrottlePercent = Round(log.MaxThrottlePercent);
         flight.CorruptFrames = log.CorruptFrames;
-        flight.WithGps(log);
+        flight.WithLogData(log);
         await db.SaveChangesAsync(ct);
         return Results.Ok(await Project(db.Flights.AsNoTracking().Where(x => x.Id == id)).FirstAsync(ct));
     }
 
-    private static Flight WithGps(this Flight flight, BlackboxLog log)
+    private static Flight WithLogData(this Flight flight, BlackboxLog log)
     {
+        flight.SticksJson = FlightTrack.BuildSticks(log);
+        flight.DataVersion = CurrentDataVersion;
         var track = FlightTrack.Build(log);
         var s = track?.Summary;
         flight.DistanceM = s?.DistanceM;
@@ -252,7 +279,8 @@ public static class FlightEndpoints
             x.Id, x.AircraftId, x.Aircraft!.Name, x.TuneSnapshotId, x.TuneSnapshot != null ? x.TuneSnapshot.Label : null, x.Notes,
             x.OriginalFileName, x.LogIndex, x.StartedAt, x.DurationMs, x.FirmwareRevision, x.Board,
             x.AvgThrottlePercent, x.MaxThrottlePercent, x.CorruptFrames, x.CreatedAt,
-            x.TrackJson != null, x.DistanceM, x.MaxSpeedMs, x.MaxHeightM, x.MaxDistanceM));
+            x.TrackJson != null, x.DistanceM, x.MaxSpeedMs, x.MaxHeightM, x.MaxDistanceM,
+            x.SticksJson != null || x.DataVersion < CurrentDataVersion)); // old rows: find out on first request
 
     /// <summary>Each session has its own "Log start datetime". FCs without a clock write year 0000, which we drop.</summary>
     private static DateTime? StartTime(BlackboxLog log)

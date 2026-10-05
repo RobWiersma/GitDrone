@@ -33,7 +33,7 @@ public static class FlightTrack
         }
 
         var stride = (int)Math.Ceiling(gps.Count / (double)MaxPoints);
-        var t0 = gps[0].TimeUs;
+        var t0 = log.FirstTimeUs; // same clock as the stick data, so playback lines up
         var sb = new StringBuilder();
         sb.Append("{\"home\":");
         sb.Append(log.Home is { } h ? $"[{F(h.Lat, 7)},{F(h.Lon, 7)}]" : "null");
@@ -42,7 +42,7 @@ public static class FlightTrack
         {
             var p = gps[i];
             if (i > 0) sb.Append(',');
-            // [seconds since first fix, lat, lon, height above takeoff (m), ground speed (m/s)]
+            // [seconds since log start, lat, lon, height above takeoff (m), ground speed (m/s)]
             sb.Append('[').Append(F((p.TimeUs - t0) / 1e6, 1)).Append(',').Append(F(p.Lat, 7)).Append(',').Append(F(p.Lon, 7))
               .Append(',').Append(F(p.AltitudeM - baseAlt, 1)).Append(',').Append(F(p.SpeedMs, 1)).Append(']');
         }
@@ -51,6 +51,21 @@ public static class FlightTrack
         var summary = new GpsSummary(Math.Round(distance), Math.Round(maxSpeed, 1), Math.Round(maxHeight, 1), Math.Round(maxFromHome),
             log.Home?.Lat, log.Home?.Lon);
         return (summary, sb.ToString());
+    }
+
+    /// <summary>{"points":[[t,roll,pitch,yaw,throttle],...]}, t in seconds since log start. Null without stick fields.</summary>
+    public static string? BuildSticks(BlackboxLog log)
+    {
+        if (log.Sticks.Count == 0) return null;
+        var sb = new StringBuilder("{\"points\":[");
+        for (var i = 0; i < log.Sticks.Count; i++)
+        {
+            var s = log.Sticks[i];
+            if (i > 0) sb.Append(',');
+            sb.Append('[').Append(F((s.TimeUs - log.FirstTimeUs) / 1e6, 2)).Append(',').Append(s.Roll).Append(',').Append(s.Pitch)
+              .Append(',').Append(s.Yaw).Append(',').Append(s.Throttle).Append(']');
+        }
+        return sb.Append("]}").ToString();
     }
 
     private static string F(double v, int decimals) => Math.Round(v, decimals).ToString(CultureInfo.InvariantCulture);

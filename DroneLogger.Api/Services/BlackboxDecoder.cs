@@ -5,6 +5,9 @@ namespace DroneLogger.Api.Services;
 
 public record GpsSample(long TimeUs, double Lat, double Lon, double AltitudeM, double SpeedMs, int Satellites);
 
+/// <summary>Stick positions from rcCommand: roll/pitch/yaw are -500..500, throttle is 1000..2000 (Betaflight 4.x+).</summary>
+public record StickSample(long TimeUs, int Roll, int Pitch, int Yaw, int Throttle);
+
 /// <summary>One armed session inside a .bbl file. A single file can hold several.</summary>
 public record BlackboxLog(
     int Index,
@@ -17,7 +20,8 @@ public record BlackboxLog(
     double? MaxThrottlePercent,
     (double Lat, double Lon)? Home,
     double? HomeAltitudeM,
-    IReadOnlyList<GpsSample> Gps)
+    IReadOnlyList<GpsSample> Gps,
+    IReadOnlyList<StickSample> Sticks)
 {
     public long DurationMs => Math.Max(0, (LastTimeUs - FirstTimeUs) / 1000);
 }
@@ -108,6 +112,11 @@ public static class BlackboxDecoder
         private long throttleCount;
         private long throttleMax = long.MinValue;
         private readonly List<GpsSample> gps = [];
+        private readonly List<StickSample> sticks = [];
+        private int[] rcIndex = [];
+        private long nextStickUs = long.MinValue;
+        /// <summary>25 Hz: smooth enough to animate, small enough to store per flight.</summary>
+        private const long StickIntervalUs = 40_000;
 
         public BlackboxLog? Parse(int index)
         {
@@ -127,6 +136,8 @@ public static class BlackboxDecoder
             if (defs.TryGetValue('S', out var s)) slowTmp = new long[s.Count];
 
             throttleIndex = i.IndexOf("rcCommand[3]");
+            rcIndex = [i.IndexOf("rcCommand[0]"), i.IndexOf("rcCommand[1]"), i.IndexOf("rcCommand[2]"), throttleIndex];
+            if (rcIndex.Any(x => x < 0)) rcIndex = [];
             ParseData();
 
             if (mainFrames == 0) return null;
@@ -145,7 +156,7 @@ public static class BlackboxDecoder
             return new BlackboxLog(index, headers, firstTime, lastTime, mainFrames, corrupt,
                 throttleCount > 0 ? ThrottlePercent(throttleSum / throttleCount) : null,
                 throttleCount > 0 ? ThrottlePercent(throttleMax) : null,
-                home, homeAlt, gps);
+                home, homeAlt, gps, sticks);
         }
 
         // rcCommand[3] runs 1000..2000 in Betaflight 4.x and later.
@@ -362,6 +373,11 @@ public static class BlackboxDecoder
         {
             mainFrames++;
             if (firstTime < 0) firstTime = frame[FieldTime];
+            if (rcIndex.Length == 4 && frame[FieldTime] >= nextStickUs)
+            {
+                sticks.Add(new StickSample(frame[FieldTime], (int)frame[rcIndex[0]], (int)frame[rcIndex[1]], (int)frame[rcIndex[2]], (int)frame[rcIndex[3]]));
+                nextStickUs = (frame[FieldTime] / StickIntervalUs + 1) * StickIntervalUs; // even grid, no drift
+            }
             if (throttleIndex >= 0)
             {
                 var v = frame[throttleIndex];

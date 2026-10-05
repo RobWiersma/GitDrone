@@ -24,10 +24,19 @@ export interface Flight {
   /** Above takeoff. */
   maxHeightM: number | null;
   maxDistanceM: number | null;
+  /** Stick data available for playback (rcCommand logged). */
+  hasSticks: boolean;
 }
 
-/** [seconds since first fix, lat, lon, height above takeoff (m), ground speed (m/s)] */
+/** [seconds since log start, lat, lon, height above takeoff (m), ground speed (m/s)] */
 export type TrackPoint = [number, number, number, number, number];
+
+/** [seconds since log start, roll, pitch, yaw (-500..500), throttle (1000..2000)], Betaflight rcCommand at 25 Hz. */
+export type StickPoint = [number, number, number, number, number];
+
+export interface FlightSticks {
+  points: StickPoint[];
+}
 
 export interface FlightTrack {
   home: [number, number] | null;

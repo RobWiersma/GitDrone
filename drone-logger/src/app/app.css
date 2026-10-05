@@ -1,4 +1,4 @@
-.site { background: var(--nav-bg); color: var(--nav-ink); position: sticky; top: 0; z-index: 1000;
+.site { background: var(--nav-bg); color: var(--nav-ink); position: sticky; top: 0; z-index: 1100;
         border-bottom: 1px solid rgb(255 255 255 / .06); }
 .nav { max-width: 68rem; margin: 0 auto; padding: 0 1rem; display: flex; align-items: center; gap: 1.5rem; height: 3.5rem; }
 .brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--nav-ink); text-decoration: none;

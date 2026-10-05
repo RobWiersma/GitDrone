@@ -3,15 +3,16 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
-import { Flight, FlightTrack, formatDistance, formatDuration, msToKmh } from './flight.models';
+import { Flight, FlightTrack, StickPoint, formatDistance, formatDuration, msToKmh } from './flight.models';
 import { FlightMapComponent } from './flight-map.component';
 import { FlightProfileComponent, clock } from './flight-profile.component';
+import { FlightPlaybackComponent } from './flight-playback.component';
 import { TuneService } from '../tunes/tune.service';
 import { TuneSnapshotSummary } from '../tunes/tune.models';
 
 @Component({
   selector: 'app-flight-detail',
-  imports: [DatePipe, DecimalPipe, FormsModule, RouterLink, FlightMapComponent, FlightProfileComponent],
+  imports: [DatePipe, DecimalPipe, FormsModule, RouterLink, FlightMapComponent, FlightProfileComponent, FlightPlaybackComponent],
   template: `
     <div class="page detail">
       @if (flight(); as f) {
@@ -27,18 +28,28 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
             <li><span class="lbl">Max height</span><span class="num">{{ f.maxHeightM | number: '1.0-0' }}<small>m</small></span></li>
             <li><span class="lbl">Furthest from home</span><span class="num">{{ f.maxDistanceM | number: '1.0-0' }}<small>m</small></span></li>
           </ul>
+        }
+
+        @if (f.hasSticks && (sticks() || track())) {
+          <section class="panel playback-panel" aria-labelledby="playback-heading">
+            <h2 id="playback-heading">Playback</h2>
+            <app-flight-playback [duration]="f.durationMs / 1000" [sticks]="sticks()"
+                                 [(time)]="scrubTime" [(playing)]="playing" />
+          </section>
+        }
+
+        @if (f.hasGps) {
           <section class="panel map-panel" aria-labelledby="map-heading">
             <h2 id="map-heading">Flight path</h2>
             @if (track(); as t) {
-              <app-flight-map [track]="t" [(hoverIndex)]="hoverIndex" />
+              <app-flight-map [track]="t" [hoverIndex]="cursorIndex()" (hoverIndexChange)="onHover($event)" />
               <p class="readout">
-                @if (hoverPoint(); as h) {
-                  <strong>{{ h.time }}</strong> in: {{ h.speed }} km/h, {{ h.height }} m above takeoff
-                } @else {
-                  <span class="hint">Hover over the path or the charts to see speed and height at that moment.</span>
+                @if (cursorPoint(); as h) {
+                  <strong class="mono">{{ h.time }}</strong> in: {{ h.speed }} km/h, {{ h.height }} m above takeoff
                 }
+                <span class="hint"> Hover over the path or charts to look at a moment, or press play.</span>
               </p>
-              <app-flight-profile [track]="t" [(hoverIndex)]="hoverIndex" />
+              <app-flight-profile [track]="t" [hoverIndex]="cursorIndex()" (hoverIndexChange)="onHover($event)" />
               <details class="table-view">
                 <summary>Data table (every 10 seconds)</summary>
                 <div class="scroll">
@@ -131,7 +142,13 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
     .num { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
     .num small { font-size: .8rem; font-weight: 600; color: var(--muted); margin-left: .25rem; letter-spacing: 0; }
     .lbl { color: var(--muted); font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .map-panel { margin-bottom: 1rem; }
+    .map-panel, .playback-panel { margin-bottom: 1rem; }
+    .playback-panel h2 { margin-bottom: .75rem; }
+    /* On big screens the sticks stay in view while you scroll through the map and charts.
+       Above Leaflet's panes and controls (z-index up to 1000), below the site header. */
+    @media (min-width: 48rem) and (min-height: 50rem) {
+      .playback-panel { position: sticky; top: 4.25rem; z-index: 1010; }
+    }
     .map-panel h2 { margin-bottom: .75rem; }
     .readout { margin: .6rem 0 .25rem; font-size: .92rem; font-variant-numeric: tabular-nums; min-height: 1.5em; }
     .table-view { margin-top: .75rem; font-size: .9rem; }
@@ -156,13 +173,34 @@ export class FlightDetailComponent {
   flight = signal<Flight | null>(null);
   track = signal<FlightTrack | null>(null);
   trackFailed = signal(false);
-  /** Point under the pointer on the map or charts; both components read and write it. */
-  hoverIndex = signal<number | null>(null);
+  sticks = signal<StickPoint[] | null>(null);
 
-  hoverPoint = computed(() => {
-    const i = this.hoverIndex();
+  /** Playback position, seconds since log start. Persists between hovers. */
+  scrubTime = signal(0);
+  playing = signal(false);
+  /** Moment under the pointer on the map or charts; previews without moving the playback position. */
+  hoverTime = signal<number | null>(null);
+
+  /** The one moment everything shows: the playback clock while playing, otherwise a hover or the scrub position. */
+  cursorTime = computed(() => (this.playing() ? this.scrubTime() : this.hoverTime() ?? this.scrubTime()));
+
+  /** Track point nearest cursorTime, for the map marker and chart crosshair. */
+  cursorIndex = computed(() => {
+    const pts = this.track()?.points;
+    if (!pts?.length) return null;
+    const t = this.cursorTime();
+    let lo = 0, hi = pts.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (pts[mid][0] < t) lo = mid; else hi = mid;
+    }
+    return t - pts[lo][0] <= pts[hi][0] - t ? lo : hi;
+  });
+
+  cursorPoint = computed(() => {
+    const i = this.cursorIndex();
     const p = i === null ? undefined : this.track()?.points[i];
-    return p ? { time: clock(p[0]), height: p[3].toFixed(0), speed: msToKmh(p[4]).toFixed(0) } : null;
+    return p ? { time: clock(this.cursorTime()), height: p[3].toFixed(0), speed: msToKmh(p[4]).toFixed(0) } : null;
   });
 
   /** Text alternative to the charts: one row per 10 s of flight. */
@@ -193,6 +231,7 @@ export class FlightDetailComponent {
         next: f => {
           this.flight.set(f);
           this.loadTrack(f);
+          this.loadSticks(f);
           this.tuneChoice.set(f.tuneSnapshotId ? String(f.tuneSnapshotId) : '');
           this.notes.set(f.notes ?? '');
           this.tuneService.list(f.aircraftId).subscribe(list =>
@@ -203,9 +242,27 @@ export class FlightDetailComponent {
     });
   }
 
+  /** From the map or charts. Ignored while playing so the pointer doesn't fight the clock. */
+  onHover(i: number | null) {
+    if (this.playing()) return;
+    const p = i === null ? undefined : this.track()?.points[i];
+    this.hoverTime.set(p ? p[0] : null);
+  }
+
+  private loadSticks(f: Flight) {
+    this.sticks.set(null);
+    if (!f.hasSticks) return;
+    this.service.sticks(f.id).subscribe({
+      next: s => this.sticks.set(s.points),
+      error: () => this.flight.update(x => (x ? { ...x, hasSticks: false } : x)), // older log without rcCommand
+    });
+  }
+
   private loadTrack(f: Flight) {
     this.track.set(null);
-    this.hoverIndex.set(null);
+    this.playing.set(false);
+    this.scrubTime.set(0);
+    this.hoverTime.set(null);
     this.trackFailed.set(false);
     if (!f.hasGps) return;
     this.service.track(f.id).subscribe({
@@ -223,6 +280,7 @@ export class FlightDetailComponent {
         this.busy.set(false);
         this.flight.set(updated);
         this.loadTrack(updated);
+        this.loadSticks(updated);
         this.message.set(updated.hasGps ? 'Found GPS data in the log.' : 'Re-read the log: it has no GPS data.');
       },
       error: () => { this.busy.set(false); this.error.set('Could not re-read the log file.'); },

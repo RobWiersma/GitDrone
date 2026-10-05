@@ -82,4 +82,8 @@ public class Flight
     public double? HomeLon { get; set; }
     /// <summary>{"home":[lat,lon]|null,"points":[[t,lat,lon,heightAboveTakeoff,speed],...]}, see FlightTrack.</summary>
     public string? TrackJson { get; set; }
+    /// <summary>{"points":[[t,roll,pitch,yaw,throttle],...]} at 25 Hz, see FlightTrack.BuildSticks.</summary>
+    public string? SticksJson { get; set; }
+    /// <summary>Which version of the derived data (track, sticks) is stored; older rows are rebuilt from the log file on demand.</summary>
+    public int DataVersion { get; set; }
 }
