@@ -28,7 +28,11 @@ public record FlightDto(
     int Id, int AircraftId, string AircraftName, int? TuneSnapshotId, string? TuneLabel, string? Notes, string OriginalFileName, int LogIndex,
     DateTime? StartedAt, long DurationMs, string FirmwareRevision, string Board,
     double? AvgThrottlePercent, double? MaxThrottlePercent, int CorruptFrames, DateTime CreatedAt,
-    bool HasGps, double? DistanceM, double? MaxSpeedMs, double? MaxHeightM, double? MaxDistanceM, bool HasSticks);
+    bool HasGps, double? DistanceM, double? MaxSpeedMs, double? MaxHeightM, double? MaxDistanceM, bool HasSticks,
+    double? AvgSpeedMs, FlightBatteryDto? Battery);
+
+public record FlightBatteryDto(int Cells, double StartV, double EndV, double MinV, double? MahUsed, double? PeakCurrentA,
+    double? AvgCurrentA, double? PeakPowerW);
 
 /// <summary>Duplicate is true when this exact file was already uploaded for the aircraft; Flights are then the existing ones.</summary>
 public record FlightUploadResult(IReadOnlyList<FlightDto> Flights, bool Duplicate);

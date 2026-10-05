@@ -26,6 +26,30 @@ export interface Flight {
   maxDistanceM: number | null;
   /** Stick data available for playback (rcCommand logged). */
   hasSticks: boolean;
+  /** Average ground speed while moving, m/s. */
+  avgSpeedMs: number | null;
+  battery: FlightBattery | null;
+}
+
+export interface FlightBattery {
+  cells: number;
+  /** Pack volts: resting at start and end, and the lowest under load. */
+  startV: number;
+  endV: number;
+  minV: number;
+  /** Null when the FC has no current sensor. */
+  mahUsed: number | null;
+  peakCurrentA: number | null;
+  avgCurrentA: number | null;
+  peakPowerW: number | null;
+}
+
+/** [seconds since log start, pack volts, amps or null], 10 Hz. */
+export type BatteryPoint = [number, number, number | null];
+
+export interface FlightBatterySeries {
+  cells: number;
+  points: BatteryPoint[];
 }
 
 /** [seconds since log start, lat, lon, height above takeoff (m), ground speed (m/s)] */

@@ -84,6 +84,22 @@ public class Flight
     public string? TrackJson { get; set; }
     /// <summary>{"points":[[t,roll,pitch,yaw,throttle],...]} at 25 Hz, see FlightTrack.BuildSticks.</summary>
     public string? SticksJson { get; set; }
+    /// <summary>Average ground speed while moving faster than 1 m/s.</summary>
+    public double? AvgSpeedMs { get; set; }
+
+    // Battery, all null when the log has no voltage field.
+    public int? CellCount { get; set; }
+    public double? StartVoltage { get; set; }
+    public double? EndVoltage { get; set; }
+    /// <summary>Lowest pack voltage under load (0.5 s average).</summary>
+    public double? MinVoltage { get; set; }
+    public double? MahUsed { get; set; }
+    public double? PeakCurrentA { get; set; }
+    public double? AvgCurrentA { get; set; }
+    public double? PeakPowerW { get; set; }
+    /// <summary>{"cells":n,"points":[[t,volts,amps],...]} at 10 Hz, see FlightTrack.BuildBattery.</summary>
+    public string? BatteryJson { get; set; }
+
     /// <summary>Which version of the derived data (track, sticks) is stored; older rows are rebuilt from the log file on demand.</summary>
     public int DataVersion { get; set; }
 }

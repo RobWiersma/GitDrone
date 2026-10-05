@@ -24,6 +24,7 @@ public static class FlightEndpoints
         f.MapGet("/{id:int}", Get);
         f.MapGet("/{id:int}/track", Track);
         f.MapGet("/{id:int}/sticks", Sticks);
+        f.MapGet("/{id:int}/battery", Battery);
         f.MapPost("/{id:int}/reprocess", Reprocess);
         f.MapPut("/{id:int}", Update);
         f.MapDelete("/{id:int}", Delete);
@@ -189,8 +190,16 @@ public static class FlightEndpoints
         return json is null ? Results.NotFound() : Results.Content(json, "application/json");
     }
 
+    /// <summary>Pack voltage/current series, or 404 when the log has no battery fields.</summary>
+    private static async Task<IResult> Battery(int id, AppDbContext db, LogStore store, CancellationToken ct)
+    {
+        await EnsureCurrentAsync(id, db, store, ct);
+        var json = await db.Flights.AsNoTracking().Where(x => x.Id == id).Select(x => x.BatteryJson).FirstOrDefaultAsync(ct);
+        return json is null ? Results.NotFound() : Results.Content(json, "application/json");
+    }
+
     /// <summary>Bumped whenever WithLogData starts storing something new, so older flights rebuild themselves.</summary>
-    private const int CurrentDataVersion = 2;
+    private const int CurrentDataVersion = 3; // 2: sticks, 3: battery and average speed
 
     /// <summary>Rebuilds track and sticks from the stored log when a flight predates the current data version.</summary>
     private static async Task EnsureCurrentAsync(int id, AppDbContext db, LogStore store, CancellationToken ct)
@@ -228,11 +237,23 @@ public static class FlightEndpoints
     private static Flight WithLogData(this Flight flight, BlackboxLog log)
     {
         flight.SticksJson = FlightTrack.BuildSticks(log);
+        var battery = FlightTrack.BuildBattery(log);
+        var b = battery?.Summary;
+        flight.BatteryJson = battery?.Json;
+        flight.CellCount = b?.Cells;
+        flight.StartVoltage = b?.StartV;
+        flight.EndVoltage = b?.EndV;
+        flight.MinVoltage = b?.MinV;
+        flight.MahUsed = b?.MahUsed;
+        flight.PeakCurrentA = b?.PeakCurrentA;
+        flight.AvgCurrentA = b?.AvgCurrentA;
+        flight.PeakPowerW = b?.PeakPowerW;
         flight.DataVersion = CurrentDataVersion;
         var track = FlightTrack.Build(log);
         var s = track?.Summary;
         flight.DistanceM = s?.DistanceM;
         flight.MaxSpeedMs = s?.MaxSpeedMs;
+        flight.AvgSpeedMs = s?.AvgSpeedMs;
         flight.MaxHeightM = s?.MaxHeightM;
         flight.MaxDistanceM = s?.MaxDistanceM;
         flight.HomeLat = s?.HomeLat;
@@ -280,7 +301,10 @@ public static class FlightEndpoints
             x.OriginalFileName, x.LogIndex, x.StartedAt, x.DurationMs, x.FirmwareRevision, x.Board,
             x.AvgThrottlePercent, x.MaxThrottlePercent, x.CorruptFrames, x.CreatedAt,
             x.TrackJson != null, x.DistanceM, x.MaxSpeedMs, x.MaxHeightM, x.MaxDistanceM,
-            x.SticksJson != null || x.DataVersion < CurrentDataVersion)); // old rows: find out on first request
+            x.SticksJson != null || x.DataVersion < CurrentDataVersion, // old rows: find out on first request
+            x.AvgSpeedMs,
+            x.CellCount == null ? null : new FlightBatteryDto(x.CellCount.Value, x.StartVoltage!.Value, x.EndVoltage!.Value,
+                x.MinVoltage!.Value, x.MahUsed, x.PeakCurrentA, x.AvgCurrentA, x.PeakPowerW)));
 
     /// <summary>Each session has its own "Log start datetime". FCs without a clock write year 0000, which we drop.</summary>
     private static DateTime? StartTime(BlackboxLog log)

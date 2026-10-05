@@ -5,11 +5,32 @@ import { clock } from './flight-profile.component';
 
 const SPEEDS = [0.5, 1, 2, 4];
 
+/** One live value in the readout, e.g. { label: 'Speed', value: '42', unit: 'km/h' }. */
+export interface Readout {
+  label: string;
+  value: string;
+  unit: string;
+  /** Optional second line, e.g. per-cell voltage. */
+  sub?: string;
+}
+
 /** Play/pause, speed and a scrubber for a flight, plus the stick animation. Drives `time` (seconds since log start). */
 @Component({
   selector: 'app-flight-playback',
   imports: [FlightSticksComponent],
   template: `
+    @if (readouts().length) {
+      <dl class="osd">
+        @for (r of readouts(); track r.label) {
+          <div class="cell">
+            <dt>{{ r.label }}</dt>
+            <dd><span class="v">{{ r.value }}</span><span class="u">{{ r.unit }}</span>
+              @if (r.sub) { <span class="sub">{{ r.sub }}</span> }
+            </dd>
+          </div>
+        }
+      </dl>
+    }
     <div class="controls">
       <button class="play" type="button" (click)="toggle()" [attr.aria-label]="playing() ? 'Pause' : 'Play'">
         @if (playing()) {
@@ -34,6 +55,13 @@ const SPEEDS = [0.5, 1, 2, 4];
   `,
   styles: [`
     :host { display: block; }
+    .osd { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .5rem; margin: 0 0 1rem; }
+    .cell { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; padding: .5rem .75rem; }
+    dt { font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .v { font-size: 1.35rem; font-weight: 700; }
+    .u { font-size: .75rem; color: var(--muted); margin-left: .2rem; }
+    .sub { display: block; font-size: .72rem; color: var(--muted); }
     .controls { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .play { width: 2.75rem; height: 2.75rem; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink);
             display: grid; place-items: center; cursor: pointer; flex: none; }
@@ -54,6 +82,8 @@ export class FlightPlaybackComponent implements OnDestroy {
   /** Flight length, seconds. */
   duration = input.required<number>();
   sticks = input<StickPoint[] | null>(null);
+  /** Live values at the current time, shown above the controls. */
+  readouts = input<Readout[]>([]);
   time = model(0);
   playing = model(false);
 

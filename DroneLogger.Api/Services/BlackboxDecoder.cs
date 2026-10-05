@@ -8,6 +8,15 @@ public record GpsSample(long TimeUs, double Lat, double Lon, double AltitudeM, d
 /// <summary>Stick positions from rcCommand: roll/pitch/yaw are -500..500, throttle is 1000..2000 (Betaflight 4.x+).</summary>
 public record StickSample(long TimeUs, int Roll, int Pitch, int Yaw, int Throttle);
 
+/// <summary>Every main-frame field at 25 Hz, in MainFields order (raw firmware units).</summary>
+public record MainSample(long TimeUs, int[] Values);
+
+/// <summary>Slow-frame state change: flight mode bits, arming state, failsafe phase.</summary>
+public record SlowSample(long TimeUs, long FlightModeFlags, long StateFlags, int FailsafePhase, bool RxSignal);
+
+/// <summary>Event frames worth keeping. Data is the disarm reason or the new flight-mode flags.</summary>
+public record LogEvent(long TimeUs, string Kind, long Data);
+
 /// <summary>One armed session inside a .bbl file. A single file can hold several.</summary>
 public record BlackboxLog(
     int Index,
@@ -21,7 +30,11 @@ public record BlackboxLog(
     (double Lat, double Lon)? Home,
     double? HomeAltitudeM,
     IReadOnlyList<GpsSample> Gps,
-    IReadOnlyList<StickSample> Sticks)
+    IReadOnlyList<StickSample> Sticks,
+    IReadOnlyList<string> MainFields,
+    IReadOnlyList<MainSample> Samples,
+    IReadOnlyList<SlowSample> Slow,
+    IReadOnlyList<LogEvent> Events)
 {
     public long DurationMs => Math.Max(0, (LastTimeUs - FirstTimeUs) / 1000);
 }
@@ -113,6 +126,9 @@ public static class BlackboxDecoder
         private long throttleMax = long.MinValue;
         private readonly List<GpsSample> gps = [];
         private readonly List<StickSample> sticks = [];
+        private readonly List<MainSample> samples = [];
+        private readonly List<SlowSample> slow = [];
+        private readonly List<LogEvent> events = [];
         private int[] rcIndex = [];
         private long nextStickUs = long.MinValue;
         /// <summary>25 Hz: smooth enough to animate, small enough to store per flight.</summary>
@@ -156,7 +172,7 @@ public static class BlackboxDecoder
             return new BlackboxLog(index, headers, firstTime, lastTime, mainFrames, corrupt,
                 throttleCount > 0 ? ThrottlePercent(throttleSum / throttleCount) : null,
                 throttleCount > 0 ? ThrottlePercent(throttleMax) : null,
-                home, homeAlt, gps, sticks);
+                home, homeAlt, gps, sticks, i.Names, samples, slow, events);
         }
 
         // rcCommand[3] runs 1000..2000 in Betaflight 4.x and later.
@@ -330,6 +346,9 @@ public static class BlackboxDecoder
                 case 'G':
                     if (gpsHomeValid && gpsTmp.Length > 0) AddGps();
                     break;
+                case 'S':
+                    AddSlow();
+                    break;
                 case 'E':
                     if (lastEvent == EvLoggingResume) { /* lastIteration/lastTime already set while parsing */ }
                     break;
@@ -373,9 +392,10 @@ public static class BlackboxDecoder
         {
             mainFrames++;
             if (firstTime < 0) firstTime = frame[FieldTime];
-            if (rcIndex.Length == 4 && frame[FieldTime] >= nextStickUs)
+            if (frame[FieldTime] >= nextStickUs)
             {
-                sticks.Add(new StickSample(frame[FieldTime], (int)frame[rcIndex[0]], (int)frame[rcIndex[1]], (int)frame[rcIndex[2]], (int)frame[rcIndex[3]]));
+                samples.Add(new MainSample(frame[FieldTime], frame.Select(v => (int)v).ToArray()));
+                if (rcIndex.Length == 4) sticks.Add(new StickSample(frame[FieldTime], (int)frame[rcIndex[0]], (int)frame[rcIndex[1]], (int)frame[rcIndex[2]], (int)frame[rcIndex[3]]));
                 nextStickUs = (frame[FieldTime] / StickIntervalUs + 1) * StickIntervalUs; // even grid, no drift
             }
             if (throttleIndex >= 0)
@@ -385,6 +405,15 @@ public static class BlackboxDecoder
                 throttleCount++;
                 if (v > throttleMax) throttleMax = v;
             }
+        }
+
+        private void AddSlow()
+        {
+            var d = defs['S'];
+            long Get(string n) => d.IndexOf(n) is var k and >= 0 ? slowTmp[k] : 0;
+            var next = new SlowSample(lastTime, Get("flightModeFlags"), Get("stateFlags"), (int)Get("failsafePhase"), Get("rxSignalReceived") != 0);
+            var prev = slow.LastOrDefault();
+            if (prev is null || prev with { TimeUs = next.TimeUs } != next) slow.Add(next); // keep changes only
         }
 
         private void AddGps()
@@ -512,8 +541,14 @@ public static class BlackboxDecoder
             switch (type)
             {
                 case EvSyncBeep: ReadUnsignedVb(); break;
-                case EvFlightMode: ReadUnsignedVb(); ReadUnsignedVb(); break;
-                case EvDisarm: ReadUnsignedVb(); break;
+                case EvFlightMode:
+                    var flags = ReadUnsignedVb();
+                    ReadUnsignedVb();
+                    events.Add(new LogEvent(lastTime, "flightMode", flags));
+                    break;
+                case EvDisarm:
+                    events.Add(new LogEvent(lastTime, "disarm", ReadUnsignedVb()));
+                    break;
                 case EvAutotuneCycleStart: Skip(5); break;
                 case EvAutotuneCycleResult: Skip(4); break;
                 case EvAutotuneTargets: Skip(8); break;
