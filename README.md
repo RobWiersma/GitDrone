@@ -1,3 +1,5 @@
+https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/
+
 # Drone Logger (Angular frontend)
 
 Aircraft collection with photo upload and Betaflight tune history.
