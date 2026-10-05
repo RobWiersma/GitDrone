@@ -1,5 +1,5 @@
 import { BatteryPoint, StickPoint, TrackPoint, msToKmh } from './flight.models';
-import { MODES, StickMode, rawStick, sampleSticks, stickAxes, throttlePercent } from './stick-math';
+import { MODES, StickMode, sampleSticks, stickAxes } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
 
@@ -31,9 +31,9 @@ let glyphs: GlyphFont | null = null;
 /** Unit strings: Betaflight's own symbols with an OSD font, plain text otherwise. */
 const units = () => glyphs
   ? { kph: SYM.kph, volt: SYM.volt, perCell: SYM.volt, amp: SYM.amp, mah: SYM.mah, watt: SYM.watt, m: SYM.m,
-      alt: SYM.alt, home: SYM.home, thr: SYM.thr, fly: SYM.fly, homeMark: SYM.home }
+      alt: SYM.alt, home: SYM.home, fly: SYM.fly, homeMark: SYM.home }
   : { kph: 'km/h', volt: 'V', perCell: ' V/cell', amp: ' A', mah: ' mAh', watt: ' W', m: ' m',
-      alt: '▲ ', home: '⌂ ', thr: 'THR ', fly: '', homeMark: 'H' };
+      alt: '▲ ', home: '⌂ ', fly: '', homeMark: 'H' };
 
 /** Betaflight battery icon for a per-cell voltage (3.3 V empty .. 4.2 V full). */
 const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.round(((cell - 3.3) / 0.9) * 6)))];
@@ -141,10 +141,6 @@ export class OverlayRenderer {
       text(ctx, `${Math.round(v * a)}${U.watt}`, x + w - 26 * u, y + 188 * u, 32 * u, 'right', 700);
       text(ctx, `${Math.round(this.mahAt[i])}${U.mah}`, x + 26 * u, y + 222 * u, 26 * u, 'left', 600, 0.9);
     }
-    if (this.data.sticks?.length) {
-      const thr = throttlePercent(stickAxes(sampleSticks(this.data.sticks, t)));
-      text(ctx, `${U.thr}${thr}%`, x + w - 26 * u, y + 222 * u, 26 * u, 'right', 600, 0.9);
-    }
   }
 
   /** Blackbox Explorer style: dark squares, thin crosshairs, a red dot, raw rcCommand values around the pair. */
@@ -153,8 +149,7 @@ export class OverlayRenderer {
     const raw = sampleSticks(this.data.sticks!, t);
     const now = stickAxes(raw);
     const [lx, ly, rx, ry] = MODES[o.stickMode];
-    // Leave room underneath for the horizontal values.
-    const top = bottom - size - 44 * u;
+    const top = bottom - size;
     const sides = [
       { side: 'left', left: cx - gap / 2 - size, ax: lx, ay: ly },
       { side: 'right', left: cx + gap / 2, ax: rx, ay: ry },
@@ -179,11 +174,6 @@ export class OverlayRenderer {
       ctx.fillStyle = '#ff5a5a';
       ctx.beginPath(); ctx.arc(kx, ky, dot, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
-
-      // Vertical value beside the pair, horizontal value underneath.
-      const vx = g.side === 'left' ? g.left - 14 * u : g.left + size + 14 * u;
-      text(ctx, String(rawStick(raw, g.ay)), vx, top + size / 2 + 11 * u, 30 * u, g.side === 'left' ? 'right' : 'left', 700);
-      text(ctx, String(rawStick(raw, g.ax)), g.left + size / 2, top + size + 38 * u, 30 * u, 'center', 700);
     }
     text(ctx, `Mode ${o.stickMode}`, sides[0].left + size / 2, top + size - 14 * u, 20 * u, 'center', 700, 0.4);
   }

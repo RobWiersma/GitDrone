@@ -55,8 +55,21 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseCors("frontend");
 
 // The built Angular app is copied into wwwroot at deploy time, so the site and the API share one origin.
+// index.html must be revalidated on every load, or browsers keep running the previous deploy's scripts.
+// The scripts and styles it points at have content hashes in their names, so those can be cached for good.
+var spaFiles = new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var headers = ctx.Context.Response.Headers;
+        if (ctx.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+            headers.CacheControl = "no-cache";
+        else if (System.Text.RegularExpressions.Regex.IsMatch(ctx.File.Name, @"-[A-Za-z0-9_]{8,}\.(js|css)$"))
+            headers.CacheControl = "public, max-age=31536000, immutable";
+    },
+};
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(spaFiles);
 
 app.MapAircraft();
 app.MapTunes();
@@ -64,6 +77,6 @@ app.MapFlights();
 
 // Client-side routes (/aircraft/3, /flights/7, ...) all load the Angular app. Unknown /api paths still 404.
 app.MapFallback("/api/{**path}", () => Results.NotFound());
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", spaFiles);
 
 app.Run();
