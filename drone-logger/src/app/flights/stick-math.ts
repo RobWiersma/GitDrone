@@ -54,5 +54,10 @@ export function stickAxes(p: StickPoint): StickAxes {
   };
 }
 
+/** The logged rcCommand value for an axis, as Blackbox Explorer prints it (throttle 1000..2000, others ±500). */
+export function rawStick(p: StickPoint, axis: Axis): number {
+  return Math.round(p[{ roll: 1, pitch: 2, yaw: 3, throttle: 4 }[axis]]);
+}
+
 /** Throttle stick as 0..100 %. */
 export const throttlePercent = (a: StickAxes) => Math.round(((a.throttle + 1) / 2) * 100);

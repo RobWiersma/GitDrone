@@ -1,5 +1,5 @@
 import { BatteryPoint, StickPoint, TrackPoint, msToKmh } from './flight.models';
-import { MODES, StickMode, sampleSticks, stickAxes, throttlePercent } from './stick-math';
+import { MODES, StickMode, rawStick, sampleSticks, stickAxes, throttlePercent } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
 
@@ -147,50 +147,45 @@ export class OverlayRenderer {
     }
   }
 
+  /** Blackbox Explorer style: dark squares, thin crosshairs, a red dot, raw rcCommand values around the pair. */
   private drawSticks(ctx: CanvasRenderingContext2D, t: number, cx: number, bottom: number, u: number, o: OverlayOptions) {
-    const size = 170 * u, gap = 36 * u, pad = 16 * u;
-    const now = stickAxes(sampleSticks(this.data.sticks!, t));
-    const trail: ReturnType<typeof stickAxes>[] = [];
-    for (let dt = 0.6; dt > 0; dt -= 0.04) trail.push(stickAxes(sampleSticks(this.data.sticks!, Math.max(0, t - dt))));
-    trail.push(now);
+    const size = 150 * u, gap = 30 * u, dot = 10 * u;
+    const raw = sampleSticks(this.data.sticks!, t);
+    const now = stickAxes(raw);
     const [lx, ly, rx, ry] = MODES[o.stickMode];
-    const sides: [number, typeof lx, typeof ly][] = [[cx - gap / 2 - size, lx, ly], [cx + gap / 2, rx, ry]];
+    // Leave room underneath for the horizontal values.
+    const top = bottom - size - 44 * u;
+    const sides = [
+      { side: 'left', left: cx - gap / 2 - size, ax: lx, ay: ly },
+      { side: 'right', left: cx + gap / 2, ax: rx, ay: ry },
+    ] as const;
 
-    for (const [left, ax, ay] of sides) {
-      const top = bottom - size;
-      panel(ctx, left, top, size, size, 26 * u, o.panelOpacity);
-      const r = size / 2 - pad;
-      const mx = left + size / 2, my = top + size / 2;
+    for (const g of sides) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(255,255,255,.35)';
-      ctx.lineWidth = 2 * u;
-      ctx.beginPath(); ctx.arc(mx, my, r, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([5 * u, 7 * u]);
-      ctx.beginPath(); ctx.moveTo(left + pad, my); ctx.lineTo(left + size - pad, my); ctx.moveTo(mx, top + pad); ctx.lineTo(mx, top + size - pad); ctx.stroke();
-      ctx.setLineDash([]);
-      const at = (a: ReturnType<typeof stickAxes>) => [mx + a[ax] * r, my - a[ay] * r] as const;
-      // Fading trail of the last 0.6 s.
-      ctx.strokeStyle = ACCENT;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      for (let k = 1; k < trail.length; k++) {
-        ctx.globalAlpha = (k / trail.length) * 0.55;
-        ctx.lineWidth = 5 * u;
-        const [x0, y0] = at(trail[k - 1]);
-        const [x1, y1] = at(trail[k]);
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      const [kx, ky] = at(now);
-      ctx.strokeStyle = 'rgba(255,255,255,.7)';
-      ctx.lineWidth = 4 * u;
-      ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(kx, ky); ctx.stroke();
-      ctx.fillStyle = ACCENT;
-      ctx.strokeStyle = 'rgba(0,0,0,.6)';
-      ctx.lineWidth = 3 * u;
-      ctx.beginPath(); ctx.arc(kx, ky, 13 * u, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // The box keeps its own dark fill (like Blackbox Explorer); the panel slider only fades it further.
+      ctx.fillStyle = `rgba(28, 28, 28, ${Math.max(0.55, o.panelOpacity + 0.4)})`;
+      ctx.beginPath();
+      ctx.roundRect(g.left, top, size, size, 14 * u);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, .35)';
+      ctx.lineWidth = Math.max(1, 2 * u);
+      ctx.beginPath();
+      ctx.moveTo(g.left, top + size / 2); ctx.lineTo(g.left + size, top + size / 2);
+      ctx.moveTo(g.left + size / 2, top); ctx.lineTo(g.left + size / 2, top + size);
+      ctx.stroke();
+      const r = size / 2 - dot - 3 * u;
+      const kx = g.left + size / 2 + now[g.ax] * r;
+      const ky = top + size / 2 - now[g.ay] * r;
+      ctx.fillStyle = '#ff5a5a';
+      ctx.beginPath(); ctx.arc(kx, ky, dot, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
+
+      // Vertical value beside the pair, horizontal value underneath.
+      const vx = g.side === 'left' ? g.left - 14 * u : g.left + size + 14 * u;
+      text(ctx, String(rawStick(raw, g.ay)), vx, top + size / 2 + 11 * u, 30 * u, g.side === 'left' ? 'right' : 'left', 700);
+      text(ctx, String(rawStick(raw, g.ax)), g.left + size / 2, top + size + 38 * u, 30 * u, 'center', 700);
     }
+    text(ctx, `Mode ${o.stickMode}`, sides[0].left + size / 2, top + size - 14 * u, 20 * u, 'center', 700, 0.4);
   }
 
   private drawMap(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, size: number, u: number, o: OverlayOptions) {
