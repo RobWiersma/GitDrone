@@ -17,6 +17,9 @@ export interface OverlayOptions {
   showTimer: boolean;
   /** Blurred, fading streak behind each stick dot, like a long exposure. */
   stickTrails: boolean;
+  /** Mini map colours (#rrggbb): the path just flown, and what it darkens to as it ages. */
+  pathRecentColor: string;
+  pathOldColor: string;
   stickMode: StickMode;
   /** Background panels behind each element, 0..1. */
   panelOpacity: number;
@@ -35,9 +38,9 @@ let speedUnit: SpeedUnit = 'kmh';
 /** Unit strings: Betaflight's own symbols with an OSD font, plain text otherwise. */
 const units = () => glyphs
   ? { kph: speedUnit === 'mph' ? SYM.mph : SYM.kph, volt: SYM.volt, perCell: SYM.volt, amp: SYM.amp, mah: SYM.mah, watt: SYM.watt, m: SYM.m,
-      alt: SYM.alt, home: SYM.home, fly: SYM.fly, homeMark: SYM.home, sat: SYM.sat }
+      alt: SYM.alt, home: SYM.home, fly: SYM.fly, sat: SYM.sat }
   : { kph: speedUnit === 'mph' ? 'mph' : 'km/h', volt: 'V', perCell: ' V/cell', amp: ' A', mah: ' mAh', watt: ' W', m: ' m',
-      alt: '▲ ', home: '⌂ ', fly: '', homeMark: 'H', sat: 'SAT ' };
+      alt: '▲ ', home: '⌂ ', fly: '', sat: 'SAT ' };
 
 /** Betaflight battery icon for a per-cell voltage (3.3 V empty .. 4.2 V full). */
 const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.round(((cell - 3.3) / 0.9) * 6)))];
@@ -240,21 +243,42 @@ export class OverlayRenderer {
     ctx.save();
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    // Whole path faint, flown part bright.
+    // Upcoming path: faint and light. Flown path: bright green where recent, darkening to a solid dark green as it
+    // ages, so old flown path never looks like path that's still to come.
     ctx.strokeStyle = 'rgba(255,255,255,.28)';
     ctx.lineWidth = 3 * u;
     ctx.beginPath();
     this.mapXY.forEach((p, k) => { const [px, py] = P(p); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
     ctx.stroke();
-    ctx.strokeStyle = ACCENT;
+
+    const FADE_S = 45;
+    const NEW = hexToRgb(o.pathRecentColor, [0x9b, 0xe5, 0x64]);
+    const OLD = hexToRgb(o.pathOldColor, [0x2c, 0x4a, 0x1f]); // opaque, so it covers the light outline underneath
+    // Age as 0..1 in 5% steps; segments in the same step share one stroke, so long flights stay cheap to draw.
+    const ageAt = (k: number) => Math.round(Math.min(1, Math.max(0, t - this.trackTimes[k]) / FADE_S) * 20) / 20;
     ctx.lineWidth = 4 * u;
-    ctx.beginPath();
-    for (let k = 0; k <= i; k++) { const [px, py] = P(this.mapXY[k]); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
-    ctx.stroke();
+    let k0 = 0;
+    while (k0 < i) {
+      const f = ageAt(k0 + 1);
+      let k1 = k0 + 1;
+      while (k1 < i && ageAt(k1 + 1) === f) k1++;
+      const [r, g, b] = NEW.map((c, n) => Math.round(c + (OLD[n] - c) * f));
+      ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+      ctx.beginPath();
+      for (let k = k0; k <= k1; k++) { const [px, py] = P(this.mapXY[k]); k === k0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); }
+      ctx.stroke();
+      k0 = k1;
+    }
 
     if (this.homeXY) {
+      // Home as a hollow ring (no text on the mini map), so it can't be mistaken for the white position dot.
       const [hx, hy] = P(this.homeXY);
-      text(ctx, units().homeMark, hx, hy + 10 * u, 28 * u, 'center', 800);
+      ctx.strokeStyle = 'rgba(0,0,0,.7)';
+      ctx.lineWidth = 6 * u;
+      ctx.beginPath(); ctx.arc(hx, hy, 9 * u, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3 * u;
+      ctx.beginPath(); ctx.arc(hx, hy, 9 * u, 0, Math.PI * 2); ctx.stroke();
     }
     const [cx, cy] = P(this.mapXY[i]);
     ctx.fillStyle = '#ffffff';
@@ -262,11 +286,18 @@ export class OverlayRenderer {
     ctx.lineWidth = 3 * u;
     ctx.beginPath(); ctx.arc(cx, cy, 10 * u, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     ctx.restore();
-    label(ctx, `${(span).toFixed(0)} m across`, x + 18 * u, y + size - 16 * u, 18 * u);
   }
 }
 
 // ---------- drawing helpers ----------
+
+/** "#9be564" -> [155, 229, 100]; anything unparseable gives the fallback. */
+function hexToRgb(hex: string, fallback: number[]): number[] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? '');
+  if (!m) return fallback;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 
 /** Upright battery outline with a fill that drains from 4.2 V to 3.3 V per cell (for the built-in font). */
 function drawBatteryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, cell: number, warn?: string) {
