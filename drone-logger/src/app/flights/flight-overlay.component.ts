@@ -5,7 +5,8 @@ import { forkJoin, of, catchError, map } from 'rxjs';
 import { FlightService } from './flight.service';
 import { Flight } from './flight.models';
 import { OverlayData, OverlayOptions, OverlayRenderer } from './overlay-renderer';
-import { FrameWriter, canWriteFolders, folderWriter, zipWriter } from './frame-writer';
+import { MovWriter, canSaveToDisk, diskMovWriter, memoryMovWriter } from './mov-writer';
+import { GlyphFont, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 
@@ -25,7 +26,7 @@ const FPS = [24, 25, 30, 50, 60];
         <a [routerLink]="['/flights', f.id]">Back to flight</a>
         <h1>Video overlay</h1>
         <p class="hint">
-          A transparent PNG sequence of the HUD, to put on a track above your footage in Premiere or After Effects.
+          A transparent QuickTime video of the HUD, to put on a track above your footage in Premiere or After Effects.
           It starts at arming, so line it up with your takeoff.
         </p>
 
@@ -47,6 +48,20 @@ const FPS = [24, 25, 30, 50, 60];
 
           <section class="panel options" aria-labelledby="options-heading">
             <h2 id="options-heading">Options</h2>
+            <div class="field">
+              <span class="field-label" id="font-label">OSD font</span>
+              @if (font(); as fnt) {
+                <p class="font-row"><span class="mono">{{ fnt.name }}</span> <span class="hint">{{ fnt.glyphW }}×{{ fnt.glyphH }} glyphs</span>
+                  <button class="link" type="button" (click)="clearFont()" [disabled]="busy()">Remove</button></p>
+              } @else {
+                <p class="hint">Built-in font. Load your goggles' Betaflight font (<code>font_bf.bin</code> is sharpest) for the real OSD look.</p>
+              }
+              <label class="btn small">
+                {{ font() ? 'Change font' : 'Load font file' }}
+                <input class="sr-only" type="file" accept=".bin" aria-labelledby="font-label" (change)="onFont($event)" [disabled]="busy()" />
+              </label>
+              @if (fontError()) { <p class="error">{{ fontError() }}</p> }
+            </div>
             <div class="field">
               <label for="res">Resolution</label>
               <select id="res" [ngModel]="resIndex()" (ngModelChange)="resIndex.set(+$event)" [disabled]="busy()">
@@ -90,8 +105,8 @@ const FPS = [24, 25, 30, 50, 60];
               </div>
             </div>
             <p class="hint">{{ frameCount() }} frames, {{ clock(end() - start()) }} long, roughly {{ sizeEstimate() }} on disk.</p>
-            @if (!folders && estimatedBytes() > 3.5e9) {
-              <p class="error">That's too big for a zip download (4 GB limit). Trim it, lower the resolution, or use Chrome or Edge.</p>
+            @if (!toDisk && estimatedBytes() > 2e9) {
+              <p class="error">That's a lot to hold in memory in this browser. Trim it, lower the resolution, or use Chrome or Edge.</p>
             }
 
             @if (busy()) {
@@ -101,11 +116,11 @@ const FPS = [24, 25, 30, 50, 60];
               </div>
               <button class="btn" type="button" (click)="cancel()">Cancel</button>
             } @else {
-              <button class="btn btn-primary" type="button" (click)="exportFrames(f)" [disabled]="!data() || frameCount() === 0">
-                {{ folders ? 'Export to a folder' : 'Export as zip' }}
+              <button class="btn btn-primary" type="button" (click)="exportVideo(f)" [disabled]="!data() || frameCount() === 0">
+                Export .mov
               </button>
-              @if (!folders) {
-                <p class="hint">Your browser can't write to folders, so frames download as one zip. Chrome or Edge is faster for long or 4K exports.</p>
+              @if (!toDisk) {
+                <p class="hint">This browser builds the file in memory before downloading. Chrome or Edge writes straight to disk, which is better for long or 4K exports.</p>
               }
             }
             @if (message()) { <p class="note" role="status">{{ message() }}</p> }
@@ -116,12 +131,11 @@ const FPS = [24, 25, 30, 50, 60];
         <section class="panel howto" aria-labelledby="howto-heading">
           <h2 id="howto-heading">Using it in Premiere Pro</h2>
           <ol>
-            <li><strong>File → Import</strong>, open the export folder, select the first frame and tick <strong>Image Sequence</strong>.</li>
-            <li>Right-click the clip in the Project panel, choose <strong>Modify → Interpret Footage</strong>, and set the frame rate to <strong>{{ fps() }} fps</strong>.</li>
-            <li>Drop it on a track above your footage. The transparency comes through automatically.</li>
+            <li>Import the <strong>.mov</strong> like any clip and drop it on a track above your footage.</li>
             <li>Slide it so the timer starts when the quad arms (usually just before takeoff).</li>
+            <li>If the background shows black instead of see-through: right-click the clip, <strong>Modify → Interpret Footage</strong>, and set Alpha Channel to <strong>Straight</strong>.</li>
           </ol>
-          <p class="hint">After Effects: same import with "PNG Sequence" ticked, then set the frame rate in Interpret Footage → Main.</p>
+          <p class="hint">The video is lossless (PNG frames inside a .mov), so it's big. Render it into your final export as usual.</p>
         </section>
       } @else {
         <p class="hint">Loading flight...</p>
@@ -148,6 +162,10 @@ const FPS = [24, 25, 30, 50, 60];
     .progress { display: grid; gap: .3rem; margin: .5rem 0; }
     progress { width: 100%; accent-color: var(--accent); }
     .note { color: var(--ok); margin: .6rem 0 0; }
+    .field-label { font-weight: 600; }
+    .font-row { margin: 0; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+    .small { padding: .3rem .75rem; font-size: .88rem; justify-self: start; }
+    .link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
     .howto ol { margin: 0; padding-left: 1.25rem; display: grid; gap: .35rem; }
     .howto .hint { margin-top: .6rem; }
   `],
@@ -160,11 +178,13 @@ export class FlightOverlayComponent {
 
   readonly resolutions = RESOLUTIONS;
   readonly fpsOptions = FPS;
-  readonly folders = canWriteFolders();
+  readonly toDisk = canSaveToDisk();
   readonly clock = clock;
 
   flight = signal<Flight | null>(null);
   data = signal<OverlayData | null>(null);
+  font = signal<GlyphFont | null>(null);
+  fontError = signal('');
   private renderer = computed(() => (this.data() ? new OverlayRenderer(this.data()!) : null));
 
   seconds = computed(() => (this.flight()?.durationMs ?? 0) / 1000);
@@ -174,7 +194,7 @@ export class FlightOverlayComponent {
   end = signal(0);
   opts = signal<OverlayOptions>({
     showSticks: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true,
-    stickMode: readStickMode(), panelOpacity: 0.35,
+    stickMode: readStickMode(), panelOpacity: 0.35, font: null,
   });
 
   previewTime = signal(0);
@@ -210,6 +230,9 @@ export class FlightOverlayComponent {
       });
     });
 
+    loadSavedFont().then(f => this.font.set(f));
+    effect(() => { const f = this.font(); this.opts.update(o => ({ ...o, font: f })); });
+
     // Redraw the preview whenever anything it shows changes.
     afterNextRender(() => this.drawPreview());
     effect(() => this.drawPreview());
@@ -217,6 +240,26 @@ export class FlightOverlayComponent {
 
   set<K extends keyof OverlayOptions>(key: K, value: OverlayOptions[K]) {
     this.opts.update(o => ({ ...o, [key]: value }));
+  }
+
+  async onFont(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.fontError.set('');
+    try {
+      const buffer = await file.arrayBuffer();
+      this.font.set(parseGlyphFont(file.name, buffer));
+      await saveFont(file.name, buffer);
+    } catch (err) {
+      this.fontError.set(err instanceof Error ? err.message : 'Could not read that font file.');
+    }
+  }
+
+  clearFont() {
+    this.font.set(null);
+    saveFont('', null);
   }
 
   setStickMode(v: number) {
@@ -236,27 +279,27 @@ export class FlightOverlayComponent {
     r.draw(c.getContext('2d')!, t, o);
   }
 
-  async exportFrames(f: Flight) {
+  async exportVideo(f: Flight) {
     const r = this.renderer();
     if (!r) return;
     this.error.set('');
     this.message.set('');
 
-    let writer: FrameWriter;
+    const { w, h } = RESOLUTIONS[this.resIndex()];
+    const fps = this.fps();
+    const name = `gitdrone-overlay-${f.id}-${w}x${h}-${fps}fps.mov`;
+    let writer: MovWriter;
     try {
-      writer = this.folders ? await folderWriter() : zipWriter(`gitdrone-overlay-${f.id}.zip`);
+      writer = this.toDisk ? await diskMovWriter(name, { width: w, height: h, fps }) : memoryMovWriter(name, { width: w, height: h, fps });
     } catch {
-      return; // folder picker cancelled
+      return; // save dialog cancelled
     }
 
-    const { w, h } = RESOLUTIONS[this.resIndex()];
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d')!;
-    const fps = this.fps();
     const total = this.frameCount();
-    const digits = String(total).length < 5 ? 5 : String(total).length;
     const opts = this.opts();
     const started = performance.now();
 
@@ -268,21 +311,22 @@ export class FlightOverlayComponent {
         if (this.cancelled) break;
         r.draw(ctx, this.start() + i / fps, opts);
         const png = await new Promise<Blob>((ok, fail) => canvas.toBlob(b => (b ? ok(b) : fail(new Error('PNG encode failed'))), 'image/png'));
-        await writer.write(`overlay_${String(i + 1).padStart(digits, '0')}.png`, png);
+        await writer.addFrame(png);
         this.done.set(i + 1);
         if (i % 15 === 0 && i > 0) {
           const perFrame = (performance.now() - started) / (i + 1);
           this.eta.set(clock(((total - i - 1) * perFrame) / 1000));
         }
       }
-      if (!this.cancelled) {
-        await writer.write('README.txt', new Blob([readme(fps, w, h, total, this.start())], { type: 'text/plain' }));
-        await writer.close();
-        this.message.set(`Exported ${total} frames at ${w}×${h}, ${fps} fps.`);
+      if (this.cancelled) {
+        await writer.abort();
+        this.message.set(`Cancelled after ${this.done()} frames; no file was written.`);
       } else {
-        this.message.set(`Cancelled after ${this.done()} frames.`);
+        await writer.close();
+        this.message.set(`Exported ${name} (${total} frames).`);
       }
     } catch (e) {
+      await writer.abort().catch(() => undefined);
       this.error.set(`Export stopped: ${e instanceof Error ? e.message : 'unknown error'}.`);
     } finally {
       this.busy.set(false);
@@ -293,22 +337,4 @@ export class FlightOverlayComponent {
   cancel() {
     this.cancelled = true;
   }
-}
-
-function readme(fps: number, w: number, h: number, frames: number, start: number) {
-  return [
-    'GitDrone video overlay',
-    `${frames} transparent PNG frames, ${w}x${h}, ${fps} fps.`,
-    start > 0 ? `Frame 1 is ${clock(start)} after the quad armed.` : 'Frame 1 is when the quad armed.',
-    '',
-    'Premiere Pro:',
-    '  1. File > Import, select overlay_00001.png, tick "Image Sequence".',
-    `  2. Right-click the clip > Modify > Interpret Footage > Assume this frame rate: ${fps}.`,
-    '  3. Put it on a track above your footage and slide it so the timer starts at arming.',
-    '',
-    'After Effects:',
-    '  File > Import > File, select the first frame, tick "PNG Sequence",',
-    `  then Interpret Footage > Main > Assume this frame rate: ${fps}.`,
-    '',
-  ].join('\r\n');
 }
