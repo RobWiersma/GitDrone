@@ -72,6 +72,10 @@ Craft name and device UID from the log header are not stored. The original file 
 `App_Data/logs` so it can be re-parsed later, for example to add GPS tracks once logs include them
 (enable the GPS field in the Configurator's Blackbox tab).
 
+Flights with GPS get distance, top speed, max height above takeoff and furthest distance from home,
+plus a map (Leaflet + OpenStreetMap tiles) with the path coloured by speed. `POST /api/flights/{id}/reprocess`
+re-reads the stored log file, e.g. after a decoder change. `GET /api/flights/{id}/track` returns the path.
+
 ## Local development
 
 Run the API (`dotnet run --launch-profile https` in `DroneLogger.Api`) and `ng serve` in `drone-logger`.

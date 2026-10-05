@@ -17,7 +17,29 @@ export interface Flight {
   maxThrottlePercent: number | null;
   corruptFrames: number;
   createdAt: string;
+  hasGps: boolean;
+  /** Path length over the ground, metres. GPS fields are null without a fix. */
+  distanceM: number | null;
+  maxSpeedMs: number | null;
+  /** Above takeoff. */
+  maxHeightM: number | null;
+  maxDistanceM: number | null;
 }
+
+/** [seconds since first fix, lat, lon, height above takeoff (m), ground speed (m/s)] */
+export type TrackPoint = [number, number, number, number, number];
+
+export interface FlightTrack {
+  home: [number, number] | null;
+  points: TrackPoint[];
+}
+
+/** "4.87 km" or "460 m". */
+export function formatDistance(m: number): string {
+  return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
+}
+
+export const msToKmh = (ms: number) => ms * 3.6;
 
 export interface FlightUploadResult {
   flights: Flight[];

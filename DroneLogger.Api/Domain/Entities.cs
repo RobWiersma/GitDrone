@@ -71,4 +71,15 @@ public class Flight
     public double? MaxThrottlePercent { get; set; }
     public int CorruptFrames { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    // GPS, all null when the log had no GPS fix.
+    public double? DistanceM { get; set; }
+    public double? MaxSpeedMs { get; set; }
+    /// <summary>Above this flight's takeoff altitude.</summary>
+    public double? MaxHeightM { get; set; }
+    public double? MaxDistanceM { get; set; }
+    public double? HomeLat { get; set; }
+    public double? HomeLon { get; set; }
+    /// <summary>{"home":[lat,lon]|null,"points":[[t,lat,lon,heightAboveTakeoff,speed],...]}, see FlightTrack.</summary>
+    public string? TrackJson { get; set; }
 }

@@ -2,7 +2,7 @@ import { Component, effect, inject, input, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
-import { Flight, formatDuration } from './flight.models';
+import { Flight, formatDistance, formatDuration } from './flight.models';
 
 @Component({
   selector: 'app-flight-list',
@@ -27,6 +27,7 @@ import { Flight, formatDuration } from './flight.models';
                   <tr>
                     <th scope="col">Date</th>
                     <th scope="col">Duration</th>
+                    <th scope="col">Distance</th>
                     <th scope="col">Tune</th>
                     <th scope="col">Throttle avg / max</th>
                   </tr>
@@ -40,6 +41,7 @@ import { Flight, formatDuration } from './flight.models';
                         </a>
                       </th>
                       <td>{{ duration(f) }}</td>
+                      <td>@if (f.distanceM !== null) { {{ distance(f) }} } @else { <span class="hint">no GPS</span> }</td>
                       <td>{{ f.tuneLabel ?? 'None' }}</td>
                       <td>
                         @if (f.avgThrottlePercent !== null) {
@@ -79,6 +81,10 @@ export class FlightListComponent {
         error: () => this.state.set('error'),
       });
     });
+  }
+
+  distance(f: Flight) {
+    return f.distanceM === null ? '' : formatDistance(f.distanceM);
   }
 
   duration(f: Flight) {

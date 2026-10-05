@@ -21,6 +21,8 @@ public static class FlightEndpoints
         var f = app.MapGroup("/api/flights");
         f.MapGet("/", Feed);
         f.MapGet("/{id:int}", Get);
+        f.MapGet("/{id:int}/track", Track);
+        f.MapPost("/{id:int}/reprocess", Reprocess);
         f.MapPut("/{id:int}", Update);
         f.MapDelete("/{id:int}", Delete);
     }
@@ -134,7 +136,7 @@ public static class FlightEndpoints
                 MaxThrottlePercent = Round(log.MaxThrottlePercent),
                 CorruptFrames = log.CorruptFrames,
                 CreatedAt = now,
-            };
+            }.WithGps(log);
         }).ToList();
 
         try
@@ -151,6 +153,48 @@ public static class FlightEndpoints
         var ids = flights.Select(x => x.Id).ToList();
         var dtos = await Project(db.Flights.AsNoTracking().Where(x => ids.Contains(x.Id)).OrderBy(x => x.LogIndex)).ToListAsync(ct);
         return Results.Created($"/api/aircraft/{aircraftId}/flights", new FlightUploadResult(dtos, false));
+    }
+
+    /// <summary>The stored GPS track, or 404 when the flight has none.</summary>
+    private static async Task<IResult> Track(int id, AppDbContext db, CancellationToken ct)
+    {
+        var json = await db.Flights.AsNoTracking().Where(x => x.Id == id).Select(x => x.TrackJson).FirstOrDefaultAsync(ct);
+        return json is null ? Results.NotFound() : Results.Content(json, "application/json");
+    }
+
+    /// <summary>Re-reads the stored log file, e.g. to pick up GPS for flights uploaded before the decoder handled it.</summary>
+    private static async Task<IResult> Reprocess(int id, AppDbContext db, LogStore store, CancellationToken ct)
+    {
+        var flight = await db.Flights.FindAsync([id], ct);
+        if (flight is null) return Results.NotFound();
+
+        var bytes = await store.ReadAsync(flight.StoredFileName, ct);
+        if (bytes is null) return Results.Problem("The original log file is no longer stored.", statusCode: 409);
+
+        var log = BlackboxDecoder.Decode(bytes).FirstOrDefault(l => l.Index == flight.LogIndex);
+        if (log is null) return Results.Problem("That session could not be read from the stored file.", statusCode: 409);
+
+        flight.DurationMs = log.DurationMs;
+        flight.AvgThrottlePercent = Round(log.AvgThrottlePercent);
+        flight.MaxThrottlePercent = Round(log.MaxThrottlePercent);
+        flight.CorruptFrames = log.CorruptFrames;
+        flight.WithGps(log);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(await Project(db.Flights.AsNoTracking().Where(x => x.Id == id)).FirstAsync(ct));
+    }
+
+    private static Flight WithGps(this Flight flight, BlackboxLog log)
+    {
+        var track = FlightTrack.Build(log);
+        var s = track?.Summary;
+        flight.DistanceM = s?.DistanceM;
+        flight.MaxSpeedMs = s?.MaxSpeedMs;
+        flight.MaxHeightM = s?.MaxHeightM;
+        flight.MaxDistanceM = s?.MaxDistanceM;
+        flight.HomeLat = s?.HomeLat;
+        flight.HomeLon = s?.HomeLon;
+        flight.TrackJson = track?.Json;
+        return flight;
     }
 
     private static async Task<IResult> Update(int id, FlightUpdateRequest body, AppDbContext db, CancellationToken ct)
@@ -190,7 +234,8 @@ public static class FlightEndpoints
         q.Select(x => new FlightDto(
             x.Id, x.AircraftId, x.Aircraft!.Name, x.TuneSnapshotId, x.TuneSnapshot != null ? x.TuneSnapshot.Label : null, x.Notes,
             x.OriginalFileName, x.LogIndex, x.StartedAt, x.DurationMs, x.FirmwareRevision, x.Board,
-            x.AvgThrottlePercent, x.MaxThrottlePercent, x.CorruptFrames, x.CreatedAt));
+            x.AvgThrottlePercent, x.MaxThrottlePercent, x.CorruptFrames, x.CreatedAt,
+            x.TrackJson != null, x.DistanceM, x.MaxSpeedMs, x.MaxHeightM, x.MaxDistanceM));
 
     /// <summary>Each session has its own "Log start datetime". FCs without a clock write year 0000, which we drop.</summary>
     private static DateTime? StartTime(BlackboxLog log)

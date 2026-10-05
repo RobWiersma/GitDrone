@@ -16,6 +16,7 @@ public record BlackboxLog(
     double? AvgThrottlePercent,
     double? MaxThrottlePercent,
     (double Lat, double Lon)? Home,
+    double? HomeAltitudeM,
     IReadOnlyList<GpsSample> Gps)
 {
     public long DurationMs => Math.Max(0, (LastTimeUs - FirstTimeUs) / 1000);
@@ -131,17 +132,20 @@ public static class BlackboxDecoder
             if (mainFrames == 0) return null;
 
             (double, double)? home = null;
+            double? homeAlt = null;
             if (defs.TryGetValue('H', out var hd) && gpsHomeValid)
             {
                 var la = hd.IndexOf("GPS_home[0]");
                 var lo = hd.IndexOf("GPS_home[1]");
+                var al = hd.IndexOf("GPS_home[2]"); // newer firmware only
                 if (la >= 0 && lo >= 0) home = (gpsHome[la] / 1e7, gpsHome[lo] / 1e7);
+                if (al >= 0) homeAlt = gpsHome[al] / 10.0; // same decimetre units as GPS_altitude
             }
 
             return new BlackboxLog(index, headers, firstTime, lastTime, mainFrames, corrupt,
                 throttleCount > 0 ? ThrottlePercent(throttleSum / throttleCount) : null,
                 throttleCount > 0 ? ThrottlePercent(throttleMax) : null,
-                home, gps);
+                home, homeAlt, gps);
         }
 
         // rcCommand[3] runs 1000..2000 in Betaflight 4.x and later.

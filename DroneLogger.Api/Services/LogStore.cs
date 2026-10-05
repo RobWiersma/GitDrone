@@ -20,6 +20,12 @@ public class LogStore
         return name;
     }
 
+    public async Task<byte[]?> ReadAsync(string fileName, CancellationToken ct)
+    {
+        var path = Path.Combine(Root, Path.GetFileName(fileName));
+        return File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : null;
+    }
+
     public void Delete(string? fileName)
     {
         if (string.IsNullOrEmpty(fileName)) return;

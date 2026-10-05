@@ -6,7 +6,6 @@ import { TuneImportComponent } from './tunes/tune-import.component';
 import { TuneCompareComponent } from './tunes/tune-compare.component';
 import { TuneBulkImportComponent } from './tunes/tune-bulk-import.component';
 import { FlightUploadComponent } from './flights/flight-upload.component';
-import { FlightDetailComponent } from './flights/flight-detail.component';
 import { FlightFeedComponent } from './flights/flight-feed.component';
 
 export const routes: Routes = [
@@ -18,7 +17,8 @@ export const routes: Routes = [
   { path: 'hangar/:id/tunes/import', component: TuneImportComponent, title: 'Import tune' },
   { path: 'hangar/:id/tunes/bulk', component: TuneBulkImportComponent, title: 'Bulk import tunes' },
   { path: 'hangar/:id/flights/upload', component: FlightUploadComponent, title: 'Upload blackbox log' },
-  { path: 'flights/:id', component: FlightDetailComponent, title: 'Flight' },
+  // Lazy: this page pulls in Leaflet, which nothing else needs.
+  { path: 'flights/:id', loadComponent: () => import('./flights/flight-detail.component').then(m => m.FlightDetailComponent), title: 'Flight' },
   { path: 'tunes/compare', component: TuneCompareComponent, title: 'Compare tunes' },
 
   // Old /aircraft addresses, kept so bookmarks still work.

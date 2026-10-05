@@ -2,7 +2,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
-import { Flight, flightDate, formatDuration } from './flight.models';
+import { Flight, flightDate, formatDistance, formatDuration } from './flight.models';
 
 const PAGE_SIZE = 50;
 
@@ -39,7 +39,7 @@ const PAGE_SIZE = 50;
                       @if (f.startedAt) { {{ f.startedAt | date: 'HH:mm' }} } @else { <span class="hint">no clock</span> }
                     </span>
                     <span class="craft">{{ f.aircraftName }}</span>
-                    <span class="dur">{{ duration(f) }}</span>
+                    <span class="dur">{{ duration(f) }}@if (f.distanceM !== null) {<span class="dist">, {{ distance(f) }}</span>}</span>
                     <span class="tune">{{ f.tuneLabel ?? 'No tune linked' }}</span>
                     <span class="thr">
                       @if (f.avgThrottlePercent !== null) {
@@ -70,13 +70,14 @@ const PAGE_SIZE = 50;
     .summary { margin: .1rem 0 .6rem; font-size: .9rem; }
     ul { list-style: none; margin: 0; padding: 0; }
     li + li { border-top: 1px solid var(--line); }
-    .row { display: grid; grid-template-columns: 4rem minmax(8rem, 1.2fr) 4rem minmax(8rem, 1.5fr) 9rem; gap: .75rem;
+    .row { display: grid; grid-template-columns: 4rem minmax(8rem, 1.2fr) 8rem minmax(8rem, 1.5fr) 9rem; gap: .75rem;
            align-items: baseline; padding: .55rem .25rem; color: inherit; text-decoration: none; border-radius: 4px; }
     .row:hover { background: var(--wash); }
     .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .time { font-variant-numeric: tabular-nums; color: var(--muted); }
     .craft { font-weight: 600; color: var(--accent); }
     .dur { font-variant-numeric: tabular-nums; }
+    .dist { color: var(--muted); }
     .tune, .thr { color: var(--muted); font-size: .92rem; }
     .thr { text-align: right; }
     .more { display: flex; justify-content: center; margin-top: 1rem; }
@@ -127,6 +128,10 @@ export class FlightFeedComponent {
         this.failed.set(true);
       },
     });
+  }
+
+  distance(f: Flight) {
+    return f.distanceM === null ? '' : formatDistance(f.distanceM);
   }
 
   duration(f: Flight) {

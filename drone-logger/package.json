@@ -21,6 +21,7 @@
     "@angular/router": "^22.2.0",
     "@angular/ssr": "^22.2.1",
     "express": "^5.1.0",
+    "leaflet": "^1.9.4",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },
@@ -29,6 +30,7 @@
     "@angular/cli": "^22.2.1",
     "@angular/compiler-cli": "^22.2.0",
     "@types/express": "^5.0.1",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^22.12.0",
     "jsdom": "^30.0.0",
     "prettier": "^3.8.1",
