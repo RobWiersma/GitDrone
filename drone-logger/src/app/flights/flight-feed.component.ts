@@ -3,13 +3,14 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
 import { Flight, flightDate, formatDistance, formatDuration } from './flight.models';
+import { FlightThumbComponent } from './flight-thumb.component';
 
 const PAGE_SIZE = 50;
 
 /** Front page: every aircraft's flights, newest first, grouped by day. */
 @Component({
   selector: 'app-flight-feed',
-  imports: [DatePipe, DecimalPipe, RouterLink],
+  imports: [DatePipe, DecimalPipe, RouterLink, FlightThumbComponent],
   template: `
     <div class="page">
       <h1>Flights</h1>
@@ -46,6 +47,9 @@ const PAGE_SIZE = 50;
                         {{ f.avgThrottlePercent | number: '1.0-0' }}% avg throttle
                       }
                     </span>
+                    <span class="thumb">
+                      @if (f.hasGps) { <app-flight-thumb [flightId]="f.id" /> }
+                    </span>
                   </a>
                 </li>
               }
@@ -70,8 +74,8 @@ const PAGE_SIZE = 50;
     .summary { margin: .1rem 0 .6rem; font-size: .9rem; }
     ul { list-style: none; margin: 0; padding: 0; }
     li + li { border-top: 1px solid var(--line); }
-    .row { display: grid; grid-template-columns: 4rem minmax(8rem, 1.2fr) 8rem minmax(8rem, 1.5fr) 9rem; gap: .75rem;
-           align-items: baseline; padding: .55rem .25rem; color: inherit; text-decoration: none; border-radius: 4px; }
+    .row { display: grid; grid-template-columns: 4rem minmax(8rem, 1.2fr) 8rem minmax(8rem, 1.5fr) 9rem 7.5rem; gap: .75rem;
+           align-items: center; padding: .55rem .25rem; color: inherit; text-decoration: none; border-radius: 4px; }
     .row:hover { background: var(--wash); }
     .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .time { font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -80,11 +84,14 @@ const PAGE_SIZE = 50;
     .dist { color: var(--muted); }
     .tune, .thr { color: var(--muted); font-size: .92rem; }
     .thr { text-align: right; }
+    .thumb { width: 7.5rem; height: 4.5rem; }
     .more { display: flex; justify-content: center; margin-top: 1rem; }
     .empty h2 { margin-bottom: .25rem; }
     @media (max-width: 42rem) {
       .row { grid-template-columns: 3.5rem 1fr auto; row-gap: .1rem; }
       .tune, .thr { grid-column: 2 / -1; text-align: left; }
+      .thumb { grid-column: 2 / -1; width: 100%; height: 6rem; margin-top: .3rem; }
+      .thumb:empty { display: none; }
     }
   `],
 })

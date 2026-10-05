@@ -36,9 +36,11 @@ export class FlightService {
     return found ? of(found).pipe(delay(150)) : throwError(() => new Error('Not found'));
   }
 
-  track(id: number): Observable<FlightTrack> {
+  /** maxPoints thins the path on the server, for thumbnails. */
+  track(id: number, maxPoints?: number): Observable<FlightTrack> {
     if (USE_MOCK) return throwError(() => new Error('No track in mock mode'));
-    return this.http.get<FlightTrack>(`${API_BASE}/flights/${id}/track`);
+    const params = maxPoints ? { max: maxPoints } : undefined;
+    return this.http.get<FlightTrack>(`${API_BASE}/flights/${id}/track`, { params });
   }
 
   /** Re-reads the stored log file on the server, e.g. to pick up GPS. */

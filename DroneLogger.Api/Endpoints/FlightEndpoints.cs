@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text.Json.Nodes;
 using DroneLogger.Api.Contracts;
 using DroneLogger.Api.Data;
 using DroneLogger.Api.Domain;
@@ -155,11 +156,27 @@ public static class FlightEndpoints
         return Results.Created($"/api/aircraft/{aircraftId}/flights", new FlightUploadResult(dtos, false));
     }
 
-    /// <summary>The stored GPS track, or 404 when the flight has none.</summary>
-    private static async Task<IResult> Track(int id, AppDbContext db, CancellationToken ct)
+    /// <summary>
+    /// The stored GPS track, or 404 when the flight has none. <paramref name="max"/> thins it to roughly that many
+    /// points (always keeping the last), for thumbnails.
+    /// </summary>
+    private static async Task<IResult> Track(int id, int? max, AppDbContext db, CancellationToken ct)
     {
         var json = await db.Flights.AsNoTracking().Where(x => x.Id == id).Select(x => x.TrackJson).FirstOrDefaultAsync(ct);
-        return json is null ? Results.NotFound() : Results.Content(json, "application/json");
+        if (json is null) return Results.NotFound();
+        if (max is not { } limit || limit < 2) return Results.Content(json, "application/json");
+
+        var node = JsonNode.Parse(json)!;
+        var points = node["points"]!.AsArray();
+        if (points.Count > limit)
+        {
+            var stride = (int)Math.Ceiling(points.Count / (double)limit);
+            var kept = new JsonArray();
+            for (var i = 0; i < points.Count; i++)
+                if (i % stride == 0 || i == points.Count - 1) kept.Add(points[i]!.DeepClone());
+            node["points"] = kept;
+        }
+        return Results.Content(node.ToJsonString(), "application/json");
     }
 
     /// <summary>Re-reads the stored log file, e.g. to pick up GPS for flights uploaded before the decoder handled it.</summary>

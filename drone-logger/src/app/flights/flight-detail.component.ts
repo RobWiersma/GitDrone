@@ -5,12 +5,13 @@ import { Router, RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
 import { Flight, FlightTrack, formatDistance, formatDuration, msToKmh } from './flight.models';
 import { FlightMapComponent } from './flight-map.component';
+import { FlightProfileComponent, clock } from './flight-profile.component';
 import { TuneService } from '../tunes/tune.service';
 import { TuneSnapshotSummary } from '../tunes/tune.models';
 
 @Component({
   selector: 'app-flight-detail',
-  imports: [DatePipe, DecimalPipe, FormsModule, RouterLink, FlightMapComponent],
+  imports: [DatePipe, DecimalPipe, FormsModule, RouterLink, FlightMapComponent, FlightProfileComponent],
   template: `
     <div class="page detail">
       @if (flight(); as f) {
@@ -29,7 +30,28 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
           <section class="panel map-panel" aria-labelledby="map-heading">
             <h2 id="map-heading">Flight path</h2>
             @if (track(); as t) {
-              <app-flight-map [track]="t" />
+              <app-flight-map [track]="t" [(hoverIndex)]="hoverIndex" />
+              <p class="readout">
+                @if (hoverPoint(); as h) {
+                  <strong>{{ h.time }}</strong> in: {{ h.speed }} km/h, {{ h.height }} m above takeoff
+                } @else {
+                  <span class="hint">Hover over the path or the charts to see speed and height at that moment.</span>
+                }
+              </p>
+              <app-flight-profile [track]="t" [(hoverIndex)]="hoverIndex" />
+              <details class="table-view">
+                <summary>Data table (every 10 seconds)</summary>
+                <div class="scroll">
+                  <table>
+                    <thead><tr><th scope="col">Time</th><th scope="col">Height (m)</th><th scope="col">Speed (km/h)</th></tr></thead>
+                    <tbody>
+                      @for (r of tableRows(); track r.time) {
+                        <tr><th scope="row">{{ r.time }}</th><td>{{ r.height }}</td><td>{{ r.speed }}</td></tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              </details>
             } @else if (trackFailed()) {
               <p class="error">Couldn't load the GPS track.</p>
             } @else {
@@ -107,6 +129,14 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
     .lbl { color: var(--muted); font-size: .85rem; }
     .map-panel { margin-bottom: 1rem; }
     .map-panel h2 { margin-bottom: .75rem; }
+    .readout { margin: .6rem 0 .25rem; font-size: .92rem; font-variant-numeric: tabular-nums; min-height: 1.5em; }
+    .table-view { margin-top: .75rem; font-size: .9rem; }
+    .table-view summary { cursor: pointer; color: var(--accent); }
+    .table-view .scroll { max-height: 16rem; overflow: auto; margin-top: .4rem; }
+    .table-view table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    .table-view th, .table-view td { padding: .2rem .9rem .2rem 0; text-align: right; border-bottom: 1px solid var(--line); }
+    .table-view thead th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
+    .table-view tbody th { font-weight: normal; text-align: left; }
     .link { margin-left: .5rem; background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
     .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
@@ -122,6 +152,26 @@ export class FlightDetailComponent {
   flight = signal<Flight | null>(null);
   track = signal<FlightTrack | null>(null);
   trackFailed = signal(false);
+  /** Point under the pointer on the map or charts; both components read and write it. */
+  hoverIndex = signal<number | null>(null);
+
+  hoverPoint = computed(() => {
+    const i = this.hoverIndex();
+    const p = i === null ? undefined : this.track()?.points[i];
+    return p ? { time: clock(p[0]), height: p[3].toFixed(0), speed: msToKmh(p[4]).toFixed(0) } : null;
+  });
+
+  /** Text alternative to the charts: one row per 10 s of flight. */
+  tableRows = computed(() => {
+    const rows: { time: string; height: string; speed: string }[] = [];
+    let next = 0;
+    for (const p of this.track()?.points ?? []) {
+      if (p[0] < next) continue;
+      rows.push({ time: clock(p[0]), height: p[3].toFixed(1), speed: msToKmh(p[4]).toFixed(0) });
+      next = p[0] + 10;
+    }
+    return rows;
+  });
   notFound = signal(false);
   tunes = signal<TuneSnapshotSummary[]>([]);
   tuneChoice = signal('');
@@ -151,6 +201,7 @@ export class FlightDetailComponent {
 
   private loadTrack(f: Flight) {
     this.track.set(null);
+    this.hoverIndex.set(null);
     this.trackFailed.set(false);
     if (!f.hasGps) return;
     this.service.track(f.id).subscribe({

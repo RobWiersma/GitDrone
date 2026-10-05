@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnDestroy, afterNextRender, effect, input, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterNextRender, effect, input, model, signal, viewChild } from '@angular/core';
 import * as L from 'leaflet';
 import { FlightTrack, TrackPoint, msToKmh } from './flight.models';
 
@@ -16,11 +16,6 @@ const BANDS = [
 
 const bandOf = (p: TrackPoint) => BANDS.findIndex(b => msToKmh(p[4]) < b.upTo);
 
-function clock(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  return `${m}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
-}
-
 @Component({
   selector: 'app-flight-map',
   template: `
@@ -31,13 +26,6 @@ function clock(seconds: number) {
         <span class="item"><span class="swatch" [style.background]="b.color"></span>{{ b.label }}</span>
       }
     </div>
-    @if (hover(); as h) {
-      <p class="readout" aria-live="polite">
-        {{ h.time }} in: {{ h.speed }} km/h, {{ h.height }} m above takeoff
-      </p>
-    } @else {
-      <p class="readout hint">Hover over the path to see speed and height.</p>
-    }
   `,
   styles: [`
     :host { display: block; }
@@ -46,15 +34,16 @@ function clock(seconds: number) {
     .title { color: var(--muted); font-weight: 600; }
     .item { display: inline-flex; align-items: center; gap: .35rem; }
     .swatch { width: 1.4rem; height: .5rem; border-radius: 4px; box-shadow: 0 0 0 2px var(--surface); }
-    .readout { margin: .4rem 0 0; font-size: .9rem; font-variant-numeric: tabular-nums; min-height: 1.4em; }
     @media (max-width: 42rem) { .map { height: 20rem; } }
   `],
 })
 export class FlightMapComponent implements OnDestroy {
   track = input.required<FlightTrack>();
 
+  /** Index into track().points under the pointer, shared with the height/speed charts. */
+  hoverIndex = model<number | null>(null);
+
   readonly bands = BANDS;
-  hover = signal<{ time: string; speed: string; height: string } | null>(null);
 
   private host = viewChild.required<ElementRef<HTMLDivElement>>('map');
   private map?: L.Map;
@@ -87,6 +76,12 @@ export class FlightMapComponent implements OnDestroy {
     effect(() => {
       const t = this.track();
       if (this.ready()) this.draw(t);
+    });
+
+    // Follow hovers that start on the charts.
+    effect(() => {
+      const i = this.hoverIndex();
+      if (this.ready()) this.showCursor(i);
     });
   }
 
@@ -150,21 +145,25 @@ export class FlightMapComponent implements OnDestroy {
       const d = (p.x - e.containerPoint.x) ** 2 + (p.y - e.containerPoint.y) ** 2;
       if (d < bestDist) { bestDist = d; best = i; }
     }
-    if (best < 0) { this.clearHover(); return; }
+    this.hoverIndex.set(best < 0 ? null : best);
+  }
 
-    const p = pts[best];
+  private clearHover() {
+    this.hoverIndex.set(null);
+  }
+
+  private showCursor(i: number | null) {
+    const p = i === null ? undefined : this.track().points[i];
+    if (!p) {
+      this.cursor?.remove();
+      this.cursor = undefined;
+      return;
+    }
     if (!this.cursor) {
       this.cursor = L.circleMarker([p[1], p[2]], { radius: 7, color: '#ffffff', weight: 2, fillColor: '#16222c', fillOpacity: 1, interactive: false })
         .addTo(this.layers!);
     } else {
       this.cursor.setLatLng([p[1], p[2]]);
     }
-    this.hover.set({ time: clock(p[0]), speed: msToKmh(p[4]).toFixed(0), height: p[3].toFixed(0) });
-  }
-
-  private clearHover() {
-    this.cursor?.remove();
-    this.cursor = undefined;
-    this.hover.set(null);
   }
 }
