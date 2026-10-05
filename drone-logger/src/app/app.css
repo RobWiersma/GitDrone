@@ -1,7 +1,22 @@
-.site { background: var(--surface); border-bottom: 1px solid var(--line); }
-.nav { max-width: 68rem; margin: 0 auto; padding: 0 1rem; display: flex; align-items: center; gap: 1.5rem; height: 3.25rem; }
-.nav a { color: var(--muted); text-decoration: none; font-weight: 600; padding: .3rem 0; border-bottom: 2px solid transparent; }
-.nav a:hover { color: var(--ink); }
-.nav a.active { color: var(--ink); border-bottom-color: var(--accent); }
-.nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
-.nav .brand { color: var(--ink); font-size: 1.05rem; margin-right: .5rem; border-bottom: 0; }
+.site { background: var(--nav-bg); color: var(--nav-ink); position: sticky; top: 0; z-index: 1000;
+        border-bottom: 1px solid rgb(255 255 255 / .06); }
+.nav { max-width: 68rem; margin: 0 auto; padding: 0 1rem; display: flex; align-items: center; gap: 1.5rem; height: 3.5rem; }
+.brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--nav-ink); text-decoration: none;
+         font-weight: 800; font-size: 1.1rem; letter-spacing: -.01em; margin-right: .5rem; }
+.mark { width: 1.6rem; height: 1.6rem; color: var(--nav-accent); }
+.link { color: var(--nav-muted); text-decoration: none; font-weight: 600; font-size: .95rem; padding: .35rem 0;
+        border-bottom: 2px solid transparent; transition: color .15s; }
+.link:hover { color: var(--nav-ink); }
+.link.active { color: var(--nav-ink); border-bottom-color: var(--nav-accent); }
+.nav a:focus-visible, .theme:focus-visible { outline: 2px solid var(--nav-accent); outline-offset: 3px; border-radius: 4px; }
+.theme { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; background: transparent; color: var(--nav-muted);
+         border: 1px solid rgb(255 255 255 / .14); border-radius: 999px; padding: .3rem .7rem; font: inherit; font-size: .85rem;
+         font-weight: 600; cursor: pointer; }
+.theme:hover { color: var(--nav-ink); border-color: rgb(255 255 255 / .3); }
+.theme svg { width: 1rem; height: 1rem; }
+@media (max-width: 30rem) {
+  .nav { gap: 1rem; }
+  .theme-label { display: none; }
+  /* Visually hidden but still the link's name for screen readers. */
+  .brand span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}

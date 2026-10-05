@@ -71,16 +71,17 @@ const PAGE_SIZE = 50;
   styles: [`
     h1 { margin-bottom: 1.25rem; }
     .day { margin-bottom: 1.25rem; padding-bottom: .5rem; }
-    .summary { margin: .1rem 0 .6rem; font-size: .9rem; }
+    .summary { margin: .1rem 0 .6rem; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     ul { list-style: none; margin: 0; padding: 0; }
     li + li { border-top: 1px solid var(--line); }
     .row { display: grid; grid-template-columns: 4rem minmax(8rem, 1.2fr) 8rem minmax(8rem, 1.5fr) 9rem 7.5rem; gap: .75rem;
            align-items: center; padding: .55rem .25rem; color: inherit; text-decoration: none; border-radius: 4px; }
-    .row:hover { background: var(--wash); }
+    .row:hover { background: var(--accent-soft); }
     .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .time { font-variant-numeric: tabular-nums; color: var(--muted); }
-    .craft { font-weight: 600; color: var(--accent); }
-    .dur { font-variant-numeric: tabular-nums; }
+    .time { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: .92rem; }
+    .craft { font-weight: 700; color: var(--ink); }
+    .row:hover .craft { color: var(--accent); }
+    .dur { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: .92rem; }
     .dist { color: var(--muted); }
     .tune, .thr { color: var(--muted); font-size: .92rem; }
     .thr { text-align: right; }

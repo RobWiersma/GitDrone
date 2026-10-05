@@ -53,13 +53,15 @@ import { AircraftImageComponent } from './aircraft-image.component';
   styles: [`
     .grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.25rem;
             grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
-    .card { display: block; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
-            overflow: hidden; color: inherit; text-decoration: none; }
-    .card:hover { border-color: var(--muted); }
+    .card { display: block; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+            overflow: hidden; color: inherit; text-decoration: none; box-shadow: var(--shadow);
+            transition: transform .15s ease, border-color .15s ease; }
+    .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    @media (prefers-reduced-motion: reduce) { .card, .card:hover { transition: none; transform: none; } }
     .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .body { padding: .85rem 1rem 1rem; }
     .body p { margin: .15rem 0 0; }
-    .tunes { font-size: .9rem; margin-top: .6rem !important; }
+    .tunes { font-size: .85rem; margin-top: .6rem !important; color: var(--muted); font-family: var(--mono); }
     .empty { display: grid; gap: .5rem; justify-items: start; }
     .empty p { margin: 0 0 .5rem; }
   `],

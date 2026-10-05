@@ -71,19 +71,19 @@ interface Series {
     :host { display: block; }
     .box { outline: none; border-radius: 6px; touch-action: pan-y; }
     .box:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-    .title { margin: .25rem 0 0; font-size: .9rem; font-weight: 600; }
+    .title { margin: .6rem 0 .1rem; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
     .unit { color: var(--muted); font-weight: normal; }
     svg { display: block; overflow: visible; }
     .grid { stroke: var(--line); stroke-width: 1; }
-    .ylab, .xlab { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .ylab, .xlab { fill: var(--muted); font-size: 11px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
     .ylab { text-anchor: end; }
     .xlab { text-anchor: middle; }
-    .line { fill: none; stroke: #256abf; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-    .area { fill: #256abf; opacity: .1; }
+    .line { fill: none; stroke: var(--chart-line); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .area { fill: var(--chart-area); }
     .cross { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
-    .dot { fill: #256abf; stroke: var(--surface); stroke-width: 2; }
+    .dot { fill: var(--chart-line); stroke: var(--surface); stroke-width: 2; }
     .tip { fill: var(--ink); }
-    .tiptext { fill: var(--surface); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .tiptext { fill: var(--surface); font-size: 11px; font-weight: 700; font-family: var(--mono); font-variant-numeric: tabular-nums; }
   `],
 })
 export class FlightProfileComponent implements OnDestroy {

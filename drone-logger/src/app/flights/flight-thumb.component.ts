@@ -1,6 +1,7 @@
-import { Component, ElementRef, OnDestroy, afterNextRender, inject, input } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterNextRender, effect, inject, input } from '@angular/core';
 import type * as Leaflet from 'leaflet';
 import { FlightService } from './flight.service';
+import { ThemeService } from '../theme.service';
 
 /**
  * Small, non-interactive map of a flight's path for list rows. Waits until it scrolls into view, then loads
@@ -24,6 +25,8 @@ export class FlightThumbComponent implements OnDestroy {
   private service = inject(FlightService);
   private observer?: IntersectionObserver;
   private map?: Leaflet.Map;
+  private lines?: [Leaflet.Polyline, Leaflet.Polyline];
+  private theme = inject(ThemeService);
   private destroyed = false;
 
   constructor() {
@@ -36,6 +39,16 @@ export class FlightThumbComponent implements OnDestroy {
       }, { rootMargin: '200px' });
       this.observer.observe(this.el.nativeElement);
     });
+
+    effect(() => {
+      this.theme.dark();
+      this.lines?.[0].setStyle({ color: this.css('--map-casing') });
+      this.lines?.[1].setStyle({ color: this.css('--chart-line') });
+    });
+  }
+
+  private css(name: string) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
   ngOnDestroy() {
@@ -61,8 +74,10 @@ export class FlightThumbComponent implements OnDestroy {
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
 
       const line = track.points.map(p => [p[1], p[2]] as Leaflet.LatLngTuple);
-      L.polyline(line, { color: '#ffffff', weight: 4, opacity: 0.9, interactive: false }).addTo(map);
-      L.polyline(line, { color: '#184f95', weight: 2, interactive: false }).addTo(map);
+      this.lines = [
+        L.polyline(line, { color: this.css('--map-casing'), weight: 4, opacity: 0.9, interactive: false }).addTo(map),
+        L.polyline(line, { color: this.css('--chart-line'), weight: 2, interactive: false }).addTo(map),
+      ];
       map.fitBounds(L.latLngBounds(line), { padding: [6, 6], animate: false });
       this.map = map;
     });

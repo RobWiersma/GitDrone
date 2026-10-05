@@ -1,8 +1,36 @@
 <header class="site">
   <nav class="nav" aria-label="Main">
-    <a class="brand" routerLink="/">GitDrone</a>
-    <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" ariaCurrentWhenActive="page">Flights</a>
-    <a routerLink="/hangar" routerLinkActive="active" ariaCurrentWhenActive="page">Hangar</a>
+    <a class="brand" routerLink="/">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <!-- Quadcopter from above: four props on arms around a body. -->
+        <g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M9 9l14 14M23 9L9 23" />
+          <circle cx="7" cy="7" r="4.5" /><circle cx="25" cy="7" r="4.5" />
+          <circle cx="7" cy="25" r="4.5" /><circle cx="25" cy="25" r="4.5" />
+        </g>
+        <rect x="12.5" y="12.5" width="7" height="7" rx="2" fill="currentColor" />
+      </svg>
+      <span>GitDrone</span>
+    </a>
+    <a class="link" routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" ariaCurrentWhenActive="page">Flights</a>
+    <a class="link" routerLink="/hangar" routerLinkActive="active" ariaCurrentWhenActive="page">Hangar</a>
+    <button class="theme" type="button" (click)="theme.cycle()" [attr.aria-label]="'Theme: ' + themeLabel() + '. Change theme'"
+            [title]="'Theme: ' + themeLabel()">
+      @switch (theme.preference()) {
+        @case ('dark') {
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor" /></svg>
+        }
+        @case ('light') {
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor" />
+            <g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" /></g></svg>
+        }
+        @default {
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+            <path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><path d="M12 6.5a4 4 0 0 0 0 8z" fill="currentColor" /></svg>
+        }
+      }
+      <span class="theme-label">{{ themeLabel() }}</span>
+    </button>
   </nav>
 </header>
 <main>

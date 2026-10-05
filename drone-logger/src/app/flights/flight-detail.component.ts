@@ -22,10 +22,10 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
 
         @if (f.hasGps) {
           <ul class="headline" aria-label="Flight summary">
-            <li><span class="num">{{ distance(f) }}</span><span class="lbl">flown</span></li>
-            <li><span class="num">{{ kmh(f.maxSpeedMs) }} km/h</span><span class="lbl">top speed</span></li>
-            <li><span class="num">{{ f.maxHeightM | number: '1.0-0' }} m</span><span class="lbl">max height above takeoff</span></li>
-            <li><span class="num">{{ f.maxDistanceM | number: '1.0-0' }} m</span><span class="lbl">furthest from home</span></li>
+            <li><span class="lbl">Distance</span><span class="num">{{ distanceValue(f) }}<small>{{ distanceUnit(f) }}</small></span></li>
+            <li><span class="lbl">Top speed</span><span class="num">{{ kmh(f.maxSpeedMs) }}<small>km/h</small></span></li>
+            <li><span class="lbl">Max height</span><span class="num">{{ f.maxHeightM | number: '1.0-0' }}<small>m</small></span></li>
+            <li><span class="lbl">Furthest from home</span><span class="num">{{ f.maxDistanceM | number: '1.0-0' }}<small>m</small></span></li>
           </ul>
           <section class="panel map-panel" aria-labelledby="map-heading">
             <h2 id="map-heading">Flight path</h2>
@@ -119,14 +119,18 @@ import { TuneSnapshotSummary } from '../tunes/tune.models';
     .detail { max-width: 56rem; }
     h1 { margin-bottom: 1rem; }
     h2 { margin: 1.5rem 0 .75rem; }
-    .stats { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1.25rem; margin: 0; }
+    .stats { display: grid; grid-template-columns: max-content 1fr; gap: .45rem 1.25rem; margin: 0; }
+    .stats dt { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: .15rem; }
     dt { color: var(--muted); }
     dd { margin: 0; }
     .warn { color: var(--warn); }
     .headline { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
-    .headline li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .7rem .9rem; display: grid; }
-    .num { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .lbl { color: var(--muted); font-size: .85rem; }
+    .headline li { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+                   padding: .8rem 1rem .85rem 1.15rem; display: grid; gap: .15rem; box-shadow: var(--shadow); overflow: hidden; }
+    .headline li::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--accent); }
+    .num { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .num small { font-size: .8rem; font-weight: 600; color: var(--muted); margin-left: .25rem; letter-spacing: 0; }
+    .lbl { color: var(--muted); font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .map-panel { margin-bottom: 1rem; }
     .map-panel h2 { margin-bottom: .75rem; }
     .readout { margin: .6rem 0 .25rem; font-size: .92rem; font-variant-numeric: tabular-nums; min-height: 1.5em; }
@@ -225,8 +229,13 @@ export class FlightDetailComponent {
     });
   }
 
-  distance(f: Flight) {
-    return f.distanceM === null ? '' : formatDistance(f.distanceM);
+  /** "4.87" and "km", so the unit can be styled smaller. */
+  distanceValue(f: Flight) {
+    return f.distanceM === null ? '' : formatDistance(f.distanceM).split(' ')[0];
+  }
+
+  distanceUnit(f: Flight) {
+    return f.distanceM === null ? '' : formatDistance(f.distanceM).split(' ')[1];
   }
 
   kmh(ms: number | null) {
