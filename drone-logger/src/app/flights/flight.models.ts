@@ -86,6 +86,19 @@ export interface FlightUploadResult {
   duplicate: boolean;
 }
 
+/** One armed session from a log read by LovelyOSD. Never stored: flight.id is 0 and there's no aircraft. */
+export interface OsdSession {
+  flight: Flight;
+  track: FlightTrack | null;
+  sticks: FlightSticks | null;
+  battery: FlightBatterySeries | null;
+}
+
+export interface OsdAnalysis {
+  fileName: string;
+  sessions: OsdSession[];
+}
+
 export interface FlightFeedPage {
   flights: Flight[];
   hasMore: boolean;

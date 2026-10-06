@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, delay, of, throwError } from 'rxjs';
 import { API_BASE, USE_MOCK } from '../api.config';
-import { Flight, FlightBatterySeries, FlightFeedPage, FlightSticks, FlightTrack, FlightUpdate, FlightUploadResult, flightDate } from './flight.models';
+import { Flight, FlightBatterySeries, FlightFeedPage, FlightSticks, FlightTrack, FlightUpdate, FlightUploadResult, OsdAnalysis, flightDate } from './flight.models';
 
 @Injectable({ providedIn: 'root' })
 export class FlightService {
@@ -72,6 +72,14 @@ export class FlightService {
     body.append('tuneSnapshotId', tuneSnapshotId == null ? '' : String(tuneSnapshotId));
     body.append('notes', notes);
     return this.http.post<FlightUploadResult>(`${API_BASE}/aircraft/${aircraftId}/flights`, body);
+  }
+
+  /** Reads a log on the server without storing it (LovelyOSD). */
+  analyze(file: File): Observable<OsdAnalysis> {
+    if (USE_MOCK) return throwError(() => new Error('LovelyOSD needs the API'));
+    const body = new FormData();
+    body.append('file', file);
+    return this.http.post<OsdAnalysis>(`${API_BASE}/osd/analyze`, body);
   }
 
   update(id: number, changes: FlightUpdate): Observable<Flight> {

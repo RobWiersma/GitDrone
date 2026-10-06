@@ -49,5 +49,14 @@ public record TuneBulkRequest(IReadOnlyList<TuneBulkItem>? Items);
 /// <summary>Status is "created", "duplicate" (same settings as the tune just before it) or "error". Index points into the request.</summary>
 public record TuneBulkItemResult(int Index, string Status, TuneSnapshotDto? Snapshot, int? DuplicateOf, string? Error);
 
+/// <summary>
+/// One armed session from a log read by LovelyOSD, never stored. Flight has Id 0 and no aircraft; Track, Sticks and
+/// Battery are the same JSON the /api/flights/{id}/track, /sticks and /battery endpoints return, or null when absent.
+/// </summary>
+public record OsdSessionDto(FlightDto Flight, System.Text.Json.JsonElement? Track, System.Text.Json.JsonElement? Sticks,
+    System.Text.Json.JsonElement? Battery);
+
+public record OsdAnalysisDto(string FileName, IReadOnlyList<OsdSessionDto> Sessions);
+
 /// <summary>A page of the all-aircraft flight feed. HasMore says whether another page exists after this one.</summary>
 public record FlightFeedPage(IReadOnlyList<FlightDto> Flights, bool HasMore);

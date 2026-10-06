@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using DroneLogger.Api.Contracts;
 using DroneLogger.Api.Data;
@@ -28,6 +29,47 @@ public static class FlightEndpoints
         f.MapPost("/{id:int}/reprocess", Reprocess);
         f.MapPut("/{id:int}", Update);
         f.MapDelete("/{id:int}", Delete);
+
+        // LovelyOSD: read a log for stats and an overlay without keeping anything.
+        app.MapPost("/api/osd/analyze", Analyze)
+            .WithMetadata(new RequestSizeLimitAttribute(LogStore.MaxBytes + 1024 * 1024));
+    }
+
+    /// <summary>
+    /// multipart/form-data: file. Decodes the log in memory and returns every armed session with the same stats and
+    /// series a stored flight has. Nothing is written to the database or to disk.
+    /// </summary>
+    private static async Task<IResult> Analyze(HttpRequest req, CancellationToken ct)
+    {
+        if (!req.HasFormContentType) return Results.BadRequest(new { error = "Send multipart/form-data." });
+        var form = await req.ReadFormAsync(ct);
+        var file = form.Files["file"];
+        if (file is null || file.Length == 0)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Choose a blackbox log file."] });
+        if (file.Length > LogStore.MaxBytes)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["That log is over 64 MB."] });
+
+        var bytes = await ReadAllAsync(file, ct);
+        List<BlackboxLog> logs;
+        try { logs = BlackboxDecoder.Decode(bytes); }
+        catch (Exception) { logs = []; }
+        if (logs.Count == 0) return NotALog();
+
+        var now = DateTime.UtcNow;
+        var name = OriginalName(file);
+        var sessions = logs.Select(log =>
+        {
+            var x = NewFlight(log, name, now);
+            var dto = new FlightDto(0, 0, "", null, null, null, x.OriginalFileName, x.LogIndex, x.StartedAt, x.DurationMs,
+                x.FirmwareRevision, x.Board, x.AvgThrottlePercent, x.MaxThrottlePercent, x.CorruptFrames, x.CreatedAt,
+                x.TrackJson != null, x.DistanceM, x.MaxSpeedMs, x.MaxHeightM, x.MaxDistanceM, x.SticksJson != null, x.AvgSpeedMs,
+                x.CellCount == null ? null : new FlightBatteryDto(x.CellCount.Value, x.StartVoltage!.Value, x.EndVoltage!.Value,
+                    x.MinVoltage!.Value, x.MahUsed, x.PeakCurrentA, x.AvgCurrentA, x.PeakPowerW));
+            return new OsdSessionDto(dto, Json(x.TrackJson), Json(x.SticksJson), Json(x.BatteryJson));
+        }).ToList();
+        return Results.Ok(new OsdAnalysisDto(name, sessions));
+
+        static JsonElement? Json(string? s) => s is null ? null : JsonDocument.Parse(s).RootElement;
     }
 
     private static async Task<IResult> List(int aircraftId, AppDbContext db, CancellationToken ct)
@@ -84,14 +126,7 @@ public static class FlightEndpoints
         }
         if (errors.Count > 0) return Results.ValidationProblem(errors);
 
-        byte[] bytes;
-        await using (var src = file!.OpenReadStream())
-        using (var ms = new MemoryStream((int)file.Length))
-        {
-            await src.CopyToAsync(ms, ct);
-            bytes = ms.ToArray();
-        }
-
+        var bytes = await ReadAllAsync(file!, ct);
         var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         var existing = await Project(db.Flights.AsNoTracking().Where(x => x.AircraftId == aircraftId && x.FileHash == hash)
             .OrderBy(x => x.LogIndex)).ToListAsync(ct);
@@ -100,11 +135,7 @@ public static class FlightEndpoints
         List<BlackboxLog> logs;
         try { logs = BlackboxDecoder.Decode(bytes); }
         catch (Exception) { logs = []; }
-        if (logs.Count == 0)
-            return Results.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["file"] = ["This doesn't look like a Betaflight blackbox log (.bbl / .bfl), or it has no flight data."],
-            });
+        if (logs.Count == 0) return NotALog();
 
         // Tunes for date matching, oldest first.
         var tunes = tuneId is null
@@ -114,32 +145,19 @@ public static class FlightEndpoints
 
         var stored = await store.SaveAsync(bytes, ct);
         var now = DateTime.UtcNow;
-        var originalName = Path.GetFileName(file.FileName);
-        if (originalName.Length > 120) originalName = originalName[..120];
+        var originalName = OriginalName(file!);
 
         var flights = logs.Select(log =>
         {
-            var started = StartTime(log);
-            var when = started ?? now;
-            return new Flight
-            {
-                AircraftId = aircraftId,
-                // A tune applies to flights after it was saved. Fall back to the oldest tune for flights before any.
-                TuneSnapshotId = tuneId ?? tunes.LastOrDefault(t => t.CreatedAt <= when)?.Id ?? tunes.FirstOrDefault()?.Id,
-                Notes = notes.Length == 0 ? null : notes,
-                OriginalFileName = originalName,
-                StoredFileName = stored,
-                FileHash = hash,
-                LogIndex = log.Index,
-                StartedAt = started,
-                DurationMs = log.DurationMs,
-                FirmwareRevision = Clamp(log.Headers.GetValueOrDefault("Firmware revision") ?? "", 80),
-                Board = Clamp(log.Headers.GetValueOrDefault("Board information") ?? "", 80),
-                AvgThrottlePercent = Round(log.AvgThrottlePercent),
-                MaxThrottlePercent = Round(log.MaxThrottlePercent),
-                CorruptFrames = log.CorruptFrames,
-                CreatedAt = now,
-            }.WithLogData(log);
+            var flight = NewFlight(log, originalName, now);
+            var when = flight.StartedAt ?? now;
+            flight.AircraftId = aircraftId;
+            // A tune applies to flights after it was saved. Fall back to the oldest tune for flights before any.
+            flight.TuneSnapshotId = tuneId ?? tunes.LastOrDefault(t => t.CreatedAt <= when)?.Id ?? tunes.FirstOrDefault()?.Id;
+            flight.Notes = notes.Length == 0 ? null : notes;
+            flight.StoredFileName = stored;
+            flight.FileHash = hash;
+            return flight;
         }).ToList();
 
         try
@@ -294,6 +312,36 @@ public static class FlightEndpoints
     }
 
     // ---- helpers ----
+
+    /// <summary>A flight built from one decoded session: stats and series filled in, not linked to anything yet.</summary>
+    private static Flight NewFlight(BlackboxLog log, string originalName, DateTime now) => new Flight
+    {
+        OriginalFileName = originalName,
+        LogIndex = log.Index,
+        StartedAt = StartTime(log),
+        DurationMs = log.DurationMs,
+        FirmwareRevision = Clamp(log.Headers.GetValueOrDefault("Firmware revision") ?? "", 80),
+        Board = Clamp(log.Headers.GetValueOrDefault("Board information") ?? "", 80),
+        AvgThrottlePercent = Round(log.AvgThrottlePercent),
+        MaxThrottlePercent = Round(log.MaxThrottlePercent),
+        CorruptFrames = log.CorruptFrames,
+        CreatedAt = now,
+    }.WithLogData(log);
+
+    private static async Task<byte[]> ReadAllAsync(IFormFile file, CancellationToken ct)
+    {
+        await using var src = file.OpenReadStream();
+        using var ms = new MemoryStream((int)file.Length);
+        await src.CopyToAsync(ms, ct);
+        return ms.ToArray();
+    }
+
+    private static string OriginalName(IFormFile file) => Clamp(Path.GetFileName(file.FileName), 120);
+
+    private static IResult NotALog() => Results.ValidationProblem(new Dictionary<string, string[]>
+    {
+        ["file"] = ["This doesn't look like a Betaflight blackbox log (.bbl / .bfl), or it has no flight data."],
+    });
 
     private static IQueryable<FlightDto> Project(IQueryable<Flight> q) =>
         q.Select(x => new FlightDto(

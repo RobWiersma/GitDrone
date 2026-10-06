@@ -32,6 +32,8 @@ ASP.NET Core API when the backend is ready.
 | /tunes/compare?from=&to=     | TuneCompareComponent       |
 | /hangar/:id/flights/upload   | FlightUploadComponent      |
 | /flights/:id                 | FlightDetailComponent      |
+| /flights/:id/overlay         | FlightOverlayComponent     |
+| /osd                         | LovelyOsdComponent         |
 
 ## API contract
 
@@ -57,6 +59,10 @@ ASP.NET Core API when the backend is ready.
 - GET    /api/flights/{id}
 - PUT    /api/flights/{id}          body: { tuneSnapshotId, notes }
 - DELETE /api/flights/{id}
+- POST   /api/osd/analyze          multipart/form-data: file (.bbl/.bfl, max 64 MB)
+                                   returns: { fileName, sessions: [{ flight, track, sticks, battery }] }
+                                   Decodes in memory and stores nothing. flight.id is 0; track/sticks/battery match the
+                                   per-flight endpoints, or null.
 
 ## Comparing tunes
 
@@ -101,6 +107,14 @@ live ETA while it works.
 
 In Premiere: import the `.mov`, put it on a track above the footage, and slide it so the timer starts when the
 quad arms. If it shows black instead of transparent, set Interpret Footage → Alpha Channel to Straight.
+
+## LovelyOSD Overlay
+
+The **LovelyOSD Overlay** tab (`/osd`) is the quick route: pick a blackbox log, see the same stats, map, playback
+and charts as a flight page, and export the overlay video, without adding anything to the hangar. The API reads the
+file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
+page, so leaving it clears them. A file with several armed sessions gets a session picker. Like uploads, it needs
+you to be signed in.
 
 ## Local development
 
