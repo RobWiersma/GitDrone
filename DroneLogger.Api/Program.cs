@@ -1,6 +1,7 @@
 using DroneLogger.Api.Data;
 using DroneLogger.Api.Endpoints;
 using DroneLogger.Api.Services;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
@@ -34,6 +35,14 @@ builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
     .AllowAnyHeader()
     .AllowAnyMethod()));
 
+// LovelyOSD is open to visitors, and decoding a big log takes real CPU and memory. Decode at most two at once, with
+// two more waiting, so a burst can't take the small App Service plan down; the rest get 503 and can try again.
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status503ServiceUnavailable;
+    o.AddConcurrencyLimiter("osd", l => { l.PermitLimit = 2; l.QueueLimit = 2; });
+});
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -65,7 +74,9 @@ app.Use(async (http, next) =>
 {
     var method = http.Request.Method;
     var readOnly = HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method);
-    if (!readOnly && http.Request.Path.StartsWithSegments("/api") && !IsSignedIn(http, devSignedIn))
+    // LovelyOSD reads a log and stores nothing, so visitors can use it too (it's rate limited instead).
+    var openToAll = http.Request.Path.StartsWithSegments("/api/osd");
+    if (!readOnly && !openToAll && http.Request.Path.StartsWithSegments("/api") && !IsSignedIn(http, devSignedIn))
     {
         http.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await http.Response.WriteAsJsonAsync(new { error = "Sign in to make changes." });
@@ -73,6 +84,8 @@ app.Use(async (http, next) =>
     }
     await next();
 });
+
+app.UseRateLimiter();
 
 app.MapGet("/api/me", (HttpContext http) => new
 {

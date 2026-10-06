@@ -113,8 +113,9 @@ quad arms. If it shows black instead of transparent, set Interpret Footage → A
 The **LovelyOSD Overlay** tab (`/osd`) is the quick route: pick a blackbox log, see the same stats, map, playback
 and charts as a flight page, and export the overlay video, without adding anything to the hangar. The API reads the
 file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
-page, so leaving it clears them. A file with several armed sessions gets a session picker. Like uploads, it needs
-you to be signed in.
+page, so leaving it clears them. A file with several armed sessions gets a session picker. It's open to visitors who
+aren't signed in, since nothing is stored; to protect the small App Service plan, the API decodes at most two logs at
+once (two more wait, the rest get a "busy, try again" 503).
 
 ## Local development
 

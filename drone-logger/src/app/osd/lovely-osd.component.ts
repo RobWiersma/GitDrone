@@ -7,7 +7,6 @@ import { OsdAnalysis, OsdSession, formatDuration } from '../flights/flight.model
 import { OverlayData } from '../flights/overlay-renderer';
 import { FlightViewComponent } from '../flights/flight-view.component';
 import { OverlayExportComponent } from '../flights/overlay-export.component';
-import { AuthService } from '../auth.service';
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
@@ -26,12 +25,6 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
         video for your footage. Nothing is saved: the log isn't added to the hangar, and it's gone when you leave this page.
       </p>
 
-      @if (!auth.signedIn()) {
-        <div class="panel">
-          <p>Sign in to read a log.</p>
-          <a class="btn btn-primary" [href]="auth.signInUrl()">Sign in</a>
-        </div>
-      } @else {
         <div class="panel pick">
           <div class="field">
             <label for="osd-file">Log file</label>
@@ -68,7 +61,6 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
             <app-overlay-export [data]="overlayData()!" [seconds]="s.flight.durationMs / 1000" [fileStem]="fileStem()" />
           </section>
         }
-      }
     </div>
   `,
   styles: [`
@@ -81,7 +73,6 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
   `],
 })
 export class LovelyOsdComponent {
-  readonly auth = inject(AuthService);
   private service = inject(FlightService);
   private exporter = viewChild(OverlayExportComponent);
 
@@ -130,7 +121,7 @@ export class LovelyOsdComponent {
         this.busy.set(false);
         const problem = e.error?.errors as Record<string, string[]> | undefined;
         this.error.set(problem ? Object.values(problem).flat().join(' ')
-          : e.status === 401 ? 'Sign in to read a log.'
+          : e.status === 503 ? 'LovelyOSD is busy reading other logs right now. Try again in a minute.'
           : 'Could not read this log. Check that the API is running and try again.');
       },
     });

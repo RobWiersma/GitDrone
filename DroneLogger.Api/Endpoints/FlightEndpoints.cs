@@ -32,7 +32,8 @@ public static class FlightEndpoints
 
         // LovelyOSD: read a log for stats and an overlay without keeping anything.
         app.MapPost("/api/osd/analyze", Analyze)
-            .WithMetadata(new RequestSizeLimitAttribute(LogStore.MaxBytes + 1024 * 1024));
+            .WithMetadata(new RequestSizeLimitAttribute(LogStore.MaxBytes + 1024 * 1024))
+            .RequireRateLimiting("osd"); // open to visitors, so limited (Program.cs)
     }
 
     /// <summary>
