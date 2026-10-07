@@ -26,6 +26,7 @@ public static class FlightEndpoints
         f.MapGet("/{id:int}/track", Track);
         f.MapGet("/{id:int}/sticks", Sticks);
         f.MapGet("/{id:int}/battery", Battery);
+        f.MapGet("/{id:int}/telemetry", Telemetry);
         f.MapPost("/{id:int}/reprocess", Reprocess);
         f.MapPut("/{id:int}", Update);
         f.MapDelete("/{id:int}", Delete);
@@ -65,8 +66,9 @@ public static class FlightEndpoints
                 x.FirmwareRevision, x.Board, x.AvgThrottlePercent, x.MaxThrottlePercent, x.CorruptFrames, x.CreatedAt,
                 x.TrackJson != null, x.DistanceM, x.MaxSpeedMs, x.MaxHeightM, x.MaxDistanceM, x.SticksJson != null, x.AvgSpeedMs,
                 x.CellCount == null ? null : new FlightBatteryDto(x.CellCount.Value, x.StartVoltage!.Value, x.EndVoltage!.Value,
-                    x.MinVoltage!.Value, x.MahUsed, x.PeakCurrentA, x.AvgCurrentA, x.PeakPowerW));
-            return new OsdSessionDto(dto, Json(x.TrackJson), Json(x.SticksJson), Json(x.BatteryJson));
+                    x.MinVoltage!.Value, x.MahUsed, x.PeakCurrentA, x.AvgCurrentA, x.PeakPowerW),
+                x.TelemetryJson != null, x.MinRssiPercent, x.MaxBaroHeightM);
+            return new OsdSessionDto(dto, Json(x.TrackJson), Json(x.SticksJson), Json(x.BatteryJson), Json(x.TelemetryJson));
         }).ToList();
         return Results.Ok(new OsdAnalysisDto(name, sessions));
 
@@ -217,8 +219,16 @@ public static class FlightEndpoints
         return json is null ? Results.NotFound() : Results.Content(json, "application/json");
     }
 
+    /// <summary>RSSI and barometer series, or 404 when the log has neither field.</summary>
+    private static async Task<IResult> Telemetry(int id, AppDbContext db, LogStore store, CancellationToken ct)
+    {
+        await EnsureCurrentAsync(id, db, store, ct);
+        var json = await db.Flights.AsNoTracking().Where(x => x.Id == id).Select(x => x.TelemetryJson).FirstOrDefaultAsync(ct);
+        return json is null ? Results.NotFound() : Results.Content(json, "application/json");
+    }
+
     /// <summary>Bumped whenever WithLogData starts storing something new, so older flights rebuild themselves.</summary>
-    private const int CurrentDataVersion = 4; // 2: sticks, 3: battery and average speed, 4: satellites and acceleration in the track
+    private const int CurrentDataVersion = 5; // 2: sticks, 3: battery and average speed, 4: satellites and acceleration in the track, 5: RSSI and baro
 
     /// <summary>Rebuilds track and sticks from the stored log when a flight predates the current data version.</summary>
     private static async Task EnsureCurrentAsync(int id, AppDbContext db, LogStore store, CancellationToken ct)
@@ -267,6 +277,10 @@ public static class FlightEndpoints
         flight.PeakCurrentA = b?.PeakCurrentA;
         flight.AvgCurrentA = b?.AvgCurrentA;
         flight.PeakPowerW = b?.PeakPowerW;
+        var telemetry = FlightTrack.BuildTelemetry(log);
+        flight.TelemetryJson = telemetry?.Json;
+        flight.MinRssiPercent = telemetry?.Summary.MinRssiPercent;
+        flight.MaxBaroHeightM = telemetry?.Summary.MaxBaroHeightM;
         flight.DataVersion = CurrentDataVersion;
         var track = FlightTrack.Build(log);
         var s = track?.Summary;
@@ -353,7 +367,9 @@ public static class FlightEndpoints
             x.SticksJson != null || x.DataVersion < CurrentDataVersion, // old rows: find out on first request
             x.AvgSpeedMs,
             x.CellCount == null ? null : new FlightBatteryDto(x.CellCount.Value, x.StartVoltage!.Value, x.EndVoltage!.Value,
-                x.MinVoltage!.Value, x.MahUsed, x.PeakCurrentA, x.AvgCurrentA, x.PeakPowerW)));
+                x.MinVoltage!.Value, x.MahUsed, x.PeakCurrentA, x.AvgCurrentA, x.PeakPowerW),
+            x.TelemetryJson != null || x.DataVersion < CurrentDataVersion, // old rows: find out on first request
+            x.MinRssiPercent, x.MaxBaroHeightM));
 
     /// <summary>Each session has its own "Log start datetime". FCs without a clock write year 0000, which we drop.</summary>
     private static DateTime? StartTime(BlackboxLog log)

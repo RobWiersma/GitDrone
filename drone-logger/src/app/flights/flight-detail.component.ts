@@ -3,7 +3,7 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { FlightService } from './flight.service';
-import { BatteryPoint, Flight, FlightTrack, StickPoint } from './flight.models';
+import { BatteryPoint, Flight, FlightTrack, StickPoint, TelemetryPoint } from './flight.models';
 import { FlightViewComponent } from './flight-view.component';
 import { TuneService } from '../tunes/tune.service';
 import { TuneSnapshotSummary } from '../tunes/tune.models';
@@ -20,7 +20,7 @@ import { AuthService } from '../auth.service';
           @if (f.startedAt) { Flight on {{ f.startedAt | date: 'd MMM y, HH:mm' }} } @else { Flight {{ f.logIndex + 1 }} of {{ f.originalFileName }} }
         </h1>
 
-        <app-flight-view [flight]="f" [track]="track()" [trackFailed]="trackFailed()" [sticks]="sticks()" [battery]="battery()"
+        <app-flight-view [flight]="f" [track]="track()" [trackFailed]="trackFailed()" [sticks]="sticks()" [battery]="battery()" [telemetry]="telemetry()"
                          [overlayLink]="['/flights', f.id, 'overlay']" [canReprocess]="auth.canEdit()" [busy]="busy()"
                          (reprocess)="reprocess(f)" />
 
@@ -87,6 +87,7 @@ export class FlightDetailComponent {
   trackFailed = signal(false);
   sticks = signal<StickPoint[] | null>(null);
   battery = signal<BatteryPoint[] | null>(null);
+  telemetry = signal<TelemetryPoint[] | null>(null);
 
   notFound = signal(false);
   tunes = signal<TuneSnapshotSummary[]>([]);
@@ -117,7 +118,18 @@ export class FlightDetailComponent {
     this.track.set(null);
     this.sticks.set(null);
     this.battery.set(null);
+    this.telemetry.set(null);
     this.trackFailed.set(false);
+    if (f.hasTelemetry) {
+      this.service.telemetry(f.id).subscribe({
+        next: t => {
+          this.telemetry.set(t.points);
+          // Older rows only learn they have RSSI/baro on first request; pick up the new summary.
+          if (f.minRssiPercent === null && f.maxBaroHeightM === null) this.service.get(f.id).subscribe(updated => this.flight.set(updated));
+        },
+        error: () => this.telemetry.set(null),
+      });
+    }
     if (f.hasGps) {
       this.service.track(f.id).subscribe({ next: t => this.track.set(t), error: () => this.trackFailed.set(true) });
     }

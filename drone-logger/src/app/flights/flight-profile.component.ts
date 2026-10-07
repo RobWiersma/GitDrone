@@ -19,6 +19,10 @@ export interface ChartSeries {
   decimals?: number;
   /** Start the y-axis at zero (heights, speeds, currents) or fit the data (voltages). */
   fromZero?: boolean;
+  /** Names the main line in the legend when there's a compare line. */
+  label?: string;
+  /** A second measure of the same thing in the same unit (GPS and barometer height), drawn dashed on the same scale. */
+  compare?: { label: string; times: number[]; values: number[] };
 }
 
 /** Round tick step: 1, 2 or 5 times a power of ten, giving roughly `count` ticks. */
@@ -55,7 +59,11 @@ export function nearest(times: number[], t: number): number {
          aria-label="Flight charts over time. Use the left and right arrow keys to step through the flight."
          (pointermove)="onPointer($event)" (pointerleave)="hover.emit(null)" (keydown)="onKey($event)">
       @for (c of charts(); track c.key; let last = $last) {
-        <h3 class="title">{{ c.title }} <span class="unit">({{ c.unit }})</span></h3>
+        <h3 class="title">{{ c.title }} <span class="unit">({{ c.unit }})</span>
+          @if (c.legend; as l) {
+            <span class="legend"><span class="key solid"></span>{{ l[0] }}<span class="key dashed"></span>{{ l[1] }}</span>
+          }
+        </h3>
         <svg [attr.width]="width()" [attr.height]="c.height" aria-hidden="true">
           @for (t of c.yTicks; track t.v) {
             <line class="grid" [attr.x1]="m.left" [attr.x2]="width() - m.right" [attr.y1]="t.y" [attr.y2]="t.y" />
@@ -63,6 +71,7 @@ export function nearest(times: number[], t: number): number {
           }
           <path class="area" [attr.d]="c.area" />
           <path class="line" [attr.d]="c.line" />
+          @if (c.compareLine) { <path class="line compare" [attr.d]="c.compareLine" /> }
           @if (last) {
             @for (t of xTicks(); track t.v) {
               <text class="xlab" [attr.x]="t.x" [attr.y]="c.height - 6">{{ t.label }}</text>
@@ -72,7 +81,7 @@ export function nearest(times: number[], t: number): number {
             <line class="cross" [attr.x1]="x" [attr.x2]="x" [attr.y1]="m.top" [attr.y2]="m.top + plotH" />
             <circle class="dot" [attr.cx]="x" [attr.cy]="c.dotY()" r="4" />
             <g [attr.transform]="'translate(' + c.labelX(x) + ',' + (m.top + 2) + ')'">
-              <rect class="tip" [attr.width]="labelW" height="18" rx="4" />
+              <rect class="tip" [attr.width]="c.labelW" height="18" rx="4" />
               <text class="tiptext" x="6" y="13">{{ c.labelText() }}</text>
             </g>
           }
@@ -93,6 +102,11 @@ export function nearest(times: number[], t: number): number {
     .xlab { text-anchor: middle; }
     .line { fill: none; stroke: var(--chart-line); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
     .area { fill: var(--chart-area); }
+    /* Second line: dashed and in muted ink, so it reads apart from the main line without relying on colour. */
+    .line.compare { stroke: var(--muted); stroke-dasharray: 5 4; stroke-width: 1.75; }
+    .legend { display: inline-flex; align-items: center; gap: .35rem; margin-left: .75rem; text-transform: none; letter-spacing: 0; font-weight: 600; }
+    .key { display: inline-block; width: 1.1rem; height: 0; border-top: 2px solid var(--chart-line); margin-left: .35rem; }
+    .key.dashed { border-top: 2px dashed var(--muted); }
     .cross { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
     .dot { fill: var(--chart-line); stroke: var(--surface); stroke-width: 2; }
     .tip { fill: var(--ink); }
@@ -109,7 +123,6 @@ export class FlightProfileComponent implements OnDestroy {
 
   readonly m = M;
   readonly plotH = PLOT_H;
-  readonly labelW = 72;
 
   private box = viewChild.required<ElementRef<HTMLDivElement>>('box');
   private resize?: ResizeObserver;
@@ -141,8 +154,9 @@ export class FlightProfileComponent implements OnDestroy {
     const series = this.series();
     return series.map((s, idx) => {
       const n = s.values.length;
-      const lo = s.fromZero === false ? Math.min(...s.values) : Math.min(0, ...s.values);
-      const hi = Math.max(...s.values, lo + (s.fromZero === false ? 0.1 : 1));
+      const all = s.compare ? [...s.values, ...s.compare.values] : s.values;
+      const lo = s.fromZero === false ? Math.min(...all) : Math.min(0, ...all);
+      const hi = Math.max(...all, lo + (s.fromZero === false ? 0.1 : 1));
       const yt = ticks(lo, hi, 3);
       const yMin = Math.min(lo, yt[0]);
       const yMax = Math.max(hi, yt.at(-1)!);
@@ -153,10 +167,16 @@ export class FlightProfileComponent implements OnDestroy {
       const base = y(Math.max(yMin, s.fromZero === false ? yMin : 0)).toFixed(1);
       const area = n ? `${line}L${x(s.times[n - 1]).toFixed(1)},${base}L${x(s.times[0]).toFixed(1)},${base}Z` : '';
 
+      const cmp = s.compare;
+      let compareLine = '';
+      if (cmp) for (let i = 0; i < cmp.values.length; i++) compareLine += `${i ? 'L' : 'M'}${x(cmp.times[i]).toFixed(1)},${y(cmp.values[i]).toFixed(1)}`;
+
       const at = () => {
         const t = this.time();
         return t === null || !n ? null : nearest(s.times, t);
       };
+      const fmt = (v: number) => v.toFixed(s.decimals ?? 0);
+      const labelW = cmp ? 150 : 72;
       return {
         key: s.key,
         title: s.title,
@@ -165,10 +185,19 @@ export class FlightProfileComponent implements OnDestroy {
         yTicks: yt.map(v => ({ v, y: y(v) })),
         line,
         area,
+        compareLine,
+        legend: cmp ? [s.label ?? s.title, cmp.label] as const : null,
+        labelW,
         dotY: () => { const i = at(); return i === null ? 0 : y(s.values[i]); },
-        labelText: () => { const i = at(); return i === null ? '' : `${s.values[i].toFixed(s.decimals ?? 0)} ${s.unit}`; },
+        labelText: () => {
+          const i = at();
+          if (i === null) return '';
+          if (!cmp?.values.length) return `${fmt(s.values[i])} ${s.unit}`;
+          const j = nearest(cmp.times, this.time()!);
+          return `${s.label ?? ''} ${fmt(s.values[i])} · ${cmp.label} ${fmt(cmp.values[j])} ${s.unit}`.trim();
+        },
         // Keep the value label inside the plot: right of the crosshair, or left near the right edge.
-        labelX: (cx: number) => (cx + 8 + this.labelW > this.width() - M.right ? cx - 8 - this.labelW : cx + 8),
+        labelX: (cx: number) => (cx + 8 + labelW > this.width() - M.right ? cx - 8 - labelW : cx + 8),
       };
     });
   });

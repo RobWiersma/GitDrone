@@ -59,8 +59,10 @@ ASP.NET Core API when the backend is ready.
 - GET    /api/flights/{id}
 - PUT    /api/flights/{id}          body: { tuneSnapshotId, notes }
 - DELETE /api/flights/{id}
+- GET    /api/flights/{id}/telemetry  returns: { points: [[t, rssi %|null, baro height above takeoff (m)|null], ...] } at 10 Hz,
+                                   or 404 when the log has neither rssi nor baroAlt
 - POST   /api/osd/analyze          multipart/form-data: file (.bbl/.bfl, max 64 MB)
-                                   returns: { fileName, sessions: [{ flight, track, sticks, battery }] }
+                                   returns: { fileName, sessions: [{ flight, track, sticks, battery, telemetry }] }
                                    Decodes in memory and stores nothing. flight.id is 0; track/sticks/battery match the
                                    per-flight endpoints, or null.
 
@@ -83,6 +85,11 @@ Craft name and device UID from the log header are not stored. The original file 
 Flights with GPS get distance, top speed, max height above takeoff and furthest distance from home,
 plus a map (Leaflet + OpenStreetMap tiles) with the path coloured by speed. `POST /api/flights/{id}/reprocess`
 re-reads the stored log file, e.g. after a decoder change. `GET /api/flights/{id}/track` returns the path.
+
+Logs with `rssi` get a lowest-RSSI stat, an RSSI chart and an RSSI element on the overlay. This is the signal
+strength Betaflight logs (shown 0–100% like its OSD), not link quality, which Betaflight doesn't write to the blackbox.
+Logs with `baroAlt` get the barometer height drawn dashed on the height chart next to GPS, and the overlay can take
+its altitude from either.
 
 ## Video overlay
 

@@ -38,7 +38,7 @@ export function parseGlyphFont(name: string, buffer: ArrayBuffer): GlyphFont {
 /** Betaflight symbol codes (src/main/drivers/osd_symbols.h). */
 export const SYM = {
   volt: '\x06', mah: '\x07', m: '\x0C', home: '\x11', thr: '\x04', alt: '\x7F',
-  amp: '\x9A', fly: '\x9C', kph: '\x9E', mph: '\x9D', watt: 'W',
+  amp: '\x9A', fly: '\x9C', kph: '\x9E', mph: '\x9D', watt: 'W', rssi: '\x01',
   /** Satellite icon is two glyphs side by side (SYM_SAT_L, SYM_SAT_R). */
   sat: '\x1E\x1F',
   /** Battery bars, full to empty. */

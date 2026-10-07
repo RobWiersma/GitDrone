@@ -100,6 +100,14 @@ public class Flight
     /// <summary>{"cells":n,"points":[[t,volts,amps],...]} at 10 Hz, see FlightTrack.BuildBattery.</summary>
     public string? BatteryJson { get; set; }
 
+    // Link and barometer, null when the log doesn't have rssi / baroAlt.
+    /// <summary>Lowest RSSI in % (Betaflight's 0..1023 scaled), 0.5 s average.</summary>
+    public double? MinRssiPercent { get; set; }
+    /// <summary>Highest barometer height above takeoff.</summary>
+    public double? MaxBaroHeightM { get; set; }
+    /// <summary>{"points":[[t,rssi%,baroHeight],...]} at 10 Hz, see FlightTrack.BuildTelemetry.</summary>
+    public string? TelemetryJson { get; set; }
+
     /// <summary>Which version of the derived data (track, sticks) is stored; older rows are rebuilt from the log file on demand.</summary>
     public int DataVersion { get; set; }
 }

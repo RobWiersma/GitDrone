@@ -29,6 +29,19 @@ export interface Flight {
   /** Average ground speed while moving, m/s. */
   avgSpeedMs: number | null;
   battery: FlightBattery | null;
+  /** RSSI and/or barometer series available (rssi / baroAlt logged). */
+  hasTelemetry: boolean;
+  /** Lowest link RSSI, %, 0.5 s average. Null when not logged. */
+  minRssiPercent: number | null;
+  /** Highest barometer height above takeoff, m. Null without a barometer. */
+  maxBaroHeightM: number | null;
+}
+
+/** [seconds since log start, RSSI % or null, barometer height above takeoff (m) or null], 10 Hz. */
+export type TelemetryPoint = [number, number | null, number | null];
+
+export interface FlightTelemetry {
+  points: TelemetryPoint[];
 }
 
 export interface FlightBattery {
@@ -92,6 +105,7 @@ export interface OsdSession {
   track: FlightTrack | null;
   sticks: FlightSticks | null;
   battery: FlightBatterySeries | null;
+  telemetry: FlightTelemetry | null;
 }
 
 export interface OsdAnalysis {

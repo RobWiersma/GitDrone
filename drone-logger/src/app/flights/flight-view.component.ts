@@ -1,7 +1,7 @@
 import { Component, computed, inject, input, linkedSignal, output } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { BatteryPoint, Flight, FlightTrack, StickPoint, formatDistance, formatDuration } from './flight.models';
+import { BatteryPoint, Flight, FlightTrack, StickPoint, TelemetryPoint, formatDistance, formatDuration } from './flight.models';
 import { FlightMapComponent } from './flight-map.component';
 import { ChartSeries, FlightProfileComponent, clock, nearest } from './flight-profile.component';
 import { FlightPlaybackComponent, Readout } from './flight-playback.component';
@@ -16,15 +16,29 @@ import { UnitsService } from '../units.service';
   imports: [DecimalPipe, RouterLink, FlightMapComponent, FlightProfileComponent, FlightPlaybackComponent],
   template: `
     @let f = flight();
-    @if (f.hasGps) {
+    @if (f.hasGps || f.minRssiPercent !== null || f.maxBaroHeightM !== null) {
       <ul class="headline" aria-label="Flight summary">
+      @if (f.hasGps) {
         <li><span class="lbl">Distance</span><span class="num">{{ distanceValue(f) }}<small>{{ distanceUnit(f) }}</small></span></li>
         <li><span class="lbl">Top speed</span><span class="num">{{ speed(f.maxSpeedMs) }}<small>{{ units.speedLabel() }}</small></span></li>
         @if (f.avgSpeedMs !== null) {
           <li><span class="lbl">Avg speed</span><span class="num">{{ speed(f.avgSpeedMs) }}<small>{{ units.speedLabel() }}</small></span></li>
         }
-        <li><span class="lbl">Max height</span><span class="num">{{ f.maxHeightM | number: '1.0-0' }}<small>m</small></span></li>
+        <li>
+          <span class="lbl">Max height</span><span class="num">{{ f.maxHeightM | number: '1.0-0' }}<small>m</small></span>
+          @if (f.maxBaroHeightM !== null) { <span class="sub">GPS; barometer says {{ f.maxBaroHeightM | number: '1.0-0' }} m</span> }
+        </li>
         <li><span class="lbl">Furthest from home</span><span class="num">{{ f.maxDistanceM | number: '1.0-0' }}<small>m</small></span></li>
+      } @else if (f.maxBaroHeightM !== null) {
+        <li><span class="lbl">Max height</span><span class="num">{{ f.maxBaroHeightM | number: '1.0-0' }}<small>m</small></span><span class="sub">Barometer</span></li>
+      }
+      @if (f.minRssiPercent !== null) {
+        <li>
+          <span class="lbl">Lowest RSSI</span>
+          <span class="num" [class.low]="f.minRssiPercent < 20">{{ f.minRssiPercent | number: '1.0-0' }}<small>%</small></span>
+          <span class="sub">Signal strength, not link quality</span>
+        </li>
+      }
       </ul>
     }
 
@@ -66,7 +80,7 @@ import { UnitsService } from '../units.service';
       </section>
     }
 
-    @if (sticks() || track() || battery()) {
+    @if (sticks() || track() || battery() || telemetry()) {
       <section class="panel" aria-labelledby="playback-heading">
         <div class="panel-head">
           <h2 id="playback-heading">Playback</h2>
@@ -89,7 +103,7 @@ import { UnitsService } from '../units.service';
               <thead>
                 <tr>
                   <th scope="col">Time</th>
-                  @for (s of series(); track s.key) { <th scope="col">{{ s.title }} ({{ s.unit }})</th> }
+                  @for (c of tableColumns(); track c.key) { <th scope="col">{{ c.title }} ({{ c.unit }})</th> }
                 </tr>
               </thead>
               <tbody>
@@ -167,6 +181,7 @@ export class FlightViewComponent {
   trackFailed = input(false);
   sticks = input<StickPoint[] | null>(null);
   battery = input<BatteryPoint[] | null>(null);
+  telemetry = input<TelemetryPoint[] | null>(null);
   /** Router link for the "Export video overlay" button; null hides it. */
   overlayLink = input<unknown[] | null>(null);
   /** Shows "Re-read log file" next to a missing GPS track. */
@@ -177,7 +192,7 @@ export class FlightViewComponent {
   seconds = computed(() => this.flight().durationMs / 1000);
 
   /** New data (another flight or session) starts playback over from the beginning. */
-  private dataKey = computed(() => [this.track(), this.sticks(), this.battery()]);
+  private dataKey = computed(() => [this.track(), this.sticks(), this.battery(), this.telemetry()]);
 
   /** Playback position, seconds since log start. Persists between hovers. */
   scrubTime = linkedSignal({ source: this.dataKey, computation: () => 0 });
@@ -191,6 +206,9 @@ export class FlightViewComponent {
   private trackTimes = computed(() => this.track()?.points.map(p => p[0]) ?? []);
   private batteryTimes = computed(() => this.battery()?.map(p => p[0]) ?? []);
   private stickTimes = computed(() => this.sticks()?.map(p => p[0]) ?? []);
+  private telemetryTimes = computed(() => this.telemetry()?.map(p => p[0]) ?? []);
+  private hasRssi = computed(() => this.telemetry()?.some(p => p[1] !== null) ?? false);
+  private hasBaro = computed(() => this.telemetry()?.some(p => p[2] !== null) ?? false);
 
   /** Track point nearest the cursor, for the map marker. */
   mapIndex = computed(() => (this.trackTimes().length ? nearest(this.trackTimes(), this.cursorTime()) : null));
@@ -212,6 +230,12 @@ export class FlightViewComponent {
       out.push({ label: 'Battery', value: p[1].toFixed(1), unit: 'V', sub: `${(p[1] / cells).toFixed(2)} V/cell` });
       if (p[2] !== null) out.push({ label: 'Current', value: p[2].toFixed(1), unit: 'A', sub: `${Math.round(p[1] * p[2])} W` });
     }
+    const tl = this.telemetry();
+    if (tl?.length) {
+      const p = tl[nearest(this.telemetryTimes(), t)];
+      if (!tp?.length && p[2] !== null) out.push({ label: 'Height', value: p[2].toFixed(0), unit: 'm', sub: 'barometer' });
+      if (p[1] !== null) out.push({ label: 'RSSI', value: p[1].toFixed(0), unit: '%' });
+    }
     const sp = this.sticks();
     if (sp?.length) {
       const p = sp[nearest(this.stickTimes(), t)];
@@ -224,9 +248,16 @@ export class FlightViewComponent {
   series = computed<ChartSeries[]>(() => {
     const out: ChartSeries[] = [];
     const tp = this.track()?.points;
+    const tl = this.telemetry() ?? [];
+    const baro = this.hasBaro() ? { label: 'Barometer', times: this.telemetryTimes(), values: tl.map(p => p[2] ?? 0) } : undefined;
     if (tp?.length) {
-      out.push({ key: 'height', title: 'Height above takeoff', unit: 'm', times: this.trackTimes(), values: tp.map(p => p[3]) });
+      out.push({ key: 'height', title: 'Height above takeoff', unit: 'm', times: this.trackTimes(), values: tp.map(p => p[3]),
+                 label: 'GPS', compare: baro });
       out.push({ key: 'speed', title: 'Ground speed', unit: this.units.speedLabel(), times: this.trackTimes(), values: tp.map(p => this.units.fromMs(p[4])) });
+    }
+    else if (baro) out.push({ key: 'height', title: 'Height above takeoff (barometer)', unit: 'm', times: baro.times, values: baro.values });
+    if (this.hasRssi()) {
+      out.push({ key: 'rssi', title: 'RSSI', unit: '%', times: this.telemetryTimes(), values: tl.map(p => p[1] ?? 0) });
     }
     const bp = this.battery();
     if (bp?.length) {
@@ -239,11 +270,21 @@ export class FlightViewComponent {
   });
 
   /** Text alternative to the charts: one row per 10 s of flight. */
+  /** One column per line drawn, so a compare line (barometer height) gets its own. */
+  tableColumns = computed(() => this.series().flatMap(s => {
+    const main = { key: s.key, title: s.compare ? `${s.title}, ${s.label ?? ''}`.replace(/, $/, '') : s.title, unit: s.unit,
+                   times: s.times, values: s.values, decimals: s.decimals };
+    return s.compare
+      ? [main, { key: `${s.key}-compare`, title: `${s.title}, ${s.compare.label}`, unit: s.unit, times: s.compare.times,
+                 values: s.compare.values, decimals: s.decimals }]
+      : [main];
+  }));
+
   tableRows = computed(() => {
-    const series = this.series();
+    const cols = this.tableColumns();
     const rows: { time: string; values: string[] }[] = [];
     for (let t = 0; t <= this.seconds(); t += 10) {
-      rows.push({ time: clock(t), values: series.map(s => s.values[nearest(s.times, t)].toFixed(s.decimals ?? 0)) });
+      rows.push({ time: clock(t), values: cols.map(c => c.values[nearest(c.times, t)].toFixed(c.decimals ?? 0)) });
     }
     return rows;
   });

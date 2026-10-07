@@ -46,6 +46,9 @@ export class FlightOverlayComponent {
           track: f.hasGps ? this.service.track(f.id).pipe(catchError(() => none<OverlayData['track']>())) : none<OverlayData['track']>(),
           sticks: f.hasSticks ? this.service.sticks(f.id).pipe(map(s => s.points), catchError(() => none<OverlayData['sticks']>())) : none<OverlayData['sticks']>(),
           battery: this.service.battery(f.id).pipe(catchError(() => none<OverlayData['battery']>())),
+          telemetry: f.hasTelemetry
+            ? this.service.telemetry(f.id).pipe(map(t => t.points), catchError(() => none<OverlayData['telemetry']>()))
+            : none<OverlayData['telemetry']>(),
         }).subscribe(d => this.data.set(d));
       });
     });

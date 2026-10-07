@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, delay, of, throwError } from 'rxjs';
 import { API_BASE, USE_MOCK } from '../api.config';
-import { Flight, FlightBatterySeries, FlightFeedPage, FlightSticks, FlightTrack, FlightUpdate, FlightUploadResult, OsdAnalysis, flightDate } from './flight.models';
+import { Flight, FlightBatterySeries, FlightFeedPage, FlightSticks, FlightTelemetry, FlightTrack, FlightUpdate, FlightUploadResult, OsdAnalysis, flightDate } from './flight.models';
 
 @Injectable({ providedIn: 'root' })
 export class FlightService {
@@ -13,7 +13,8 @@ export class FlightService {
       originalFileName: 'btfl_012.bbl', logIndex: 0, startedAt: '2026-08-22T17:10:00Z', durationMs: 245_000,
       firmwareRevision: 'Betaflight 4.5.0 (c155f5830) STM32F405', board: 'MTKS MATEKF405', avgThrottlePercent: 34.2,
       maxThrottlePercent: 91.5, corruptFrames: 0, createdAt: '2026-08-22T19:00:00Z',
-      hasGps: false, distanceM: null, maxSpeedMs: null, maxHeightM: null, maxDistanceM: null, hasSticks: false, avgSpeedMs: null, battery: null },
+      hasGps: false, distanceM: null, maxSpeedMs: null, maxHeightM: null, maxDistanceM: null, hasSticks: false, avgSpeedMs: null, battery: null,
+      hasTelemetry: false, minRssiPercent: null, maxBaroHeightM: null },
   ];
 
   /** All aircraft, newest first. */
@@ -51,6 +52,11 @@ export class FlightService {
   battery(id: number): Observable<FlightBatterySeries> {
     if (USE_MOCK) return throwError(() => new Error('No battery data in mock mode'));
     return this.http.get<FlightBatterySeries>(`${API_BASE}/flights/${id}/battery`);
+  }
+
+  telemetry(id: number): Observable<FlightTelemetry> {
+    if (USE_MOCK) return throwError(() => new Error('No telemetry in mock mode'));
+    return this.http.get<FlightTelemetry>(`${API_BASE}/flights/${id}/telemetry`);
   }
 
   /** Re-reads the stored log file on the server, e.g. to pick up GPS. */

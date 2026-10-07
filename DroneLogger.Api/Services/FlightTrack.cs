@@ -7,6 +7,9 @@ public record GpsSummary(double DistanceM, double MaxSpeedMs, double AvgSpeedMs,
 
 public record BatterySummary(int Cells, double StartV, double EndV, double MinV, double? MahUsed, double? PeakCurrentA, double? AvgCurrentA, double? PeakPowerW);
 
+/// <summary>Lowest link RSSI (%, 0.5 s average) and highest barometer height above takeoff (m); null when not logged.</summary>
+public record TelemetrySummary(double? MinRssiPercent, double? MaxBaroHeightM);
+
 /// <summary>Turns a decoded log's GPS samples into flight stats and a compact track for the map.</summary>
 public static class FlightTrack
 {
@@ -165,6 +168,59 @@ public static class FlightTrack
 
         var summary = new BatterySummary(cells, Math.Round(startV, 2), Math.Round(endV, 2), Math.Round(minV, 2), mah, peakA, avgA, peakW);
         return (summary, sb.ToString());
+    }
+
+    /// <summary>
+    /// Link and barometer series from rssi (0..1023, Betaflight's scale) and baroAlt (cm), on a 10 Hz grid.
+    /// JSON: {"points":[[t,rssi % | null,baro height above takeoff (m) | null],...]}. Null when the log has neither field.
+    /// </summary>
+    public static (TelemetrySummary Summary, string Json)? BuildTelemetry(BlackboxLog log)
+    {
+        var fields = log.MainFields.ToList();
+        var ri = fields.IndexOf("rssi");
+        var bi = fields.IndexOf("baroAlt");
+        var samples = log.Samples;
+        if ((ri < 0 && bi < 0) || samples.Count < 10) return null;
+
+        // Same scale as the OSD's RSSI element: 0..1023 shown as a percentage.
+        double Rssi(int k) => samples[k].Values[ri] / 10.23;
+        var seconds = Math.Max(1, (samples[^1].TimeUs - samples[0].TimeUs) / 1e6);
+        var perSecond = Math.Max(1, (int)Math.Round(samples.Count / seconds));
+        // Height from takeoff, like the GPS height: the first second sitting on the pad is zero.
+        var baro0 = bi < 0 ? 0 : Enumerable.Range(0, Math.Min(perSecond, samples.Count)).Average(k => samples[k].Values[bi]) / 100.0;
+        double Baro(int k) => samples[k].Values[bi] / 100.0 - baro0;
+
+        double? minRssi = null, maxBaro = null;
+        if (ri >= 0)
+        {
+            // Lowest 0.5 s average, so one dropped reading isn't the headline number.
+            var window = Math.Max(1, perSecond / 2);
+            double sum = 0, min = double.MaxValue;
+            for (var k = 0; k < samples.Count; k++)
+            {
+                sum += Rssi(k);
+                if (k >= window) sum -= Rssi(k - window);
+                if (k >= window - 1) min = Math.Min(min, sum / window);
+            }
+            minRssi = Math.Round(min);
+        }
+        if (bi >= 0) maxBaro = Math.Round(Enumerable.Range(0, samples.Count).Max(Baro), 1);
+
+        var sb = new StringBuilder("{\"points\":[");
+        var next = long.MinValue;
+        var first = true;
+        for (var k = 0; k < samples.Count; k++)
+        {
+            if (samples[k].TimeUs < next) continue;
+            next = (samples[k].TimeUs / 100_000 + 1) * 100_000; // even 10 Hz grid, like the battery series
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append('[').Append(F((samples[k].TimeUs - log.FirstTimeUs) / 1e6, 1)).Append(',')
+              .Append(ri >= 0 ? F(Rssi(k), 0) : "null").Append(',')
+              .Append(bi >= 0 ? F(Baro(k), 1) : "null").Append(']');
+        }
+        sb.Append("]}");
+        return (new TelemetrySummary(minRssi, maxBaro), sb.ToString());
     }
 
     /// <summary>Same rule as Betaflight: cells = voltage at arming / max cell voltage, rounded down, plus one.</summary>

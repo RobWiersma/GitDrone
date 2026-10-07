@@ -1,4 +1,4 @@
-import { BatteryPoint, SpeedUnit, StickPoint, TrackPoint, speedFromMs } from './flight.models';
+import { BatteryPoint, SpeedUnit, StickPoint, TelemetryPoint, TrackPoint, speedFromMs } from './flight.models';
 import { MODES, StickMode, sampleSticks, stickAxes } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
@@ -7,6 +7,8 @@ export interface OverlayData {
   track: { home: [number, number] | null; points: TrackPoint[] } | null;
   sticks: StickPoint[] | null;
   battery: { cells: number; points: BatteryPoint[] } | null;
+  /** RSSI and barometer height; null for logs without rssi / baroAlt. */
+  telemetry: TelemetryPoint[] | null;
 }
 
 export interface OverlayOptions {
@@ -15,6 +17,10 @@ export interface OverlayOptions {
   showBattery: boolean;
   showMap: boolean;
   showTimer: boolean;
+  /** Link RSSI next to the timer, like Betaflight's RSSI element. */
+  showRssi: boolean;
+  /** Where the speed panel's altitude comes from. Barometer falls back to GPS when the log has none. */
+  altSource: 'gps' | 'baro';
   /** Blurred, fading streak behind each stick dot, like a long exposure. */
   stickTrails: boolean;
   /** Mini map colours (#rrggbb): the path just flown, and what it darkens to as it ages. */
@@ -46,9 +52,9 @@ let speedUnit: SpeedUnit = 'kmh';
 /** Unit strings: Betaflight's own symbols with an OSD font, plain text otherwise. */
 const units = () => glyphs
   ? { kph: speedUnit === 'mph' ? SYM.mph : SYM.kph, volt: SYM.volt, perCell: SYM.volt, amp: SYM.amp, mah: SYM.mah, watt: SYM.watt, m: SYM.m,
-      alt: SYM.alt, home: SYM.home, fly: SYM.fly, sat: SYM.sat }
+      alt: SYM.alt, home: SYM.home, fly: SYM.fly, sat: SYM.sat, rssi: SYM.rssi }
   : { kph: speedUnit === 'mph' ? 'mph' : 'km/h', volt: 'V', perCell: ' V/cell', amp: ' A', mah: ' mAh', watt: ' W', m: ' m',
-      alt: '▲ ', home: '⌂ ', fly: '', sat: 'SAT ' };
+      alt: '▲ ', home: '⌂ ', fly: '', sat: 'SAT ', rssi: '' };
 
 /** Betaflight battery icon for a per-cell voltage (3.3 V empty .. 4.2 V full). */
 const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.round(((cell - 3.3) / 0.9) * 6)))];
@@ -60,6 +66,9 @@ const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.
 export class OverlayRenderer {
   private trackTimes: number[];
   private batteryTimes: number[];
+  private telemetryTimes: number[];
+  private hasRssi: boolean;
+  private hasBaro: boolean;
   /** mAh used up to each battery sample. */
   private mahAt: number[];
   /** Metres from home at each track point. */
@@ -71,6 +80,9 @@ export class OverlayRenderer {
   constructor(private data: OverlayData) {
     this.trackTimes = data.track?.points.map(p => p[0]) ?? [];
     this.batteryTimes = data.battery?.points.map(p => p[0]) ?? [];
+    this.telemetryTimes = data.telemetry?.map(p => p[0]) ?? [];
+    this.hasRssi = data.telemetry?.some(p => p[1] !== null) ?? false;
+    this.hasBaro = data.telemetry?.some(p => p[2] !== null) ?? false;
 
     this.mahAt = [];
     let mah = 0;
@@ -107,6 +119,7 @@ export class OverlayRenderer {
     speedUnit = o.speedUnit;
 
     if (o.showTimer) this.drawTimer(ctx, t, m, u, o);
+    if (o.showRssi && this.hasRssi) this.drawRssi(ctx, t, o.showTimer ? m + 226 * u : m, m, u, o);
     if (o.showMap && this.mapXY.length > 1) this.drawMap(ctx, t, W - m - 300 * u, m, 300 * u, u, o);
     if (o.showSpeed && this.trackTimes.length) this.drawSpeed(ctx, t, m, H - m, u, o);
     if (o.showBattery && this.batteryTimes.length) this.drawBattery(ctx, t, W - m, H - m, u, o);
@@ -119,6 +132,18 @@ export class OverlayRenderer {
     panel(ctx, m, m, 210 * u, 92 * u, 18 * u, o.panelOpacity);
     if (!glyphs) label(ctx, 'FLIGHT TIME', m + 22 * u, m + 30 * u, 20 * u); // OSD fonts say it with the quad icon
     text(ctx, units().fly + clock(t), m + 22 * u, m + 74 * u, 46 * u, 'left', 700);
+  }
+
+  /** Betaflight shows RSSI as 0..99 after its antenna glyph; same here, with a % in the built-in font. */
+  private drawRssi(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, u: number, o: OverlayOptions) {
+    const p = this.data.telemetry![nearest(this.telemetryTimes, t)];
+    if (p[1] === null) return;
+    const value = Math.min(99, Math.round(p[1]));
+    const warn = value < 20 ? '#ffb340' : undefined; // Betaflight's default osd_rssi_alarm
+    const w = 170 * u;
+    panel(ctx, x, y, w, 92 * u, 18 * u, o.panelOpacity);
+    if (!glyphs) label(ctx, 'RSSI', x + 22 * u, y + 30 * u, 20 * u);
+    text(ctx, `${units().rssi}${value}${glyphs ? '' : '%'}`, x + 22 * u, y + 74 * u, 46 * u, 'left', 700, 1, warn);
   }
 
   private drawSpeed(ctx: CanvasRenderingContext2D, t: number, x: number, bottom: number, u: number, o: OverlayOptions) {
@@ -134,7 +159,9 @@ export class OverlayRenderer {
     text(ctx, U.kph, x + 26 * u + measure(ctx, speed, 54 * u, 800) + 10 * u, y + 96 * u, glyphs ? 30 * u : 24 * u, 'left', 600, 0.85);
     if (p[6] !== undefined) text(ctx, `${(p[6] / 9.81).toFixed(1)}G`, x + w - 26 * u, y + 96 * u, 32 * u, 'right', 700);
     // Home sits a little right of centre: the altitude reading on the left is usually the wider of the two neighbours.
-    text(ctx, `${U.alt}${p[3].toFixed(0)}${U.m}`, x + 26 * u, y + 140 * u, 26 * u, 'left', 700);
+    const tl = o.altSource === 'baro' && this.hasBaro ? this.data.telemetry![nearest(this.telemetryTimes, t)] : null;
+    const alt = tl?.[2] ?? p[3];
+    text(ctx, `${U.alt}${alt.toFixed(0)}${U.m}`, x + 26 * u, y + 140 * u, 26 * u, 'left', 700);
     text(ctx, `${U.home}${this.homeDist[i].toFixed(0)}${U.m}`, x + w * 0.55, y + 140 * u, 26 * u, 'center', 700);
     if (p[5] !== undefined) text(ctx, `${U.sat}${p[5]}`, x + w - 26 * u, y + 140 * u, 26 * u, 'right', 700);
   }

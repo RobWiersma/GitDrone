@@ -100,6 +100,15 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             <fieldset class="field" [disabled]="busy()">
               <legend>Show</legend>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSpeed" (ngModelChange)="set('showSpeed', $event)" [disabled]="!data().track" /> Speed, height, distance</label>
+              @if (hasBaro() && data().track) {
+                <div class="field indent trail">
+                  <label for="alt-source">Height from</label>
+                  <select id="alt-source" [ngModel]="opts().altSource" (ngModelChange)="set('altSource', $event)" [disabled]="busy() || !opts().showSpeed">
+                    <option value="gps">GPS (matches the flight stats)</option>
+                    <option value="baro">Barometer (smoother)</option>
+                  </select>
+                </div>
+              }
               <label class="check"><input type="checkbox" [ngModel]="opts().showBattery" (ngModelChange)="set('showBattery', $event)" [disabled]="!data().battery" /> Battery</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data().sticks" /> Sticks</label>
               <label class="check indent"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" [disabled]="!data().sticks || !opts().showSticks" /> Stick trails (motion blur)</label>
@@ -128,6 +137,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <button class="link" type="button" (click)="resetColors(pathColors)" [disabled]="!opts().showMap">Reset</button>
               </div>
               <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" /> Flight timer</label>
+              <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi()" /> RSSI</label>
             </fieldset>
             <div class="field">
               <label for="mode">Stick mode</label>
@@ -242,6 +252,8 @@ export class OverlayExportComponent {
   font = signal<GlyphFont | null>(null);
   fontError = signal('');
   private renderer = computed(() => new OverlayRenderer(this.data()));
+  hasRssi = computed(() => this.data().telemetry?.some(p => p[1] !== null) ?? false);
+  hasBaro = computed(() => this.data().telemetry?.some(p => p[2] !== null) ?? false);
 
   /** New data (another flight or session) resets the range to the whole flight. */
   private range = computed(() => ({ data: this.data(), seconds: this.seconds() }));
@@ -250,7 +262,7 @@ export class OverlayExportComponent {
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true,
+    showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true, showRssi: true, altSource: 'gps',
     ...readColors(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh',
   });

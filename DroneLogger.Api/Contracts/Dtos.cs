@@ -29,7 +29,8 @@ public record FlightDto(
     DateTime? StartedAt, long DurationMs, string FirmwareRevision, string Board,
     double? AvgThrottlePercent, double? MaxThrottlePercent, int CorruptFrames, DateTime CreatedAt,
     bool HasGps, double? DistanceM, double? MaxSpeedMs, double? MaxHeightM, double? MaxDistanceM, bool HasSticks,
-    double? AvgSpeedMs, FlightBatteryDto? Battery);
+    double? AvgSpeedMs, FlightBatteryDto? Battery,
+    bool HasTelemetry, double? MinRssiPercent, double? MaxBaroHeightM);
 
 public record FlightBatteryDto(int Cells, double StartV, double EndV, double MinV, double? MahUsed, double? PeakCurrentA,
     double? AvgCurrentA, double? PeakPowerW);
@@ -51,10 +52,11 @@ public record TuneBulkItemResult(int Index, string Status, TuneSnapshotDto? Snap
 
 /// <summary>
 /// One armed session from a log read by LovelyOSD, never stored. Flight has Id 0 and no aircraft; Track, Sticks and
-/// Battery are the same JSON the /api/flights/{id}/track, /sticks and /battery endpoints return, or null when absent.
+/// Battery and Telemetry are the same JSON the /api/flights/{id}/track, /sticks, /battery and /telemetry endpoints
+/// return, or null when absent.
 /// </summary>
 public record OsdSessionDto(FlightDto Flight, System.Text.Json.JsonElement? Track, System.Text.Json.JsonElement? Sticks,
-    System.Text.Json.JsonElement? Battery);
+    System.Text.Json.JsonElement? Battery, System.Text.Json.JsonElement? Telemetry);
 
 public record OsdAnalysisDto(string FileName, IReadOnlyList<OsdSessionDto> Sessions);
 

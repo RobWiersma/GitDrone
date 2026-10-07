@@ -53,7 +53,8 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
             @else { Session {{ s.flight.logIndex + 1 }} of {{ s.flight.originalFileName }} }
           </h2>
 
-          <app-flight-view [flight]="s.flight" [track]="s.track" [sticks]="s.sticks?.points ?? null" [battery]="s.battery?.points ?? null" />
+          <app-flight-view [flight]="s.flight" [track]="s.track" [sticks]="s.sticks?.points ?? null" [battery]="s.battery?.points ?? null"
+                           [telemetry]="s.telemetry?.points ?? null" />
 
           <section aria-labelledby="osd-export-heading">
             <h2 id="osd-export-heading">Video overlay</h2>
@@ -88,7 +89,7 @@ export class LovelyOsdComponent {
 
   overlayData = computed<OverlayData | null>(() => {
     const s = this.session();
-    return s ? { track: s.track, sticks: s.sticks?.points ?? null, battery: s.battery } : null;
+    return s ? { track: s.track, sticks: s.sticks?.points ?? null, battery: s.battery, telemetry: s.telemetry?.points ?? null } : null;
   });
 
   /** "lovelyosd-btfl_012-s2": the log's name, safe for any file system. */
