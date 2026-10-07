@@ -11,6 +11,45 @@ export interface OverlayData {
   telemetry: TelemetryPoint[] | null;
 }
 
+export type ElementKey = 'timer' | 'rssi' | 'map' | 'speed' | 'battery' | 'sticks';
+
+export const ELEMENT_LABELS: Record<ElementKey, string> = {
+  timer: 'Flight timer', rssi: 'RSSI', map: 'Mini map', speed: 'Speed panel', battery: 'Battery panel', sticks: 'Sticks',
+};
+
+/**
+ * Where the user put an element: its centre as a fraction of the frame (0..1 across, 0..1 down) and a size multiplier.
+ * Fractions keep the layout identical at 1080p, 1440p and 4K.
+ */
+export interface ElementPlacement { x: number; y: number; scale: number }
+
+/** Only moved or resized elements are listed; the rest sit at their default spots. */
+export type OverlayLayout = Partial<Record<ElementKey, ElementPlacement>>;
+
+/** An element's box on a canvas, in pixels. */
+export interface PlacedElement { key: ElementKey; x: number; y: number; w: number; h: number; scale: number }
+
+/** Text items inside the panels that can be sized on their own. */
+export type ItemKey =
+  | 'timer.time' | 'rssi.value'
+  | 'speed.value' | 'speed.accel' | 'speed.alt' | 'speed.home' | 'speed.sats'
+  | 'battery.volts' | 'battery.cell' | 'battery.amps' | 'battery.mah' | 'battery.watts';
+
+export const ELEMENT_ITEMS: Partial<Record<ElementKey, { key: ItemKey; label: string }[]>> = {
+  timer: [{ key: 'timer.time', label: 'Time' }],
+  rssi: [{ key: 'rssi.value', label: 'RSSI value' }],
+  speed: [
+    { key: 'speed.value', label: 'Speed' }, { key: 'speed.accel', label: 'G-force' }, { key: 'speed.alt', label: 'Height' },
+    { key: 'speed.home', label: 'Distance from home' }, { key: 'speed.sats', label: 'Satellites' },
+  ],
+  battery: [
+    { key: 'battery.cell', label: 'Per-cell voltage' }, { key: 'battery.volts', label: 'Pack voltage' },
+    { key: 'battery.amps', label: 'Current' }, { key: 'battery.mah', label: 'mAh used' }, { key: 'battery.watts', label: 'Watts' },
+  ],
+};
+
+export const ITEM_SCALE_MIN = 0.5, ITEM_SCALE_MAX = 2;
+
 export interface OverlayOptions {
   showSticks: boolean;
   showSpeed: boolean;
@@ -40,7 +79,16 @@ export interface OverlayOptions {
   /** Betaflight OSD font to draw text with; null uses the built-in monospace font. */
   font: GlyphFont | null;
   speedUnit: SpeedUnit;
+  layout: OverlayLayout;
+  /** Text size multipliers for items inside panels; missing means 100%. */
+  itemScale: Partial<Record<ItemKey, number>>;
 }
+
+/** One piece of text in a panel row; `w` replaces measuring for drawn shapes (the built-in battery icon). */
+interface Part { s: string; size: number; weight: number; w?: number }
+interface Row { baseline: number; items: { key?: ItemKey; parts: Part[] }[] }
+/** A panel's size and its rows' baselines, in 1080p units at element scale 1. */
+interface Geometry { w: number; h: number; baselines: number[]; k: (item: ItemKey) => number }
 
 const ACCENT = '#9be564';
 const FONT = 'ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace';
@@ -52,9 +100,22 @@ let speedUnit: SpeedUnit = 'kmh';
 /** Unit strings: Betaflight's own symbols with an OSD font, plain text otherwise. */
 const units = () => glyphs
   ? { kph: speedUnit === 'mph' ? SYM.mph : SYM.kph, volt: SYM.volt, perCell: SYM.volt, amp: SYM.amp, mah: SYM.mah, watt: SYM.watt, m: SYM.m,
-      alt: SYM.alt, home: SYM.home, fly: SYM.fly, sat: SYM.sat, rssi: SYM.rssi }
+      alt: SYM.alt, home: SYM.home, fly: SYM.fly, rssi: SYM.rssi }
   : { kph: speedUnit === 'mph' ? 'mph' : 'km/h', volt: 'V', perCell: ' V/cell', amp: ' A', mah: ' mAh', watt: ' W', m: ' m',
-      alt: '▲ ', home: '⌂ ', fly: '', sat: 'SAT ', rssi: '' };
+      alt: '▲ ', home: '⌂ ', fly: '', rssi: '' };
+
+/**
+ * Text sizes shared by the speed and battery panels (1080p px), so their headline numbers, units and small readings
+ * match: the speed number is the same size as the per-cell voltage, and every small reading is the same size.
+ */
+const BIG = 36;
+const unitSize = () => (glyphs ? 28 : 22);
+const SMALL = 24;
+/** Panel height and row baselines shared by the speed and battery panels, so they line up side by side. */
+const ROW1 = 60, ROW2 = 106, TWO_ROW_H = 128;
+
+/** Satellite count: after Betaflight's satellite icon with an OSD font, or "24 SAT" in the built-in font. */
+const satText = (n: number) => (glyphs ? `${SYM.sat}${n}` : `${n} SAT`);
 
 /** Betaflight battery icon for a per-cell voltage (3.3 V empty .. 4.2 V full). */
 const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.round(((cell - 3.3) / 0.9) * 6)))];
@@ -69,6 +130,8 @@ export class OverlayRenderer {
   private telemetryTimes: number[];
   private hasRssi: boolean;
   private hasBaro: boolean;
+  /** The battery panel is shorter without a current sensor; fixed per flight so the box doesn't jump. */
+  private hasCurrent: boolean;
   /** mAh used up to each battery sample. */
   private mahAt: number[];
   /** Metres from home at each track point. */
@@ -83,6 +146,7 @@ export class OverlayRenderer {
     this.telemetryTimes = data.telemetry?.map(p => p[0]) ?? [];
     this.hasRssi = data.telemetry?.some(p => p[1] !== null) ?? false;
     this.hasBaro = data.telemetry?.some(p => p[2] !== null) ?? false;
+    this.hasCurrent = data.battery?.points[0]?.[2] != null;
 
     this.mahAt = [];
     let mah = 0;
@@ -113,25 +177,112 @@ export class OverlayRenderer {
   draw(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {
     const { width: W, height: H } = ctx.canvas;
     const u = H / 1080;
-    const m = 48 * u;
     ctx.clearRect(0, 0, W, H);
     glyphs = o.font;
     speedUnit = o.speedUnit;
 
-    if (o.showTimer) this.drawTimer(ctx, t, m, u, o);
-    if (o.showRssi && this.hasRssi) this.drawRssi(ctx, t, o.showTimer ? m + 226 * u : m, m, u, o);
-    if (o.showMap && this.mapXY.length > 1) this.drawMap(ctx, t, W - m - 300 * u, m, 300 * u, u, o);
-    if (o.showSpeed && this.trackTimes.length) this.drawSpeed(ctx, t, m, H - m, u, o);
-    if (o.showBattery && this.batteryTimes.length) this.drawBattery(ctx, t, W - m, H - m, u, o);
-    if (o.showSticks && this.data.sticks?.length) this.drawSticks(ctx, t, W / 2, H - m, u, o);
+    for (const p of this.placements(W, H, o)) {
+      const s = u * p.scale; // each element draws in its own scaled units, so text, icons and panels grow together
+      switch (p.key) {
+        case 'timer': this.drawTimer(ctx, t, p.x, p.y, s, o); break;
+        case 'rssi': this.drawRssi(ctx, t, p.x, p.y, s, o); break;
+        case 'map': this.drawMap(ctx, t, p.x, p.y, p.w, s, o); break;
+        case 'speed': this.drawSpeed(ctx, t, p.x, p.y, s, o); break;
+        case 'battery': this.drawBattery(ctx, t, p.x, p.y, s, o); break;
+        case 'sticks': this.drawSticks(ctx, t, p.x, p.y, s, o); break;
+      }
+    }
+  }
+
+  /**
+   * Every element that will be drawn, with its box on a W x H canvas, in drawing order (later ones on top).
+   * Moved elements sit centred on their placement; the rest use the default HUD layout.
+   */
+  placements(W: number, H: number, o: OverlayOptions): PlacedElement[] {
+    glyphs = o.font; // panel widths depend on the font being measured
+    speedUnit = o.speedUnit;
+    const u = H / 1080;
+    const m = 48 * u;
+    const out: PlacedElement[] = [];
+    // w and h are 1080p sizes at scale 1; (dx, dy) is the default top-left.
+    const add = (key: ElementKey, show: boolean, w: number, h: number, dx: number, dy: number) => {
+      if (!show) return;
+      const pl = o.layout?.[key];
+      const scale = pl?.scale ?? 1;
+      const pw = w * u * scale, ph = h * u * scale;
+      // Kept fully inside the frame, so growing a corner element pushes it inward instead of cutting it off.
+      const inside = (v: number, size: number, max: number) => Math.min(Math.max(0, v), Math.max(0, max - size));
+      out.push(pl
+        ? { key, x: inside(pl.x * W - pw / 2, pw, W), y: inside(pl.y * H - ph / 2, ph, H), w: pw, h: ph, scale }
+        : { key, x: dx, y: dy, w: pw, h: ph, scale });
+    };
+    const timer = this.geometry('timer', o), rssi = this.geometry('rssi', o);
+    const speed = this.geometry('speed', o), battery = this.geometry('battery', o);
+    add('timer', o.showTimer, timer.w, timer.h, m, m);
+    add('rssi', o.showRssi && this.hasRssi, rssi.w, rssi.h, o.showTimer ? m + (timer.w + 16) * u : m, m);
+    add('map', o.showMap && this.mapXY.length > 1, 300, 300, W - m - 300 * u, m);
+    add('speed', o.showSpeed && this.trackTimes.length > 0, speed.w, speed.h, m, H - m - speed.h * u);
+    add('battery', o.showBattery && this.batteryTimes.length > 0, battery.w, battery.h, W - m - battery.w * u, H - m - battery.h * u);
+    add('sticks', o.showSticks && !!this.data.sticks?.length, 330, 150, W / 2 - 165 * u, H - m - 150 * u);
+    return out;
   }
 
   // ---------- elements ----------
 
-  private drawTimer(ctx: CanvasRenderingContext2D, t: number, m: number, u: number, o: OverlayOptions) {
-    panel(ctx, m, m, 210 * u, 92 * u, 18 * u, o.panelOpacity);
-    if (!glyphs) label(ctx, 'FLIGHT TIME', m + 22 * u, m + 30 * u, 20 * u); // OSD fonts say it with the quad icon
-    text(ctx, units().fly + clock(t), m + 22 * u, m + 74 * u, 46 * u, 'left', 700);
+  /**
+   * Panel layout from the default design plus whatever the user resized. Each row's baseline moves down by the extra
+   * height of the rows above it (and most of its own), and the panel widens when a row's widest-case text no longer
+   * fits, so nothing overlaps. With every item at 100% this is exactly the original layout.
+   */
+  private geometry(key: 'timer' | 'rssi' | 'speed' | 'battery', o: OverlayOptions): Geometry {
+    const k = (item: ItemKey) => Math.min(ITEM_SCALE_MAX, Math.max(ITEM_SCALE_MIN, o.itemScale?.[item] ?? 1));
+    const U = units();
+    const lbl = (s: string): Row['items'] => (glyphs ? [] : [{ parts: [{ s, size: 20, weight: 700 }] }]);
+    switch (key) {
+      case 'timer':
+        return fit(210, 92, 22, k, [
+          { baseline: 30, items: lbl('FLIGHT TIME') },
+          { baseline: 74, items: [{ key: 'timer.time', parts: [{ s: U.fly + '88:88', size: 46, weight: 700 }] }] },
+        ]);
+      case 'rssi':
+        return fit(170, 92, 22, k, [
+          { baseline: 30, items: lbl('RSSI') },
+          { baseline: 74, items: [{ key: 'rssi.value', parts: [{ s: `${U.rssi}99${glyphs ? '' : '%'}`, size: 46, weight: 700 }] }] },
+        ]);
+      case 'speed':
+        // No label: the speed unit says what it is. Same rows and text sizes as the battery panel.
+        return fit(400, TWO_ROW_H, 26, k, [
+          { baseline: ROW1, items: [
+            { key: 'speed.value', parts: [{ s: '188', size: BIG, weight: 800 }, { s: U.kph, size: unitSize(), weight: 600 }] },
+            { key: 'speed.accel', parts: [{ s: '9.9G', size: SMALL, weight: 700 }] },
+          ] },
+          { baseline: ROW2, items: [
+            { key: 'speed.alt', parts: [{ s: `${U.alt}888${U.m}`, size: SMALL, weight: 700 }] },
+            { key: 'speed.home', parts: [{ s: `${U.home}8888${U.m}`, size: SMALL, weight: 700 }] },
+            { key: 'speed.sats', parts: [{ s: satText(88), size: SMALL, weight: 700 }] },
+          ] },
+        ]);
+      case 'battery': {
+        const icon: Part = glyphs ? { s: SYM.batt[0], size: BIG, weight: 700 } : { s: '', size: BIG, weight: 700, w: 26 };
+        const rows: Row[] = [{ baseline: ROW1, items: [
+          { key: 'battery.cell', parts: [icon, { s: '4.20', size: BIG, weight: 800 }, { s: glyphs ? U.volt : 'V/cell', size: unitSize(), weight: 600 }] },
+          { key: 'battery.volts', parts: [{ s: `88.8${glyphs ? U.volt : ' V'}`, size: SMALL, weight: 600 }] },
+        ] }];
+        if (this.hasCurrent) rows.push({ baseline: ROW2, items: [
+          { key: 'battery.amps', parts: [{ s: `188.8${U.amp}`, size: SMALL, weight: 700 }] },
+          { key: 'battery.mah', parts: [{ s: `8888${U.mah}`, size: SMALL, weight: 700 }] },
+          { key: 'battery.watts', parts: [{ s: `8888${U.watt}`, size: SMALL, weight: 700 }] },
+        ] });
+        return fit(400, this.hasCurrent ? TWO_ROW_H : 86, 26, k, rows);
+      }
+    }
+  }
+
+  private drawTimer(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, u: number, o: OverlayOptions) {
+    const g = this.geometry('timer', o);
+    panel(ctx, x, y, g.w * u, g.h * u, 18 * u, o.panelOpacity);
+    if (!glyphs) label(ctx, 'FLIGHT TIME', x + 22 * u, y + g.baselines[0] * u, 20 * u); // OSD fonts say it with the quad icon
+    text(ctx, units().fly + clock(t), x + 22 * u, y + g.baselines[1] * u, 46 * g.k('timer.time') * u, 'left', 700);
   }
 
   /** Betaflight shows RSSI as 0..99 after its antenna glyph; same here, with a % in the built-in font. */
@@ -140,77 +291,83 @@ export class OverlayRenderer {
     if (p[1] === null) return;
     const value = Math.min(99, Math.round(p[1]));
     const warn = value < 20 ? '#ffb340' : undefined; // Betaflight's default osd_rssi_alarm
-    const w = 170 * u;
-    panel(ctx, x, y, w, 92 * u, 18 * u, o.panelOpacity);
-    if (!glyphs) label(ctx, 'RSSI', x + 22 * u, y + 30 * u, 20 * u);
-    text(ctx, `${units().rssi}${value}${glyphs ? '' : '%'}`, x + 22 * u, y + 74 * u, 46 * u, 'left', 700, 1, warn);
+    const g = this.geometry('rssi', o);
+    panel(ctx, x, y, g.w * u, g.h * u, 18 * u, o.panelOpacity);
+    if (!glyphs) label(ctx, 'RSSI', x + 22 * u, y + g.baselines[0] * u, 20 * u);
+    text(ctx, `${units().rssi}${value}${glyphs ? '' : '%'}`, x + 22 * u, y + g.baselines[1] * u, 46 * g.k('rssi.value') * u, 'left', 700, 1, warn);
   }
 
-  private drawSpeed(ctx: CanvasRenderingContext2D, t: number, x: number, bottom: number, u: number, o: OverlayOptions) {
+  private drawSpeed(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, u: number, o: OverlayOptions) {
     const i = nearest(this.trackTimes, t);
     const p = this.data.track!.points[i];
-    // Same width as the battery panel. Line 1: speed and acceleration; line 2: altitude, home distance, satellites.
-    const w = 400 * u, h = 160 * u, y = bottom - h;
-    panel(ctx, x, y, w, h, 22 * u, o.panelOpacity);
-    if (!glyphs) label(ctx, 'SPEED', x + 26 * u, y + 36 * u, 20 * u);
+    // Same width as the battery panel by default. Line 1: speed and acceleration; line 2: altitude, home distance, satellites.
+    const g = this.geometry('speed', o);
+    const w = g.w * u, [b1, b2] = g.baselines.map(b => y + b * u);
+    panel(ctx, x, y, w, g.h * u, 22 * u, o.panelOpacity);
     const U = units();
+    const sv = g.k('speed.value');
     const speed = speedFromMs(p[4], o.speedUnit).toFixed(0);
-    text(ctx, speed, x + 26 * u, y + 96 * u, 54 * u, 'left', 800);
-    text(ctx, U.kph, x + 26 * u + measure(ctx, speed, 54 * u, 800) + 10 * u, y + 96 * u, glyphs ? 30 * u : 24 * u, 'left', 600, 0.85);
-    if (p[6] !== undefined) text(ctx, `${(p[6] / 9.81).toFixed(1)}G`, x + w - 26 * u, y + 96 * u, 32 * u, 'right', 700);
-    // Home sits a little right of centre: the altitude reading on the left is usually the wider of the two neighbours.
+    text(ctx, speed, x + 26 * u, b1, BIG * sv * u, 'left', 800);
+    text(ctx, U.kph, x + 26 * u + measure(ctx, speed, BIG * sv * u, 800) + 8 * sv * u, b1, unitSize() * sv * u, 'left', 600, 0.85);
+    if (p[6] !== undefined) text(ctx, `${(p[6] / 9.81).toFixed(1)}G`, x + w - 26 * u, b1, SMALL * g.k('speed.accel') * u, 'right', 700);
     const tl = o.altSource === 'baro' && this.hasBaro ? this.data.telemetry![nearest(this.telemetryTimes, t)] : null;
     const alt = tl?.[2] ?? p[3];
-    text(ctx, `${U.alt}${alt.toFixed(0)}${U.m}`, x + 26 * u, y + 140 * u, 26 * u, 'left', 700);
-    text(ctx, `${U.home}${this.homeDist[i].toFixed(0)}${U.m}`, x + w * 0.55, y + 140 * u, 26 * u, 'center', 700);
-    if (p[5] !== undefined) text(ctx, `${U.sat}${p[5]}`, x + w - 26 * u, y + 140 * u, 26 * u, 'right', 700);
+    spreadRow(ctx, x + 26 * u, x + w - 26 * u, b2, [
+      { s: `${U.alt}${alt.toFixed(0)}${U.m}`, size: SMALL * g.k('speed.alt') * u },
+      { s: `${U.home}${this.homeDist[i].toFixed(0)}${U.m}`, size: SMALL * g.k('speed.home') * u },
+      p[5] !== undefined ? { s: satText(p[5]), size: SMALL * g.k('speed.sats') * u } : null,
+    ]);
   }
 
-  private drawBattery(ctx: CanvasRenderingContext2D, t: number, right: number, bottom: number, u: number, o: OverlayOptions) {
+  private drawBattery(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, u: number, o: OverlayOptions) {
     const bat = this.data.battery!;
     const i = nearest(this.batteryTimes, t);
     const [, v, a] = bat.points[i];
     const cell = v / bat.cells;
     // Two lines: icon, pack voltage and per-cell average; then amps, mAh used and watts.
-    const w = 400 * u, h = a !== null ? 128 * u : 86 * u, x = right - w, y = bottom - h;
-    panel(ctx, x, y, w, h, 22 * u, o.panelOpacity);
+    const g = this.geometry('battery', o);
+    const w = g.w * u;
+    panel(ctx, x, y, w, g.h * u, 22 * u, o.panelOpacity);
     const U = units();
     const low = cell < 3.5;
     const warn = low ? '#ffb340' : undefined;
-    const line1 = y + 60 * u;
+    const line1 = y + g.baselines[0] * u;
+    // Per-cell average is the headline (it reads the same on any pack); the pack total is the smaller figure on the right.
+    const kc = g.k('battery.cell');
 
     // Battery-level icon: Betaflight's own glyph with an OSD font, a drawn one otherwise.
     let vx = x + 26 * u;
     if (glyphs) {
-      text(ctx, batteryIcon(cell), vx, line1, 36 * u, 'left', 700);
-      vx += measure(ctx, batteryIcon(cell), 36 * u, 700) + 6 * u;
+      text(ctx, batteryIcon(cell), vx, line1, BIG * kc * u, 'left', 700);
+      vx += measure(ctx, batteryIcon(cell), BIG * kc * u, 700) + 6 * kc * u;
     } else {
-      drawBatteryIcon(ctx, vx, line1 - 32 * u, 18 * u, 34 * u, cell, warn);
-      vx += 32 * u;
+      drawBatteryIcon(ctx, vx, line1 - 32 * kc * u, 18 * kc * u, 34 * kc * u, cell, warn);
+      vx += 32 * kc * u;
     }
-    const volts = v.toFixed(1);
-    text(ctx, volts, vx, line1, 36 * u, 'left', 800, 1, warn);
-    text(ctx, U.volt, vx + measure(ctx, volts, 36 * u, 800) + 8 * u, line1, glyphs ? 28 * u : 22 * u, 'left', 600, 0.85);
-    text(ctx, `${cell.toFixed(2)}${U.perCell}`, x + w - 26 * u, line1, 24 * u, 'right', 600, 0.9, warn);
+    const perCell = cell.toFixed(2);
+    text(ctx, perCell, vx, line1, BIG * kc * u, 'left', 800, 1, warn);
+    text(ctx, glyphs ? U.volt : 'V/cell', vx + measure(ctx, perCell, BIG * kc * u, 800) + 8 * kc * u, line1,
+         unitSize() * kc * u, 'left', 600, 0.85, warn);
+    text(ctx, `${v.toFixed(1)}${glyphs ? U.volt : ' V'}`, x + w - 26 * u, line1, SMALL * g.k('battery.volts') * u, 'right', 600, 0.9, warn);
 
-    if (a !== null) {
-      const line2 = y + 106 * u;
-      text(ctx, `${a.toFixed(1)}${U.amp}`, x + 26 * u, line2, 24 * u, 'left', 700);
-      text(ctx, `${Math.round(this.mahAt[i])}${U.mah}`, x + w / 2, line2, 24 * u, 'center', 700);
-      text(ctx, `${Math.round(v * a)}${U.watt}`, x + w - 26 * u, line2, 24 * u, 'right', 700);
+    if (a !== null && g.baselines.length > 1) {
+      spreadRow(ctx, x + 26 * u, x + w - 26 * u, y + g.baselines[1] * u, [
+        { s: `${a.toFixed(1)}${U.amp}`, size: SMALL * g.k('battery.amps') * u },
+        { s: `${Math.round(this.mahAt[i])}${U.mah}`, size: SMALL * g.k('battery.mah') * u },
+        { s: `${Math.round(v * a)}${U.watt}`, size: SMALL * g.k('battery.watts') * u },
+      ]);
     }
   }
 
   /** Blackbox Explorer style: dark squares, thin crosshairs, a red dot, raw rcCommand values around the pair. */
-  private drawSticks(ctx: CanvasRenderingContext2D, t: number, cx: number, bottom: number, u: number, o: OverlayOptions) {
+  private drawSticks(ctx: CanvasRenderingContext2D, t: number, x: number, top: number, u: number, o: OverlayOptions) {
     const size = 150 * u, gap = 30 * u, dot = 10 * u;
     const raw = sampleSticks(this.data.sticks!, t);
     const now = stickAxes(raw);
     const [lx, ly, rx, ry] = MODES[o.stickMode];
-    const top = bottom - size;
     const sides = [
-      { side: 'left', left: cx - gap / 2 - size, ax: lx, ay: ly },
-      { side: 'right', left: cx + gap / 2, ax: rx, ay: ry },
+      { side: 'left', left: x, ax: lx, ay: ly },
+      { side: 'right', left: x + size + gap, ax: rx, ay: ry },
     ] as const;
 
     const box = hexToRgb(o.stickBoxColor, [28, 28, 28]);
@@ -455,6 +612,46 @@ function measure(ctx: CanvasRenderingContext2D, s: string, size: number, weight:
   const w = ctx.measureText(s).width;
   ctx.restore();
   return w;
+}
+
+/**
+ * Three readings on one line: first flush left, last flush right, and the middle one centred in the gap between them,
+ * so resizing any of them never makes two collide. A null last item leaves the middle centred in the remaining space.
+ */
+function spreadRow(ctx: CanvasRenderingContext2D, left: number, right: number, baseline: number,
+                   items: [{ s: string; size: number }, { s: string; size: number }, { s: string; size: number } | null]) {
+  const [a, b, c] = items;
+  text(ctx, a.s, left, baseline, a.size, 'left', 700);
+  if (c) text(ctx, c.s, right, baseline, c.size, 'right', 700);
+  const gapL = left + measure(ctx, a.s, a.size, 700);
+  const gapR = c ? right - measure(ctx, c.s, c.size, 700) : right;
+  text(ctx, b.s, (gapL + gapR) / 2, baseline, b.size, 'center', 700);
+}
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+/** See OverlayRenderer.geometry. Sizes are 1080p units; `pad` is the left/right inset; items in a row sit 20 apart. */
+function fit(w0: number, h0: number, pad: number, k: (item: ItemKey) => number, rows: Row[]): Geometry {
+  measureCtx ??= document.createElement('canvas').getContext('2d')!;
+  const scaleOf = (key?: ItemKey) => (key ? k(key) : 1);
+  let shift = 0, w = w0;
+  const baselines: number[] = [];
+  for (const r of rows) {
+    const sizes = r.items.flatMap(i => i.parts.map(p => ({ base: p.size, now: p.size * scaleOf(i.key) })));
+    const delta = sizes.length ? Math.max(...sizes.map(z => z.now)) - Math.max(...sizes.map(z => z.base)) : 0;
+    // Most of a row's growth goes above its baseline (text grows upwards from it), the rest pushes the rows below.
+    baselines.push(r.baseline + shift + delta * 0.8);
+    shift += delta;
+    const rowW = (scaled: boolean) => pad * 2 + 20 * Math.max(0, r.items.length - 1) + r.items.reduce((sum, i) => {
+      const sc = scaled ? scaleOf(i.key) : 1;
+      return sum + i.parts.reduce((acc, p, n) =>
+        acc + (n ? 10 * sc : 0) + (p.w !== undefined ? p.w * sc : measure(measureCtx!, p.s, p.size * sc, p.weight)), 0);
+    }, 0);
+    // Grow only by what resizing added: the default design already decides how tight its own rows are.
+    const before = Math.max(w0, rowW(false));
+    w = Math.max(w, w0 + Math.max(0, rowW(true) - before));
+  }
+  return { w, h: h0 + shift, baselines, k };
 }
 
 function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {

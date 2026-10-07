@@ -1,6 +1,7 @@
 import { Component, ElementRef, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { OverlayData, OverlayOptions, OverlayRenderer } from './overlay-renderer';
+import { ELEMENT_ITEMS, ELEMENT_LABELS, ElementKey, ElementPlacement, ITEM_SCALE_MAX, ITEM_SCALE_MIN, ItemKey, OverlayData, OverlayLayout,
+  OverlayOptions, OverlayRenderer } from './overlay-renderer';
 import { MovWriter, canSaveToDisk, diskMovWriter, memoryMovWriter } from './mov-writer';
 import { GlyphFont, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font';
 import { UnitsService } from '../units.service';
@@ -43,6 +44,51 @@ function readTrailIntensity(): number {
   return 1;
 }
 
+const LAYOUT_KEY = 'gitdrone-overlay-layout';
+const SCALE_MIN = 0.5, SCALE_MAX = 2;
+/** The preview canvas is always drawn at 1080p; placements are fractions, so this is only for pointer maths. */
+const PREVIEW_W = 1920, PREVIEW_H = 1080;
+
+/** Moved/resized elements remembered in this browser. Anything malformed is dropped, so that element goes back to default. */
+function readLayout(): OverlayLayout {
+  const layout: OverlayLayout = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null');
+    for (const key of Object.keys(ELEMENT_LABELS) as ElementKey[]) {
+      const v = saved?.[key];
+      const ok = (n: unknown, lo: number, hi: number) => typeof n === 'number' && n >= lo && n <= hi;
+      if (v && ok(v.x, 0, 1) && ok(v.y, 0, 1) && ok(v.scale, SCALE_MIN, SCALE_MAX)) layout[key] = { x: v.x, y: v.y, scale: v.scale };
+    }
+  } catch { /* defaults */ }
+  return layout;
+}
+
+function saveLayout(layout: OverlayLayout) {
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* not remembered */ }
+}
+
+const ITEMS_KEY = 'gitdrone-overlay-item-sizes';
+type ItemScales = Partial<Record<ItemKey, number>>;
+
+/** Text sizes inside panels, remembered in this browser. Unknown keys and out-of-range values are dropped. */
+function readItemScales(): ItemScales {
+  const out: ItemScales = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(ITEMS_KEY) ?? 'null');
+    for (const item of Object.values(ELEMENT_ITEMS).flat()) {
+      const v = saved?.[item.key];
+      if (typeof v === 'number' && v >= ITEM_SCALE_MIN && v <= ITEM_SCALE_MAX) out[item.key] = v;
+    }
+  } catch { /* defaults */ }
+  return out;
+}
+
+function saveItemScales(scales: ItemScales) {
+  try { localStorage.setItem(ITEMS_KEY, JSON.stringify(scales)); } catch { /* not remembered */ }
+}
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
 function saveColors(o: typeof DEFAULT_COLORS) {
   const colors = Object.fromEntries((Object.keys(DEFAULT_COLORS) as ColorKey[]).map(k => [k, o[k]]));
   try { localStorage.setItem(COLORS_KEY, JSON.stringify(colors)); } catch { /* not remembered */ }
@@ -57,7 +103,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             <h2 id="preview-heading">Preview</h2>
             <div class="stage" [class.dark]="darkBackdrop()">
               <canvas #preview width="1920" height="1080" role="img"
-                      [attr.aria-label]="'Overlay preview at ' + previewClock()"></canvas>
+                      [attr.aria-label]="'Overlay preview at ' + previewClock() + '. Drag an element to move it; the layout controls below do the same from the keyboard.'"
+                      [style.cursor]="dragging() ? 'grabbing' : hoverKey() ? 'grab' : 'default'"
+                      (pointerdown)="onPointerDown($event)" (pointermove)="onPointerMove($event)"
+                      (pointerup)="onPointerUp()" (pointercancel)="onPointerUp()" (pointerleave)="hoverKey.set(null)"></canvas>
             </div>
             <div class="scrub">
               <label for="previewTime" class="sr-only">Preview time</label>
@@ -66,6 +115,108 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               <span class="mono">{{ previewClock() }}</span>
               <label class="check"><input type="checkbox" [ngModel]="darkBackdrop()" (ngModelChange)="darkBackdrop.set($event)" /> Dark backdrop</label>
             </div>
+
+            <fieldset class="layout-edit" [disabled]="busy()">
+              <legend>Layout</legend>
+              <p class="hint">Drag an element on the preview to move it, or pick one here. Positions are the element's centre.</p>
+              @if (current(); as c) {
+                <div class="layout-grid">
+                  <div class="field">
+                    <label for="el">Element</label>
+                    <select id="el" [ngModel]="c.key" (ngModelChange)="selected.set($event)">
+                      @for (p of placed(); track p.key) { <option [value]="p.key">{{ labels[p.key] }}</option> }
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="el-size">Size: {{ (c.scale * 100).toFixed(0) }}%</label>
+                    <input id="el-size" type="range" [min]="scaleMin" [max]="scaleMax" step="0.05" [ngModel]="c.scale"
+                           (ngModelChange)="updatePlacement('scale', +$event)" />
+                  </div>
+                  <div class="field">
+                    <label for="el-x">Across: {{ (c.x * 100).toFixed(0) }}%</label>
+                    <input id="el-x" type="range" min="0" max="1" step="0.005" [ngModel]="c.x" (ngModelChange)="updatePlacement('x', +$event)" />
+                  </div>
+                  <div class="field">
+                    <label for="el-y">Down: {{ (c.y * 100).toFixed(0) }}%</label>
+                    <input id="el-y" type="range" min="0" max="1" step="0.005" [ngModel]="c.y" (ngModelChange)="updatePlacement('y', +$event)" />
+                  </div>
+                </div>
+                @if (items[c.key]; as list) {
+                  <fieldset class="item-sizes">
+                    <legend>Text sizes in the {{ labels[c.key].toLowerCase() }}</legend>
+                    <div class="layout-grid">
+                      @for (it of list; track it.key) {
+                        <div class="field">
+                          <label [for]="'item-' + it.key">{{ it.label }}: {{ (itemScale(it.key) * 100).toFixed(0) }}%</label>
+                          <input [id]="'item-' + it.key" type="range" [min]="itemMin" [max]="itemMax" step="0.05"
+                                 [ngModel]="itemScale(it.key)" (ngModelChange)="setItemScale(it.key, +$event)" />
+                        </div>
+                      }
+                    </div>
+                  </fieldset>
+                }
+                @if (c.key === 'sticks') {
+                  <fieldset class="item-sizes">
+                    <legend>Stick settings</legend>
+                    <div class="layout-grid">
+                      <div class="field">
+                        <label for="mode">Stick mode</label>
+                        <select id="mode" [ngModel]="opts().stickMode" (ngModelChange)="setStickMode(+$event)">
+                          @for (m of [1, 2, 3, 4]; track m) { <option [value]="m">Mode {{ m }}</option> }
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label class="check"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" /> Stick trails (motion blur)</label>
+                        <label for="trail-intensity">Trail intensity: {{ (opts().stickTrailIntensity * 100).toFixed(0) }}%</label>
+                        <input id="trail-intensity" type="range" min="0.25" max="2" step="0.05" [ngModel]="opts().stickTrailIntensity"
+                               (ngModelChange)="setTrailIntensity(+$event)" [disabled]="!opts().stickTrails" />
+                      </div>
+                    </div>
+                  </fieldset>
+                  <fieldset class="item-sizes">
+                    <legend>Stick colours</legend>
+                    <div class="colors">
+                      <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)" /> Dot</label>
+                      <label class="color"><input type="color" [ngModel]="opts().stickTrailColor" (ngModelChange)="setColor('stickTrailColor', $event)"
+                             [disabled]="!opts().stickTrails" /> Trail</label>
+                      <label class="color"><input type="color" [ngModel]="opts().stickBoxColor" (ngModelChange)="setColor('stickBoxColor', $event)" /> Background</label>
+                      <label class="color"><input type="color" [ngModel]="opts().stickCrossColor" (ngModelChange)="setColor('stickCrossColor', $event)" /> Crosshair</label>
+                      <button class="link" type="button" (click)="resetColors(stickColors)">Reset colours</button>
+                    </div>
+                  </fieldset>
+                }
+                @if (c.key === 'speed' && hasBaro()) {
+                  <fieldset class="item-sizes">
+                    <legend>Speed panel settings</legend>
+                    <div class="layout-grid">
+                      <div class="field">
+                        <label for="alt-source">Height from</label>
+                        <select id="alt-source" [ngModel]="opts().altSource" (ngModelChange)="set('altSource', $event)">
+                          <option value="gps">GPS (matches the flight stats)</option>
+                          <option value="baro">Barometer (smoother)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </fieldset>
+                }
+                @if (c.key === 'map') {
+                  <fieldset class="item-sizes">
+                    <legend>Mini map colours</legend>
+                    <div class="colors">
+                      <label class="color"><input type="color" [ngModel]="opts().pathRecentColor" (ngModelChange)="setColor('pathRecentColor', $event)" /> Recent path</label>
+                      <label class="color"><input type="color" [ngModel]="opts().pathOldColor" (ngModelChange)="setColor('pathOldColor', $event)" /> Older path</label>
+                      <button class="link" type="button" (click)="resetColors(pathColors)">Reset colours</button>
+                    </div>
+                  </fieldset>
+                }
+                <div class="layout-actions">
+                  <button class="link" type="button" (click)="resetElement(c.key)" [disabled]="!isCustom(c.key)">Reset {{ labels[c.key] }}</button>
+                  <button class="link" type="button" (click)="resetLayout()" [disabled]="!hasCustomLayout()">Reset whole layout</button>
+                </div>
+              } @else {
+                <p class="hint">Turn on an element under Show to place it.</p>
+              }
+            </fieldset>
           </section>
 
           <section class="panel options" aria-labelledby="options-heading">
@@ -100,51 +251,12 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             <fieldset class="field" [disabled]="busy()">
               <legend>Show</legend>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSpeed" (ngModelChange)="set('showSpeed', $event)" [disabled]="!data().track" /> Speed, height, distance</label>
-              @if (hasBaro() && data().track) {
-                <div class="field indent trail">
-                  <label for="alt-source">Height from</label>
-                  <select id="alt-source" [ngModel]="opts().altSource" (ngModelChange)="set('altSource', $event)" [disabled]="busy() || !opts().showSpeed">
-                    <option value="gps">GPS (matches the flight stats)</option>
-                    <option value="baro">Barometer (smoother)</option>
-                  </select>
-                </div>
-              }
               <label class="check"><input type="checkbox" [ngModel]="opts().showBattery" (ngModelChange)="set('showBattery', $event)" [disabled]="!data().battery" /> Battery</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data().sticks" /> Sticks</label>
-              <label class="check indent"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" [disabled]="!data().sticks || !opts().showSticks" /> Stick trails (motion blur)</label>
-              <div class="field indent trail">
-                <label for="trail-intensity">Trail intensity: {{ (opts().stickTrailIntensity * 100).toFixed(0) }}%</label>
-                <input id="trail-intensity" type="range" min="0.25" max="2" step="0.05" [ngModel]="opts().stickTrailIntensity"
-                       (ngModelChange)="setTrailIntensity(+$event)" [disabled]="busy() || !data().sticks || !opts().showSticks || !opts().stickTrails" />
-              </div>
-              <div class="colors indent">
-                <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)"
-                       [disabled]="!data().sticks || !opts().showSticks" /> Dot</label>
-                <label class="color"><input type="color" [ngModel]="opts().stickTrailColor" (ngModelChange)="setColor('stickTrailColor', $event)"
-                       [disabled]="!data().sticks || !opts().showSticks || !opts().stickTrails" /> Trail</label>
-                <label class="color"><input type="color" [ngModel]="opts().stickBoxColor" (ngModelChange)="setColor('stickBoxColor', $event)"
-                       [disabled]="!data().sticks || !opts().showSticks" /> Background</label>
-                <label class="color"><input type="color" [ngModel]="opts().stickCrossColor" (ngModelChange)="setColor('stickCrossColor', $event)"
-                       [disabled]="!data().sticks || !opts().showSticks" /> Crosshair</label>
-                <button class="link" type="button" (click)="resetColors(stickColors)" [disabled]="!opts().showSticks">Reset</button>
-              </div>
               <label class="check"><input type="checkbox" [ngModel]="opts().showMap" (ngModelChange)="set('showMap', $event)" [disabled]="!data().track" /> Mini map</label>
-              <div class="colors indent">
-                <label class="color"><input type="color" [ngModel]="opts().pathRecentColor" (ngModelChange)="setColor('pathRecentColor', $event)"
-                       [disabled]="!data().track || !opts().showMap" /> Recent path</label>
-                <label class="color"><input type="color" [ngModel]="opts().pathOldColor" (ngModelChange)="setColor('pathOldColor', $event)"
-                       [disabled]="!data().track || !opts().showMap" /> Older path</label>
-                <button class="link" type="button" (click)="resetColors(pathColors)" [disabled]="!opts().showMap">Reset</button>
-              </div>
               <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" /> Flight timer</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi()" /> RSSI</label>
             </fieldset>
-            <div class="field">
-              <label for="mode">Stick mode</label>
-              <select id="mode" [ngModel]="opts().stickMode" (ngModelChange)="setStickMode(+$event)" [disabled]="busy()">
-                @for (m of [1, 2, 3, 4]; track m) { <option [value]="m">Mode {{ m }}</option> }
-              </select>
-            </div>
             <div class="field">
               <label for="opacity">Panel background: {{ (opts().panelOpacity * 100).toFixed(0) }}%</label>
               <input id="opacity" type="range" min="0" max="0.8" step="0.05" [ngModel]="opts().panelOpacity"
@@ -206,13 +318,20 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     canvas { display: block; width: 100%; height: auto; }
     .scrub { display: flex; align-items: center; gap: .75rem; margin-top: .6rem; flex-wrap: wrap; }
     .scrub input[type=range] { flex: 1 1 12rem; accent-color: var(--accent); }
+    canvas { touch-action: none; } /* dragging an element shouldn't scroll the page on touch screens */
+    .layout-edit { margin: 1rem 0 0; }
+    .layout-edit .hint { margin: 0 0 .5rem; }
+    .layout-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem 1rem; }
+    .layout-grid .field { margin: 0; }
+    .layout-grid label { font-weight: normal; font-size: .92rem; }
+    .layout-grid input[type=range] { accent-color: var(--accent); }
+    .item-sizes { margin: .6rem 0 0; padding: .5rem 0 0; border: 0; border-top: 1px solid var(--line); }
+    .item-sizes legend { font-weight: 600; font-size: .92rem; padding: 0; }
+    .layout-actions { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: .4rem; font-size: .92rem; }
     .check { display: flex; align-items: center; justify-content: flex-start; gap: .45rem; font-weight: normal; margin: .2rem 0; }
     /* The site-wide .field input rule makes inputs full width; checkboxes shouldn't be. */
     .check input { width: auto; margin: 0; }
-    .check.indent { margin-left: 1.6rem; }
-    .field.trail { margin: .2rem 0 .3rem 1.6rem; font-size: .92rem; }
-    .field.trail label { font-weight: normal; }
-    .colors { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: .2rem 0 .3rem 1.6rem; font-size: .92rem; }
+    .colors { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: .2rem 0 .3rem; font-size: .92rem; }
     .color { display: inline-flex; align-items: center; gap: .4rem; font-weight: normal; }
     /* Colour wells: override the site-wide full-width input rule. */
     .color input { width: 2.2rem; height: 1.6rem; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
@@ -264,9 +383,31 @@ export class OverlayExportComponent {
   opts = signal<OverlayOptions>({
     showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true, showRssi: true, altSource: 'gps',
     ...readColors(), stickTrailIntensity: readTrailIntensity(),
-    stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh',
+    stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh', layout: readLayout(), itemScale: readItemScales(),
   });
   private units = inject(UnitsService);
+
+  // ---- layout editing ----
+  readonly labels = ELEMENT_LABELS;
+  readonly scaleMin = SCALE_MIN;
+  readonly scaleMax = SCALE_MAX;
+  /** Elements currently drawn, with their boxes on the 1080p preview. */
+  placed = computed(() => this.renderer().placements(PREVIEW_W, PREVIEW_H, this.opts()));
+  /** Picked by click or from the list; null until the user starts editing, so no outline shows before then. */
+  selected = signal<ElementKey | null>(null);
+  hoverKey = signal<ElementKey | null>(null);
+  dragging = signal(false);
+  private drag: { key: ElementKey; dx: number; dy: number } | null = null;
+  hasCustomLayout = computed(() => Object.keys(this.opts().layout).length > 0 || Object.keys(this.opts().itemScale).length > 0);
+  readonly items = ELEMENT_ITEMS;
+  readonly itemMin = ITEM_SCALE_MIN;
+  readonly itemMax = ITEM_SCALE_MAX;
+  /** The element the controls edit, as centre fractions and scale. */
+  current = computed(() => {
+    const placed = this.placed();
+    const p = placed.find(e => e.key === this.selected()) ?? placed[0];
+    return p ? { key: p.key, x: (p.x + p.w / 2) / PREVIEW_W, y: (p.y + p.h / 2) / PREVIEW_H, scale: p.scale } : null;
+  });
 
   previewTime = linkedSignal({ source: this.range, computation: r => Math.min(60, r.seconds / 2) });
   previewClock = computed(() => clock(this.previewTime()));
@@ -343,6 +484,98 @@ export class OverlayExportComponent {
     this.set('stickMode', (v === 1 || v === 3 || v === 4 ? v : 2) as StickMode);
   }
 
+  private setPlacement(key: ElementKey, placement: ElementPlacement, save = true) {
+    this.opts.update(o => ({ ...o, layout: { ...o.layout, [key]: placement } }));
+    if (save) saveLayout(this.opts().layout);
+  }
+
+  updatePlacement(field: keyof ElementPlacement, value: number) {
+    const c = this.current();
+    if (!c || !Number.isFinite(value)) return;
+    this.selected.set(c.key);
+    const next = { x: c.x, y: c.y, scale: c.scale, [field]: value };
+    next.scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, next.scale));
+    this.setPlacement(c.key, { x: clamp01(next.x), y: clamp01(next.y), scale: next.scale });
+  }
+
+  itemScale(key: ItemKey) {
+    return this.opts().itemScale[key] ?? 1;
+  }
+
+  setItemScale(key: ItemKey, value: number) {
+    if (!Number.isFinite(value)) return;
+    const v = Math.min(ITEM_SCALE_MAX, Math.max(ITEM_SCALE_MIN, value));
+    this.opts.update(o => ({ ...o, itemScale: { ...o.itemScale, [key]: v } }));
+    saveItemScales(this.opts().itemScale);
+  }
+
+  /** True when the element is moved, resized, or has resized text. */
+  isCustom(key: ElementKey) {
+    const o = this.opts();
+    return !!o.layout[key] || (ELEMENT_ITEMS[key] ?? []).some(i => o.itemScale[i.key] !== undefined);
+  }
+
+  /** Back to its default spot, size and text sizes. */
+  resetElement(key: ElementKey) {
+    const itemKeys = new Set<string>((ELEMENT_ITEMS[key] ?? []).map(i => i.key));
+    this.opts.update(o => ({
+      ...o,
+      layout: Object.fromEntries(Object.entries(o.layout).filter(([k]) => k !== key)),
+      itemScale: Object.fromEntries(Object.entries(o.itemScale).filter(([k]) => !itemKeys.has(k))),
+    }));
+    saveLayout(this.opts().layout);
+    saveItemScales(this.opts().itemScale);
+  }
+
+  resetLayout() {
+    this.opts.update(o => ({ ...o, layout: {}, itemScale: {} }));
+    saveLayout({});
+    saveItemScales({});
+  }
+
+  /** Pointer position in preview canvas pixels. */
+  private canvasPoint(e: PointerEvent) {
+    const c = this.canvas()!.nativeElement;
+    const r = c.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * PREVIEW_W, y: ((e.clientY - r.top) / r.height) * PREVIEW_H };
+  }
+
+  /** Topmost element under a point (drawn last = on top). */
+  private hit(x: number, y: number) {
+    return [...this.placed()].reverse().find(p => x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) ?? null;
+  }
+
+  onPointerDown(e: PointerEvent) {
+    if (this.busy()) return;
+    const pt = this.canvasPoint(e);
+    const p = this.hit(pt.x, pt.y);
+    if (!p) return;
+    e.preventDefault();
+    this.selected.set(p.key);
+    this.drag = { key: p.key, dx: pt.x - (p.x + p.w / 2), dy: pt.y - (p.y + p.h / 2) };
+    this.dragging.set(true);
+    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+  }
+
+  onPointerMove(e: PointerEvent) {
+    const pt = this.canvasPoint(e);
+    if (!this.drag) { this.hoverKey.set(this.busy() ? null : this.hit(pt.x, pt.y)?.key ?? null); return; }
+    let x = clamp01((pt.x - this.drag.dx) / PREVIEW_W);
+    let y = clamp01((pt.y - this.drag.dy) / PREVIEW_H);
+    // Snap to the frame's centre lines, which are the hardest spots to hit by hand.
+    if (Math.abs(x - 0.5) < 0.008) x = 0.5;
+    if (Math.abs(y - 0.5) < 0.012) y = 0.5;
+    const scale = this.placed().find(p => p.key === this.drag!.key)?.scale ?? 1;
+    this.setPlacement(this.drag.key, { x, y, scale }, false);
+  }
+
+  onPointerUp() {
+    if (!this.drag) return;
+    this.drag = null;
+    this.dragging.set(false);
+    saveLayout(this.opts().layout);
+  }
+
   clampTime(v: number) {
     return Math.min(this.seconds(), Math.max(0, Number.isFinite(v) ? v : 0));
   }
@@ -353,7 +586,18 @@ export class OverlayExportComponent {
     const t = this.previewTime();
     const o = this.opts();
     if (!c) return;
-    r.draw(c.getContext('2d')!, t, o);
+    const ctx = c.getContext('2d')!;
+    r.draw(ctx, t, o);
+    // Outline the element being edited. Preview only: the exported frames never get it.
+    const sel = this.selected() ? this.placed().find(p => p.key === this.selected()) : null;
+    if (sel) {
+      ctx.save();
+      ctx.strokeStyle = '#9be564';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([12, 8]);
+      ctx.strokeRect(sel.x - 6, sel.y - 6, sel.w + 12, sel.h + 12);
+      ctx.restore();
+    }
   }
 
   async exportVideo() {

@@ -99,6 +99,11 @@ from home, satellites, battery (pack and per-cell voltage, amps, mAh used, watts
 Blackbox Explorer style (modes 1–4), a flight timer and a mini map, and can draw everything with your goggles'
 Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format) including Betaflight's own icons.
 
+**Layout.** Drag any element on the preview to move it, and set each one's size (50–200%) under Layout; the same
+controls also move elements from the keyboard. The timer, RSSI, speed and battery panels also let you size each reading
+inside them (speed, G-force, satellites, pack voltage, mAh, ...), and the panel grows or shrinks to fit. Positions are stored as fractions of the frame, so a layout looks the
+same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.
+
 **How it renders.** Everything happens in the browser; nothing is uploaded. Each frame is drawn on a canvas
 straight from the decoded log data (no playback, no screen capture), encoded as a PNG, and written into a
 QuickTime `.mov` with the PNG codec, which keeps the alpha channel so the overlay is transparent without
