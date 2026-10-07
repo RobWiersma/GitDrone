@@ -35,10 +35,18 @@ export function parseGlyphFont(name: string, buffer: ArrayBuffer): GlyphFont {
   return { name, glyphW: w, glyphH: h, atlas };
 }
 
+/**
+ * A font slot by number, carried in a private-use character (U+E000 + code). Use it for symbols whose codes fall on
+ * lowercase letters (0x61-0x7A); glyphCodes maps it straight back to the slot without capitalising.
+ */
+export const glyph = (code: number) => String.fromCharCode(0xe000 + code);
+
 /** Betaflight symbol codes (src/main/drivers/osd_symbols.h). */
 export const SYM = {
   volt: '\x06', mah: '\x07', m: '\x0C', home: '\x11', thr: '\x04', alt: '\x7F',
   amp: '\x9A', fly: '\x9C', kph: '\x9E', mph: '\x9D', watt: 'W', rssi: '\x01',
+  /** SYM_SPEED is 0x70, the same code as "p", so it's marked as a raw glyph or text drawing would capitalise it. */
+  speed: glyph(0x70),
   /** Satellite icon is two glyphs side by side (SYM_SAT_L, SYM_SAT_R). */
   sat: '\x1E\x1F',
   /** Battery bars, full to empty. */

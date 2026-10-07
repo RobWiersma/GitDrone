@@ -185,9 +185,9 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     </div>
                   </fieldset>
                 }
-                @if (c.key === 'speed' && hasBaro()) {
+                @if (c.key === 'rssi' && hasBaro() && data().track) {
                   <fieldset class="item-sizes">
-                    <legend>Speed panel settings</legend>
+                    <legend>RSSI panel settings</legend>
                     <div class="layout-grid">
                       <div class="field">
                         <label for="alt-source">Height from</label>
@@ -254,8 +254,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               <label class="check"><input type="checkbox" [ngModel]="opts().showBattery" (ngModelChange)="set('showBattery', $event)" [disabled]="!data().battery" /> Battery</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data().sticks" /> Sticks</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showMap" (ngModelChange)="set('showMap', $event)" [disabled]="!data().track" /> Mini map</label>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" /> Flight timer</label>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi()" /> RSSI</label>
+              <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" [disabled]="!data().battery" /> Flight time (in the battery panel)</label>
+              <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi() && !data().track" /> RSSI panel (satellites, RSSI, distance, height)</label>
             </fieldset>
             <div class="field">
               <label for="opacity">Panel background: {{ (opts().panelOpacity * 100).toFixed(0) }}%</label>
