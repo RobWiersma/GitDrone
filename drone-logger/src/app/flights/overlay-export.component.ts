@@ -1,7 +1,7 @@
 import { Component, ElementRef, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ELEMENT_ITEMS, ELEMENT_LABELS, ElementKey, ElementPlacement, ITEM_SCALE_MAX, ITEM_SCALE_MIN, ItemKey, OverlayData, OverlayLayout,
-  OverlayOptions, OverlayRenderer } from './overlay-renderer';
+  OverlayOptions, OverlayRenderer, STATS_GAP_S } from './overlay-renderer';
 import { MovWriter, canSaveToDisk, diskMovWriter, memoryMovWriter } from './mov-writer';
 import { GlyphFont, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font';
 import { UnitsService } from '../units.service';
@@ -110,7 +110,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             </div>
             <div class="scrub">
               <label for="previewTime" class="sr-only">Preview time</label>
-              <input id="previewTime" type="range" min="0" [max]="seconds()" step="0.1" [ngModel]="previewTime()"
+              <input id="previewTime" type="range" min="0" [max]="previewMax()" step="0.1" [ngModel]="previewTime()"
                      (ngModelChange)="previewTime.set(+$event)" />
               <span class="mono">{{ previewClock() }}</span>
               <label class="check"><input type="checkbox" [ngModel]="darkBackdrop()" (ngModelChange)="darkBackdrop.set($event)" /> Dark backdrop</label>
@@ -255,6 +255,16 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data().sticks" /> Sticks</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showMap" (ngModelChange)="set('showMap', $event)" [disabled]="!data().track" /> Mini map</label>
               <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" [disabled]="!data().battery" /> Flight time (in the battery panel)</label>
+              <label class="check"><input type="checkbox" [ngModel]="opts().showStats" (ngModelChange)="set('showStats', $event)" /> End-of-flight stats</label>
+              <div class="stats-time">
+                <label for="stats-seconds">Show stats for</label>
+                <input id="stats-seconds" type="number" min="0.5" max="30" step="0.5" [ngModel]="statsSeconds()"
+                       (ngModelChange)="setStatsSeconds(+$event)" [disabled]="!opts().showStats" />
+                <span>s</span>
+              </div>
+              @if (opts().showStats) {
+                <p class="hint stats-hint">After the log ends: a {{ gapMs }} ms blank, then the stats. Drag the preview past the end to see them.</p>
+              }
               <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi() && !data().track" /> RSSI panel (satellites, RSSI, distance, height)</label>
             </fieldset>
             <div class="field">
@@ -272,7 +282,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <input id="end" type="number" [min]="start()" [max]="seconds()" step="0.5" [ngModel]="end()" (ngModelChange)="end.set(clampTime(+$event))" [disabled]="busy()" />
               </div>
             </div>
-            <p class="hint">{{ frameCount() }} frames, {{ clock(end() - start()) }} long, roughly {{ sizeEstimate() }} on disk.</p>
+            <p class="hint">{{ frameCount() }} frames, {{ clock(exportSeconds()) }} long{{ opts().showStats ? ' with the stats' : '' }}, roughly {{ sizeEstimate() }} on disk.</p>
             @if (!toDisk && estimatedBytes() > 2e9) {
               <p class="error">That's a lot to hold in memory in this browser. Trim it, lower the resolution, or use Chrome or Edge.</p>
             }
@@ -327,6 +337,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .layout-grid input[type=range] { accent-color: var(--accent); }
     .item-sizes { margin: .6rem 0 0; padding: .5rem 0 0; border: 0; border-top: 1px solid var(--line); }
     .item-sizes legend { font-weight: 600; font-size: .92rem; padding: 0; }
+    .stats-time { display: flex; align-items: center; gap: .5rem; margin: .1rem 0 .3rem 1.6rem; font-size: .92rem; }
+    .stats-time label { font-weight: normal; }
+    .stats-time input { width: 4.5rem; }
+    .stats-hint { margin: 0 0 .4rem 1.6rem; font-size: .85rem; }
     .layout-actions { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: .4rem; font-size: .92rem; }
     .check { display: flex; align-items: center; justify-content: flex-start; gap: .45rem; font-weight: normal; margin: .2rem 0; }
     /* The site-wide .field input rule makes inputs full width; checkboxes shouldn't be. */
@@ -381,7 +395,7 @@ export class OverlayExportComponent {
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true, showRssi: true, altSource: 'gps',
+    showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true, showRssi: true, altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
     ...readColors(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh', layout: readLayout(), itemScale: readItemScales(),
   });
@@ -413,7 +427,15 @@ export class OverlayExportComponent {
   previewClock = computed(() => clock(this.previewTime()));
   darkBackdrop = signal(true);
 
-  frameCount = computed(() => Math.max(0, Math.floor((this.end() - this.start()) * this.fps())));
+  // ---- end-of-flight stats ----
+  readonly gapMs = Math.round(STATS_GAP_S * 1000);
+  statsSeconds = signal(2);
+  /** Blank pause plus the stats screen, added after the export's end. */
+  private tail = computed(() => (this.opts().showStats ? STATS_GAP_S + this.statsSeconds() : 0));
+  exportSeconds = computed(() => Math.max(0, this.end() - this.start()) + this.tail());
+  previewMax = computed(() => this.seconds() + this.tail());
+
+  frameCount = computed(() => Math.max(0, Math.floor(this.exportSeconds() * this.fps())));
   /** Measured about 170 KB per 1080p frame with all elements on; scales with pixel count. */
   estimatedBytes = computed(() => this.frameCount() * 170_000 * (RESOLUTIONS[this.resIndex()].h / 1080) ** 2);
   sizeEstimate = computed(() => {
@@ -431,6 +453,8 @@ export class OverlayExportComponent {
     loadSavedFont().then(f => this.font.set(f));
     effect(() => { const f = this.font(); this.opts.update(o => ({ ...o, font: f })); });
     effect(() => { const u = this.units.speed(); this.opts.update(o => ({ ...o, speedUnit: u })); });
+    // The stats start where the export ends (or the flight does, in the preview past the end).
+    effect(() => { const after = this.end(), flight = this.seconds(); this.opts.update(o => ({ ...o, statsAfter: after, flightSeconds: flight })); });
 
     // Redraw the preview whenever anything it shows changes.
     afterNextRender(() => this.drawPreview());
@@ -574,6 +598,10 @@ export class OverlayExportComponent {
     this.drag = null;
     this.dragging.set(false);
     saveLayout(this.opts().layout);
+  }
+
+  setStatsSeconds(v: number) {
+    if (Number.isFinite(v)) this.statsSeconds.set(Math.min(30, Math.max(0.5, v)));
   }
 
   clampTime(v: number) {

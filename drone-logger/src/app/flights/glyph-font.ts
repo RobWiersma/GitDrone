@@ -47,6 +47,7 @@ export const SYM = {
   amp: '\x9A', fly: '\x9C', kph: '\x9E', mph: '\x9D', watt: 'W', rssi: '\x01',
   /** SYM_SPEED is 0x70, the same code as "p", so it's marked as a raw glyph or text drawing would capitalise it. */
   speed: glyph(0x70),
+  km: '\x7D', mi: '\x7E',
   /** Satellite icon is two glyphs side by side (SYM_SAT_L, SYM_SAT_R). */
   sat: '\x1E\x1F',
   /** Battery bars, full to empty. */

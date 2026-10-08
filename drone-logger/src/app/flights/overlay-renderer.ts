@@ -63,6 +63,11 @@ export interface OverlayOptions {
   showRssi: boolean;
   /** Where the speed panel's altitude comes from. Barometer falls back to GPS when the log has none. */
   altSource: 'gps' | 'baro';
+  /** Betaflight-style "--- STATS ---" screen in place of the HUD from `statsAfter` (seconds since log start) on. */
+  showStats: boolean;
+  statsAfter: number;
+  /** Whole flight length, for TOTAL ARM. */
+  flightSeconds: number;
   /** Blurred, fading streak behind each stick dot, like a long exposure. */
   stickTrails: boolean;
   /** Mini map colours (#rrggbb): the path just flown, and what it darkens to as it ages. */
@@ -121,6 +126,9 @@ const MAP_SIZE = 300;
 
 /** Width of the drawn speed gauge (1080p px at 100%), standing in for Betaflight's speed glyph in the built-in font. */
 const SPEED_ICON_W = 40;
+
+/** Blank pause between the end of the log and the stats screen, in seconds. */
+export const STATS_GAP_S = 0.1;
 
 /** Satellite count: after Betaflight's satellite icon with an OSD font, or "24 SAT" in the built-in font. */
 const satText = (n: number) => (glyphs ? `${SYM.sat}${n}` : `${n} SAT`);
@@ -197,6 +205,12 @@ export class OverlayRenderer {
     glyphs = o.font;
     speedUnit = o.speedUnit;
 
+    // Like Betaflight after disarm: the HUD clears, a short blank beat, then the stats take the whole screen.
+    if (o.showStats && t > o.statsAfter) {
+      if (t >= o.statsAfter + STATS_GAP_S) this.drawStats(ctx, W, H, u, o);
+      return;
+    }
+
     for (const p of this.placements(W, H, o)) {
       const s = u * p.scale; // each element draws in its own scaled units, so text, icons and panels grow together
       switch (p.key) {
@@ -247,6 +261,78 @@ export class OverlayRenderer {
   }
 
   // ---------- elements ----------
+
+  /** Whole-flight figures for the stats screen; each is null when the log doesn't have it. */
+  private stats(o: OverlayOptions) {
+    const tp = this.data.track?.points ?? [];
+    const bp = this.data.battery?.points ?? [];
+    const tl = this.data.telemetry ?? [];
+    const max = (v: number[]) => (v.length ? Math.max(...v) : null);
+    // Pack voltage low point from a 0.5 s average, so one noisy sample isn't the minimum (same as the flight stats).
+    let minV: number | null = null;
+    for (let k = 4; k < bp.length; k++) {
+      const avg = (bp[k][1] + bp[k - 1][1] + bp[k - 2][1] + bp[k - 3][1] + bp[k - 4][1]) / 5;
+      minV = minV === null ? avg : Math.min(minV, avg);
+    }
+    let dist = 0;
+    for (let k = 1; k < tp.length; k++) dist += haversine(tp[k - 1][1], tp[k - 1][2], tp[k][1], tp[k][2]);
+    const baro = o.altSource === 'baro' && this.hasBaro;
+    const rssi = tl.map(p => p[1]).filter((v): v is number => v !== null);
+    const amps = bp.map(p => p[2]).filter((v): v is number => v !== null);
+    const accel = tp.map(p => p[6]).filter((v): v is number => v !== undefined);
+    return {
+      arm: o.flightSeconds,
+      alt: baro ? max(tl.map(p => p[2]).filter((v): v is number => v !== null)) : max(tp.map(p => p[3])),
+      speed: max(tp.map(p => p[4])),
+      maxDist: max(this.homeDist),
+      dist: tp.length > 1 ? dist : null,
+      g: accel.length ? Math.max(...accel) / 9.81 : null,
+      minV,
+      endV: bp.length ? bp[bp.length - 1][1] : null,
+      minRssi: rssi.length ? Math.min(...rssi) : null,
+      maxA: amps.length ? Math.max(...amps) : null,
+      mah: amps.length ? this.mahAt[this.mahAt.length - 1] : null,
+    };
+  }
+
+  /** Betaflight's post-flight stats screen: centred title, then LABEL : VALUE rows, in the OSD font when loaded. */
+  private drawStats(ctx: CanvasRenderingContext2D, W: number, H: number, u: number, o: OverlayOptions) {
+    const s = this.stats(o);
+    const G = !!glyphs;
+    const U = units();
+    const mi = o.speedUnit === 'mph';
+    const m = G ? SYM.m : ' m';
+    const rows: [string, string][] = [];
+    const add = (label: string, v: number | null, fmt: (v: number) => string) => { if (v !== null) rows.push([label, fmt(v)]); };
+    add('TOTAL ARM', s.arm, v => clock(v));
+    add('MAX ALTITUDE', s.alt, v => `${v.toFixed(1)}${m}`);
+    add('MAX SPEED', s.speed, v => `${speedFromMs(v, o.speedUnit).toFixed(0)}${G ? U.kph : ' ' + (mi ? 'mph' : 'km/h')}`);
+    add('MAX DISTANCE', s.maxDist, v => `${v.toFixed(0)}${m}`);
+    add('FLIGHT DISTANCE', s.dist, v => mi ? `${(v / 1609.344).toFixed(2)}${G ? SYM.mi : ' mi'}` : `${(v / 1000).toFixed(2)}${G ? SYM.km : ' km'}`);
+    add('MAX G-FORCE', s.g, v => `${v.toFixed(1)}G`);
+    add('MIN BATTERY', s.minV, v => `${v.toFixed(2)}${G ? SYM.volt : ' V'}`);
+    add('END BATTERY', s.endV, v => `${v.toFixed(2)}${G ? SYM.volt : ' V'}`);
+    add('MIN RSSI', s.minRssi, v => `${Math.round(v)}%`);
+    add('MAX CURRENT', s.maxA, v => `${v.toFixed(0)}${G ? SYM.amp : ' A'}`);
+    add('USED MAH', s.mah, v => `${Math.round(v)}${G ? SYM.mah : ' mAh'}`);
+
+    const size = 34 * u, lh = 52 * u, gap = 22 * u;
+    const labelW = Math.max(...rows.map(r => measure(ctx, r[0], size, 700)));
+    const colonW = measure(ctx, ':', size, 700);
+    const valueW = Math.max(...rows.map(r => measure(ctx, r[1], size, 700)));
+    const title = '--- STATS ---';
+    const blockW = Math.max(labelW + gap + colonW + gap + valueW, measure(ctx, title, size, 700));
+    const blockH = (rows.length + 1) * lh + lh * 0.4;
+    const x0 = (W - blockW) / 2, y0 = (H - blockH) / 2;
+    panel(ctx, x0 - 48 * u, y0 - 30 * u, blockW + 96 * u, blockH + 52 * u, 26 * u, o.panelOpacity);
+    text(ctx, title, W / 2, y0 + lh * 0.8, size, 'center', 700);
+    rows.forEach(([label, value], n) => {
+      const y = y0 + lh * (n + 1.4) + lh * 0.8;
+      text(ctx, label, x0, y, size, 'left', 700);
+      text(ctx, ':', x0 + labelW + gap, y, size, 'left', 700);
+      text(ctx, value, x0 + labelW + gap + colonW + gap, y, size, 'left', 700);
+    });
+  }
 
   /**
    * Panel layout from the default design plus whatever the user resized. Each row's baseline moves down by the extra
