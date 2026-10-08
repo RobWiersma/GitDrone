@@ -5,10 +5,11 @@ import { FlightService } from './flight.service';
 import { Flight } from './flight.models';
 import { OverlayData } from './overlay-renderer';
 import { OverlayExportComponent } from './overlay-export.component';
+import { BlackboxTipsComponent } from './blackbox-tips.component';
 
 @Component({
   selector: 'app-flight-overlay',
-  imports: [RouterLink, OverlayExportComponent],
+  imports: [RouterLink, OverlayExportComponent, BlackboxTipsComponent],
   template: `
     <div class="page">
       @if (flight(); as f) {
@@ -23,6 +24,7 @@ import { OverlayExportComponent } from './overlay-export.component';
         } @else {
           <p class="hint">Loading flight data...</p>
         }
+        <app-blackbox-tips />
       } @else {
         <p class="hint">Loading flight...</p>
       }

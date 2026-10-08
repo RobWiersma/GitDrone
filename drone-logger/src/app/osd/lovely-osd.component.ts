@@ -7,6 +7,7 @@ import { OsdAnalysis, OsdSession, formatDuration } from '../flights/flight.model
 import { OverlayData } from '../flights/overlay-renderer';
 import { FlightViewComponent } from '../flights/flight-view.component';
 import { OverlayExportComponent } from '../flights/overlay-export.component';
+import { BlackboxTipsComponent } from '../flights/blackbox-tips.component';
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
@@ -16,7 +17,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
  */
 @Component({
   selector: 'app-lovely-osd',
-  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent],
+  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent],
   template: `
     <div class="page">
       <h1>LovelyOSD Overlay</h1>
@@ -46,6 +47,9 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
             }
           }
         </div>
+
+        <!-- Open until a log is loaded, then folded away to one line. -->
+        <app-blackbox-tips [open]="!result()" />
 
         @if (session(); as s) {
           <h2 class="session-title">
