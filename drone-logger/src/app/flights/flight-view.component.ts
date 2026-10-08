@@ -16,8 +16,8 @@ import { UnitsService } from '../units.service';
   imports: [DecimalPipe, RouterLink, FlightMapComponent, FlightProfileComponent, FlightPlaybackComponent],
   template: `
     @let f = flight();
-    @if (f.hasGps || f.minRssiPercent !== null || f.maxBaroHeightM !== null) {
-      <ul class="headline" aria-label="Flight summary">
+    @if (tileCount() > 0) {
+      <ul class="headline" aria-label="Flight summary" [style.--cols]="tileCols()">
       @if (f.hasGps) {
         <li><span class="lbl">Distance</span><span class="num">{{ distanceValue(f) }}<small>{{ distanceUnit(f) }}</small></span></li>
         <li><span class="lbl">Top speed</span><span class="num">{{ speed(f.maxSpeedMs) }}<small>{{ units.speedLabel() }}</small></span></li>
@@ -39,26 +39,23 @@ import { UnitsService } from '../units.service';
           <span class="sub">Signal strength, not link quality</span>
         </li>
       }
-      </ul>
-    }
-
-    @if (f.battery; as b) {
-      <ul class="headline battery" aria-label="Battery summary">
+      @if (f.battery; as b) {
         @if (b.mahUsed !== null) {
-          <li><span class="lbl">Used</span><span class="num">{{ b.mahUsed | number: '1.0-0' }}<small>mAh</small></span></li>
+          <li class="battery"><span class="lbl">Used</span><span class="num">{{ b.mahUsed | number: '1.0-0' }}<small>mAh</small></span></li>
         }
-        <li>
+        <li class="battery">
           <span class="lbl">Lowest cell</span>
           <span class="num" [class.low]="b.minV / b.cells < 3.3">{{ b.minV / b.cells | number: '1.2-2' }}<small>V</small></span>
           <span class="sub">{{ b.minV | number: '1.1-1' }} V pack under load</span>
         </li>
         @if (b.peakCurrentA !== null) {
-          <li>
+          <li class="battery">
             <span class="lbl">Peak current</span><span class="num">{{ b.peakCurrentA | number: '1.0-0' }}<small>A</small></span>
             <span class="sub">{{ b.avgCurrentA | number: '1.1-1' }} A average</span>
           </li>
-          <li><span class="lbl">Peak power</span><span class="num">{{ b.peakPowerW | number: '1.0-0' }}<small>W</small></span></li>
+          <li class="battery"><span class="lbl">Peak power</span><span class="num">{{ b.peakPowerW | number: '1.0-0' }}<small>W</small></span></li>
         }
+      }
       </ul>
     }
 
@@ -147,11 +144,13 @@ import { UnitsService } from '../units.service';
     dt { color: var(--muted); }
     dd { margin: 0; }
     .warn { color: var(--warn); }
-    .headline { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
+    /* Column count comes from the number of tiles (see tileCols), so the rows are even instead of leaving one tile alone. */
+    .headline { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr)); gap: .75rem; }
+    @media (max-width: 44rem) { .headline { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .headline li { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
                    padding: .8rem 1rem .85rem 1.15rem; display: grid; gap: .15rem; align-content: start; box-shadow: var(--shadow); overflow: hidden; }
     .headline li::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--accent); }
-    .battery li::before { background: var(--ok); }
+    .headline li.battery::before { background: var(--ok); }
     .num { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
     .num small { font-size: .8rem; font-weight: 600; color: var(--muted); margin: 0 .25rem; letter-spacing: 0; }
     .num.low { color: var(--warn); }
@@ -284,6 +283,24 @@ export class FlightViewComponent {
   });
 
   duration = computed(() => formatDuration(this.flight().durationMs));
+
+  /** How many summary tiles show; mirrors the @if blocks in the template. */
+  tileCount = computed(() => {
+    const f = this.flight();
+    let n = 0;
+    if (f.hasGps) n += 4 + (f.avgSpeedMs !== null ? 1 : 0);
+    else if (f.maxBaroHeightM !== null) n += 1;
+    if (f.minRssiPercent !== null) n += 1;
+    const b = f.battery;
+    if (b) n += 1 + (b.mahUsed !== null ? 1 : 0) + (b.peakCurrentA !== null ? 2 : 0);
+    return n;
+  });
+
+  /** Up to five a row; more than five split over two equal rows (10 tiles: 5 + 5, 8 tiles: 4 + 4). */
+  tileCols = computed(() => {
+    const n = this.tileCount();
+    return n <= 5 ? Math.max(1, n) : Math.ceil(n / Math.ceil(n / 5));
+  });
 
   /** From the map. Ignored while playing so the pointer doesn't fight the clock. */
   onMapHover(i: number | null) {
