@@ -148,6 +148,25 @@ App settings on the App Service:
 | `Storage__LogsPath`          | `/home/data/logs`                      |
 
 `/home` survives restarts and deploys, so SQLite is fine on a single instance. Turn on App Service
-Authentication (Microsoft provider) before sharing the URL; the app itself has no login.
+Authentication (Microsoft provider) with **Allow unauthenticated access**: visitors can browse and use LovelyOSD,
+and only signed-in users can add or change anything (the API enforces this).
 GitHub needs variable `AZURE_WEBAPP_NAME` and secret `AZURE_WEBAPP_PUBLISH_PROFILE`.
+
+## License
+
+GitDrone is free software under the [GNU General Public License v3.0](LICENSE). You can use, study, share and change
+it; if you distribute a modified version, it has to stay under the GPL too.
+
+## Credits
+
+GitDrone stands on the open-source FPV world:
+
+- **[Betaflight](https://github.com/betaflight/betaflight)** (GPL-3.0): the flight controller firmware whose logs,
+  `diff all` format and OSD symbol codes (`osd_symbols.h`) this reads.
+- **[Blackbox Explorer](https://github.com/betaflight/blackbox-log-viewer)** (GPL-3.0): `Services/BlackboxDecoder.cs`
+  is a port of its log decoder, which is why GitDrone is GPL-3.0 as well.
+- **[WTFOS msp-osd](https://github.com/fpv-wtf/msp-osd)**: the DJI goggles font format LovelyOSD reads. Fonts are
+  loaded from your own computer and never uploaded or bundled here.
+- **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause) and **[OpenStreetMap](https://www.openstreetmap.org/copyright)**
+  contributors (ODbL) for the flight maps.
 
