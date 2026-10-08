@@ -28,8 +28,8 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
 
         <!-- Decorative: a still of what an overlay looks like. The real thing is drawn from your log. -->
         <div class="screen" aria-hidden="true">
-          <div class="osd map"><svg viewBox="0 0 100 100"><path d="M20 70 C 15 40, 40 15, 62 22 S 88 50, 70 66 S 38 84, 30 62 S 52 40, 60 48"
-            fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" /><circle cx="60" cy="48" r="6" fill="#fff" /></svg></div>
+          <div class="osd map"><svg viewBox="0 0 100 100"><path d="M12 80 C 4 40, 28 6, 58 12 S 96 42, 82 70 S 40 94, 26 66 S 50 34, 66 50"
+            fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" /><circle cx="66" cy="50" r="7" fill="#fff" /></svg></div>
           <div class="osd info"><span>24 SAT</span><span>53% RSSI</span><span>⌂ 81 m</span><span>▲ 8 m</span></div>
           <div class="osd speed"><span class="big">64</span> km/h <span class="r">9.3 A</span><span>0.8G</span><span class="r">294 W</span></div>
           <div class="osd sticks"><i></i><i></i></div>
@@ -127,13 +127,13 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
               background: linear-gradient(180deg, #5d82a8 0%, #8fb0c9 46%, #4f6b3e 47%, #2f4426 100%); box-shadow: var(--shadow);
               font-family: var(--mono); color: #fff; font-weight: 700;
               container-type: inline-size; /* everything inside scales with the frame, not the window */ }
-    .screen > * { font-size: 1.75cqw; }
+    .screen > * { font-size: 2.3cqw; }
     .osd { position: absolute; background: rgb(8 12 16 / .45); border-radius: .6em; padding: .5em .8em; white-space: nowrap;
            text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
-    .map { top: 4%; right: 3%; width: 21cqw; height: 21cqw; padding: 0; color: #9be564; }
-    .map svg { display: block; width: 100%; height: 100%; padding: 14%; box-sizing: border-box; }
-    .info { top: calc(4% + 22.5cqw); right: 3%; width: 21cqw; box-sizing: border-box; display: grid; grid-template-columns: 1fr auto; gap: .25em .6em; }
-    .speed, .battery { bottom: 5%; width: 29cqw; box-sizing: border-box; display: grid; grid-template-columns: auto 1fr auto;
+    .map { top: 4%; right: 3%; width: 25cqw; height: 25cqw; padding: 0; color: #9be564; }
+    .map svg { display: block; width: 100%; height: 100%; padding: 8%; box-sizing: border-box; }
+    .info { top: calc(4% + 26.5cqw); right: 3%; width: 25cqw; box-sizing: border-box; display: grid; grid-template-columns: 1fr auto; gap: .25em .6em; }
+    .speed, .battery { bottom: 5%; width: 34cqw; box-sizing: border-box; display: grid; grid-template-columns: auto 1fr auto;
                        align-items: baseline; column-gap: .4em; row-gap: .25em; }
     .speed { left: 3%; }
     .battery { right: 3%; }

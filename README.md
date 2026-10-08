@@ -22,7 +22,8 @@ ASP.NET Core API when the backend is ready.
 
 | Route                        | Component                  |
 |------------------------------|----------------------------|
-| /                            | FlightFeedComponent        |
+| /                            | HomeComponent              |
+| /flights                     | FlightFeedComponent        |
 | /hangar                      | AircraftListComponent      |
 | /hangar/new                  | AircraftFormComponent      |
 | /hangar/:id                  | AircraftDetailComponent    |
