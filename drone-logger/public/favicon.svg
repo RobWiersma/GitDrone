@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- GitDrone mark (same as the nav logo) in the site green on a dark tile, so it reads on light and dark tabs. -->
+  <rect width="32" height="32" rx="7" fill="#0a0f14"/>
+  <g transform="translate(3.5 3.5) scale(0.78)" stroke="#9be564">
+    <g fill="none" stroke-width="2.6" stroke-linecap="round">
+      <path d="M9 9l14 14M23 9L9 23"/>
+      <circle cx="7" cy="7" r="4.5"/><circle cx="25" cy="7" r="4.5"/>
+      <circle cx="7" cy="25" r="4.5"/><circle cx="25" cy="25" r="4.5"/>
+    </g>
+    <rect x="12.5" y="12.5" width="7" height="7" rx="2" fill="#9be564" stroke="none"/>
+  </g>
+</svg>
