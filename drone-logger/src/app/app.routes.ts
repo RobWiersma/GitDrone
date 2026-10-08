@@ -8,9 +8,11 @@ import { TuneCompareComponent } from './tunes/tune-compare.component';
 import { TuneBulkImportComponent } from './tunes/tune-bulk-import.component';
 import { FlightUploadComponent } from './flights/flight-upload.component';
 import { FlightFeedComponent } from './flights/flight-feed.component';
+import { HomeComponent } from './home/home.component';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', component: FlightFeedComponent, title: 'Flights' },
+  { path: '', pathMatch: 'full', component: HomeComponent, title: 'GitDrone' },
+  { path: 'flights', pathMatch: 'full', component: FlightFeedComponent, title: 'Flights' },
   { path: 'hangar', component: AircraftListComponent, title: 'Hangar' },
   { path: 'hangar/new', canActivate: [requireSignIn], component: AircraftFormComponent, title: 'Add aircraft' },
   { path: 'hangar/:id', component: AircraftDetailComponent, title: 'Aircraft' },
