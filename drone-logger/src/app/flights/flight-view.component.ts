@@ -52,11 +52,6 @@ import { UnitsService } from '../units.service';
           <span class="num" [class.low]="b.minV / b.cells < 3.3">{{ b.minV / b.cells | number: '1.2-2' }}<small>V</small></span>
           <span class="sub">{{ b.minV | number: '1.1-1' }} V pack under load</span>
         </li>
-        <li>
-          <span class="lbl">Pack</span>
-          <span class="num">{{ b.startV / b.cells | number: '1.2-2' }}<small>→</small>{{ b.endV / b.cells | number: '1.2-2' }}<small>V/cell</small></span>
-          <span class="sub">{{ b.cells }}S, {{ b.startV | number: '1.1-1' }} → {{ b.endV | number: '1.1-1' }} V</span>
-        </li>
         @if (b.peakCurrentA !== null) {
           <li>
             <span class="lbl">Peak current</span><span class="num">{{ b.peakCurrentA | number: '1.0-0' }}<small>A</small></span>
@@ -234,7 +229,6 @@ export class FlightViewComponent {
     if (tl?.length) {
       const p = tl[nearest(this.telemetryTimes(), t)];
       if (!tp?.length && p[2] !== null) out.push({ label: 'Height', value: p[2].toFixed(0), unit: 'm', sub: 'barometer' });
-      if (p[1] !== null) out.push({ label: 'RSSI', value: p[1].toFixed(0), unit: '%' });
     }
     const sp = this.sticks();
     if (sp?.length) {
