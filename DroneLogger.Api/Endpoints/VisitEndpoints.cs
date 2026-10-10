@@ -58,10 +58,10 @@ public static partial class VisitEndpoints
         return Results.NoContent();
     }
 
-    /// <summary>Signed-in only. days = 1..365 (default 30), ending today.</summary>
+    /// <summary>Owners only. days = 1..365 (default 30), ending today.</summary>
     private static async Task<IResult> Stats(int? days, HttpContext http, AppDbContext db, CancellationToken ct)
     {
-        if (!SignIn.IsSignedIn(http)) return Results.Unauthorized();
+        if (!SignIn.IsOwner(http)) return Results.StatusCode(SignIn.IsSignedIn(http) ? StatusCodes.Status403Forbidden : StatusCodes.Status401Unauthorized);
         var n = Math.Clamp(days ?? 30, 1, 365);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var from = today.AddDays(1 - n);

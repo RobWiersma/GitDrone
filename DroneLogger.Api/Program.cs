@@ -73,10 +73,12 @@ app.Use(async (http, next) =>
     // LovelyOSD reads a log and stores nothing, so visitors can use it too (it's rate limited instead).
     // Visit counting has to work for visitors, and only stores a daily hash.
     var openToAll = http.Request.Path.StartsWithSegments("/api/osd") || http.Request.Path.StartsWithSegments("/api/visit");
-    if (!readOnly && !openToAll && http.Request.Path.StartsWithSegments("/api") && !SignIn.IsSignedIn(http))
+    // Changes need an owner (see SignIn): signed out gets 401, signed in with another account 403.
+    if (!readOnly && !openToAll && http.Request.Path.StartsWithSegments("/api") && !SignIn.IsOwner(http))
     {
-        http.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        await http.Response.WriteAsJsonAsync(new { error = "Sign in to make changes." });
+        var signedIn = SignIn.IsSignedIn(http);
+        http.Response.StatusCode = signedIn ? StatusCodes.Status403Forbidden : StatusCodes.Status401Unauthorized;
+        await http.Response.WriteAsJsonAsync(new { error = signedIn ? "Only GitDrone's owners can make changes." : "Sign in to make changes." });
         return;
     }
     await next();
@@ -87,6 +89,9 @@ app.UseRateLimiter();
 app.MapGet("/api/me", (HttpContext http) => new
 {
     signedIn = SignIn.IsSignedIn(http),
+    // Owners can edit and see visitor stats. A signed-in non-owner gets their id back, to add to Auth__OwnerIds.
+    owner = SignIn.IsOwner(http),
+    id = SignIn.IsOwner(http) ? null : SignIn.PrincipalId(http),
     name = devSignedIn ? "Local" : http.Request.Headers["X-MS-CLIENT-PRINCIPAL-NAME"].ToString(),
     // Sign-in and sign-out links only exist where App Service Authentication is running.
     canSignOut = !devSignedIn,

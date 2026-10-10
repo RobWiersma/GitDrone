@@ -29,6 +29,13 @@
           @if (open() === 'account') {
             <div id="account-menu" class="dropdown">
               <p class="menu-head">Signed in as <strong>{{ auth.name() || 'you' }}</strong></p>
+              @if (auth.accountId(); as id) {
+                <p class="menu-note">
+                  This account isn't an owner of this GitDrone, so it can't make changes. To make it one, add its id to the
+                  <code>Auth__OwnerIds</code> app setting:
+                </p>
+                <code class="account-id">{{ id }}</code>
+              }
               @if (auth.canSignOut()) {
                 <a class="item" [href]="auth.signOutUrl">Sign out</a>
               } @else {
@@ -67,7 +74,7 @@
               }
             </div>
           </div>
-          @if (auth.signedIn()) {
+          @if (auth.canEdit()) {
             <a class="item stats-item" routerLink="/stats" routerLinkActive="active" ariaCurrentWhenActive="page">Visitor stats</a>
           }
         </div>
