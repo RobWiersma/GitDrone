@@ -8,8 +8,6 @@ interface Me {
   signedIn: boolean;
   /** Listed in the API's Auth__OwnerIds: can make changes and see visitor stats. */
   owner: boolean;
-  /** The account's id, only sent when signed in but not an owner, so it can be added to Auth__OwnerIds. */
-  id?: string | null;
   name: string;
   /** False when running locally, where there's no App Service sign-in to leave. */
   canSignOut: boolean;
@@ -26,10 +24,7 @@ export class AuthService {
   private loading: Promise<Me> | null = null;
 
   readonly signedIn = computed(() => this.me()?.signedIn ?? false);
-  readonly canEdit = computed(() => this.me()?.owner ?? false);
-  /** Set when signed in with an account that isn't an owner. */
-  readonly accountId = computed(() => this.me()?.id ?? null);
-  readonly name = computed(() => this.me()?.name ?? '');
+  readonly canEdit = computed(() => this.me()?.owner ?? false);  readonly name = computed(() => this.me()?.name ?? '');
   readonly canSignOut = computed(() => this.me()?.canSignOut ?? false);
 
   constructor() {

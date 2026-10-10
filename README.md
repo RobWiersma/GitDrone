@@ -153,7 +153,7 @@ App settings on the App Service:
 Authentication (Microsoft provider) with **Allow unauthenticated access**: visitors can browse and use LovelyOSD.
 Only **owners** can add or change anything or see visitor stats: accounts whose id is in `Auth__OwnerIds`. Signing in
 with any other account changes nothing, and with the setting empty nobody can make changes (the API enforces all of
-this). To find your id, sign in and open the account menu: until you're an owner it shows the id to add.
+this). Your id is the **Object ID** under Microsoft Entra ID → Users → your user.
 GitHub needs variable `AZURE_WEBAPP_NAME` and secret `AZURE_WEBAPP_PUBLISH_PROFILE`.
 
 ## Visitor stats

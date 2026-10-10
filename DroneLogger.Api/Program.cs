@@ -89,9 +89,8 @@ app.UseRateLimiter();
 app.MapGet("/api/me", (HttpContext http) => new
 {
     signedIn = SignIn.IsSignedIn(http),
-    // Owners can edit and see visitor stats. A signed-in non-owner gets their id back, to add to Auth__OwnerIds.
+    // Owners can edit and see visitor stats. Account ids are never sent back.
     owner = SignIn.IsOwner(http),
-    id = SignIn.IsOwner(http) ? null : SignIn.PrincipalId(http),
     name = devSignedIn ? "Local" : http.Request.Headers["X-MS-CLIENT-PRINCIPAL-NAME"].ToString(),
     // Sign-in and sign-out links only exist where App Service Authentication is running.
     canSignOut = !devSignedIn,
