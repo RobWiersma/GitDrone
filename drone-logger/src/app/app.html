@@ -17,7 +17,6 @@
     <a class="link" routerLink="/osd" routerLinkActive="active" ariaCurrentWhenActive="page">LovelyOSD<span class="long"> Overlay</span></a>
     <span class="account">
       @if (auth.signedIn()) {
-        <a class="link" routerLink="/stats" routerLinkActive="active" ariaCurrentWhenActive="page">Stats</a>
         <div class="menu">
           <button id="account-btn" class="theme menu-btn" type="button" aria-haspopup="true" aria-controls="account-menu"
                   [attr.aria-expanded]="open() === 'account'" (click)="toggleMenu('account')">
@@ -47,7 +46,7 @@
               [attr.aria-expanded]="open() === 'prefs'" (click)="toggleMenu('prefs')" title="Preferences">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"
           d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.3 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4z" /></svg>
-        <span class="theme-label">Preferences</span><span class="sr-only only-small">Preferences</span>
+        <span class="sr-only">Preferences</span>
         <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
         <span class="sr-only">(speed in {{ units.speedLabel() }}, {{ themeLabel() }} theme)</span>
       </button>
@@ -60,14 +59,17 @@
               <button type="button" [attr.aria-pressed]="units.speed() === 'mph'" (click)="units.speed.set('mph')">mph</button>
             </div>
           </div>
-          <div class="choice" role="group" aria-labelledby="theme-label">
-            <span id="theme-label" class="menu-head">Theme</span>
+          <div class="choice" role="group" aria-labelledby="theme-group-label">
+            <span id="theme-group-label" class="menu-head">Theme</span>
             <div class="seg">
               @for (t of themes; track t.value) {
                 <button type="button" [attr.aria-pressed]="theme.preference() === t.value" (click)="theme.preference.set(t.value)">{{ t.label }}</button>
               }
             </div>
           </div>
+          @if (auth.signedIn()) {
+            <a class="item stats-item" routerLink="/stats" routerLinkActive="active" ariaCurrentWhenActive="page">Visitor stats</a>
+          }
         </div>
       }
     </div>
