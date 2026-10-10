@@ -17,6 +17,7 @@
     <a class="link" routerLink="/osd" routerLinkActive="active" ariaCurrentWhenActive="page">LovelyOSD<span class="long"> Overlay</span></a>
     <span class="account">
       @if (auth.signedIn()) {
+        <a class="link" routerLink="/stats" routerLinkActive="active" ariaCurrentWhenActive="page">Stats</a>
         <span class="who">{{ auth.name() }}</span>
         @if (auth.canSignOut()) { <a class="link" [href]="auth.signOutUrl">Sign out</a> }
       } @else {

@@ -153,6 +153,20 @@ Authentication (Microsoft provider) with **Allow unauthenticated access**: visit
 and only signed-in users can add or change anything (the API enforces this).
 GitHub needs variable `AZURE_WEBAPP_NAME` and secret `AZURE_WEBAPP_PUBLISH_PROFILE`.
 
+## Visitor stats
+
+`/stats` (signed in only) shows unique visitors per day, the pages they open and the sites that sent them, without
+cookies and without storing IP addresses:
+
+- On each page change the site calls `POST /api/visit` with the page and, on the landing page only, the referring
+  site's **hostname** (never the full link).
+- The API stores a 16-character hash of IP + browser + **today's secret**, the day, the page folded onto its route
+  (`/flights/8` becomes `/flights/:id`) and the referrer name. The secret is random, kept in `VisitSalts`, and deleted
+  once the day is over, so old hashes can't be recomputed or linked to anyone.
+- The same person on two days counts as two; nobody can be followed over time. Signed-in visits and obvious bots
+  aren't counted.
+- `GET /api/stats/visits?days=30` returns the numbers (signed in only).
+
 ## License
 
 GitDrone is free software under the [GNU General Public License v3.0](LICENSE). You can use, study, share and change

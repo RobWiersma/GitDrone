@@ -24,6 +24,7 @@ export const routes: Routes = [
   { path: 'flights/:id/overlay', loadComponent: () => import('./flights/flight-overlay.component').then(m => m.FlightOverlayComponent), title: 'Video overlay' },
   { path: 'flights/:id', loadComponent: () => import('./flights/flight-detail.component').then(m => m.FlightDetailComponent), title: 'Flight' },
   { path: 'tunes/compare', component: TuneCompareComponent, title: 'Compare tunes' },
+  { path: 'stats', canActivate: [requireSignIn], loadComponent: () => import('./stats/stats.component').then(m => m.StatsComponent), title: 'Visitors' },
   { path: 'osd', loadComponent: () => import('./osd/lovely-osd.component').then(m => m.LovelyOsdComponent), title: 'LovelyOSD Overlay' },
 
   // Old /aircraft addresses, kept so bookmarks still work.

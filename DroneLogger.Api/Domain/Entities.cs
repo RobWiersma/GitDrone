@@ -111,3 +111,25 @@ public class Flight
     /// <summary>Which version of the derived data (track, sticks) is stored; older rows are rebuilt from the log file on demand.</summary>
     public int DataVersion { get; set; }
 }
+
+/// <summary>
+/// One visitor seeing one page on one day. VisitorHash is a one-way hash of IP and browser with that day's secret
+/// (see VisitSalt), so it can't be turned back into an IP or matched to the same person on another day.
+/// </summary>
+public class Visit
+{
+    public int Id { get; set; }
+    public DateOnly Day { get; set; }
+    public string VisitorHash { get; set; } = "";
+    /// <summary>Page, with ids folded in: "/flights/:id".</summary>
+    public string Path { get; set; } = "";
+    /// <summary>Site the visitor came from ("linkedin.com"), on the visit's landing page only; never the full link.</summary>
+    public string? Referrer { get; set; }
+}
+
+/// <summary>The secret for one day's visitor hashes. Deleted once the day is over, so old hashes can't be recomputed.</summary>
+public class VisitSalt
+{
+    public DateOnly Day { get; set; }
+    public string Salt { get; set; } = "";
+}

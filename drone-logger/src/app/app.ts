@@ -5,6 +5,7 @@ import { filter, map } from 'rxjs';
 import { ThemeService } from './theme.service';
 import { AuthService } from './auth.service';
 import { UnitsService } from './units.service';
+import { VisitService } from './stats/visit.service';
 
 @Component({
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
@@ -24,4 +25,8 @@ export class App {
   ), { initialValue: '/' });
   /** Sign in, then come back to whatever page you were on. */
   readonly signInHref = computed(() => this.auth.signInUrl(this.url()));
+
+  constructor() {
+    inject(VisitService).trackPageViews(inject(Router));
+  }
 }

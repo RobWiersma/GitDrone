@@ -63,20 +63,17 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.UseCors("frontend");
 
-// Anyone can look; only signed-in users can change anything. On Azure, App Service Authentication signs people in
-// and passes who they are in X-MS-CLIENT-PRINCIPAL-* headers (it strips any a client tries to send itself).
-// Locally there is no sign-in, so Development counts as signed in.
+// Anyone can look; only signed-in users can change anything (see SignIn for how sign-in is detected).
 var devSignedIn = app.Environment.IsDevelopment();
-static bool IsSignedIn(HttpContext http, bool dev) =>
-    dev || !string.IsNullOrEmpty(http.Request.Headers["X-MS-CLIENT-PRINCIPAL-ID"]);
 
 app.Use(async (http, next) =>
 {
     var method = http.Request.Method;
     var readOnly = HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method);
     // LovelyOSD reads a log and stores nothing, so visitors can use it too (it's rate limited instead).
-    var openToAll = http.Request.Path.StartsWithSegments("/api/osd");
-    if (!readOnly && !openToAll && http.Request.Path.StartsWithSegments("/api") && !IsSignedIn(http, devSignedIn))
+    // Visit counting has to work for visitors, and only stores a daily hash.
+    var openToAll = http.Request.Path.StartsWithSegments("/api/osd") || http.Request.Path.StartsWithSegments("/api/visit");
+    if (!readOnly && !openToAll && http.Request.Path.StartsWithSegments("/api") && !SignIn.IsSignedIn(http))
     {
         http.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await http.Response.WriteAsJsonAsync(new { error = "Sign in to make changes." });
@@ -89,7 +86,7 @@ app.UseRateLimiter();
 
 app.MapGet("/api/me", (HttpContext http) => new
 {
-    signedIn = IsSignedIn(http, devSignedIn),
+    signedIn = SignIn.IsSignedIn(http),
     name = devSignedIn ? "Local" : http.Request.Headers["X-MS-CLIENT-PRINCIPAL-NAME"].ToString(),
     // Sign-in and sign-out links only exist where App Service Authentication is running.
     canSignOut = !devSignedIn,
@@ -115,6 +112,7 @@ app.UseStaticFiles(spaFiles);
 app.MapAircraft();
 app.MapTunes();
 app.MapFlights();
+app.MapVisits();
 
 // Client-side routes (/aircraft/3, /flights/7, ...) all load the Angular app. Unknown /api paths still 404.
 app.MapFallback("/api/{**path}", () => Results.NotFound());

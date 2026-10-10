@@ -11,6 +11,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<TuneSnapshot> TuneSnapshots => Set<TuneSnapshot>();
     public DbSet<TuneSetting> TuneSettings => Set<TuneSetting>();
     public DbSet<Flight> Flights => Set<Flight>();
+    public DbSet<Visit> Visits => Set<Visit>();
+    public DbSet<VisitSalt> VisitSalts => Set<VisitSalt>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -59,6 +61,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(x => x.TuneSnapshot).WithMany().HasForeignKey(x => x.TuneSnapshotId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => new { x.AircraftId, x.StartedAt });
             e.HasIndex(x => new { x.AircraftId, x.FileHash });
+        });
+
+        b.Entity<Visit>(e =>
+        {
+            e.Property(x => x.VisitorHash).HasMaxLength(16).IsRequired();
+            e.Property(x => x.Path).HasMaxLength(80).IsRequired();
+            e.Property(x => x.Referrer).HasMaxLength(60);
+            // One row per visitor, page and day: repeat views don't add rows.
+            e.HasIndex(x => new { x.Day, x.VisitorHash, x.Path }).IsUnique();
+        });
+
+        b.Entity<VisitSalt>(e =>
+        {
+            e.HasKey(x => x.Day);
+            e.Property(x => x.Salt).HasMaxLength(64).IsRequired();
         });
 
         // SQLite hands DateTime back as Kind=Unspecified, which serializes without a "Z" and

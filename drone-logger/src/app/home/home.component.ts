@@ -84,6 +84,7 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
           <li><strong>Free, no account.</strong> LovelyOSD works without signing up.</li>
           <li><strong>Nothing kept.</strong> A log you open in LovelyOSD is read and forgotten, and the video is rendered in your browser.</li>
           <li><strong>Your font stays yours.</strong> OSD fonts load from your computer and are never uploaded.</li>
+          <li><strong>No tracking cookies.</strong> Visits are counted with a hash that changes daily. No IP addresses are stored.</li>
           <li>
             <strong>Open source.</strong> GPL-3.0, built on Betaflight and Blackbox Explorer.
             <a href="https://github.com/RobWiersma/GitDrone">Code on GitHub</a>

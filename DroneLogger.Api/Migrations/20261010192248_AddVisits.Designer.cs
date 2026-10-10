@@ -3,6 +3,7 @@ using System;
 using DroneLogger.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DroneLogger.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261010192248_AddVisits")]
+    partial class AddVisits
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
@@ -302,10 +305,6 @@ namespace DroneLogger.Api.Migrations
                     b.Property<string>("Path")
                         .IsRequired()
                         .HasMaxLength(80)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Referrer")
-                        .HasMaxLength(60)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("VisitorHash")
