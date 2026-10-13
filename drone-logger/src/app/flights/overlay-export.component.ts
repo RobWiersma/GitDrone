@@ -113,12 +113,28 @@ function saveColors(o: typeof DEFAULT_COLORS) {
 
 @Component({
   selector: 'app-overlay-export',
+  host: {
+    '(document:fullscreenchange)': 'onFullscreenChange()',
+    '(document:keydown)': 'onFullscreenKey($event)',
+  },
   imports: [FormsModule],
   template: `
         <div class="layout">
           <section class="panel preview-panel" aria-labelledby="preview-heading">
             <h2 id="preview-heading">Preview</h2>
-            <div class="stage" [class.dark]="backdrop() === 'sky'">
+            <div #stage class="stage" [class.dark]="backdrop() === 'sky'">
+              <button class="fullscreen-btn" type="button" (click)="toggleFullscreen()"
+                      [attr.aria-label]="fullscreen() ? 'Exit full screen' : 'Full screen preview'" [title]="fullscreen() ? 'Exit full screen (Esc)' : 'Full screen'">
+                @if (fullscreen()) {
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                } @else {
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                }
+              </button>
+              @if (fullscreen() && backdrop() === 'video' && videoUrl()) {
+                <p class="fs-hint" aria-live="polite">Space to {{ videoPlaying() ? 'pause' : 'play' }} · Esc to exit</p>
+              }
+              <div class="frame">
               @if (backdrop() === 'video' && videoUrl()) {
                 <video #bgVideo class="bg-video" [src]="videoUrl()" [muted]="muted()" playsinline preload="auto" aria-hidden="true"
                        (loadedmetadata)="onVideoMeta(); seekVideoToPreview()" (durationchange)="onVideoMeta()"
@@ -130,6 +146,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                       [style.cursor]="dragging() ? 'grabbing' : hoverKey() ? 'grab' : 'default'"
                       (pointerdown)="onPointerDown($event)" (pointermove)="onPointerMove($event)"
                       (pointerup)="onPointerUp()" (pointercancel)="onPointerUp()" (pointerleave)="hoverKey.set(null)"></canvas>
+              </div>
             </div>
             @if (backdrop() === 'video' && videoUrl()) {
               <!-- Moves only the video, to find the takeoff frame; the overlay stays put until "Takeoff is here". -->
@@ -412,7 +429,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
         </section>
   `,
   styles: [`
-    :host { display: block; }
+    /* Wider than the site's usual page so the preview can be big; never narrower than its container. */
+    :host { display: block; width: max(100%, min(96rem, calc(100vw - 4rem))); margin-inline: calc((100% - max(100%, min(96rem, calc(100vw - 4rem)))) / 2); }
     .layout { display: grid; grid-template-columns: minmax(0, 1fr) 20rem; gap: 1rem; align-items: start; margin: 1rem 0; }
     @media (max-width: 60rem) { .layout { grid-template-columns: 1fr; } }
     .panel h2 { margin-bottom: .75rem; }
@@ -426,8 +444,19 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .preview-help { margin: .75rem 0 0; font-size: .88rem; line-height: 1.5; display: grid; gap: .5rem; }
     .preview-help p { margin: 0; }
     .stage { position: relative; }
-    .stage canvas { position: relative; z-index: 1; }
+    /* Video and overlay share one 16:9 frame, so they stay lined up at any size, full screen included. */
+    .frame { position: relative; aspect-ratio: 16 / 9; }
+    .frame canvas { position: relative; z-index: 1; }
     .bg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+    .fullscreen-btn { position: absolute; top: .5rem; right: .5rem; z-index: 3; width: 2.1rem; height: 2.1rem; display: grid; place-items: center;
+                      border: 0; border-radius: 8px; background: rgb(8 12 16 / .6); color: #fff; cursor: pointer; padding: 0; opacity: .75; }
+    .fullscreen-btn:hover, .fullscreen-btn:focus-visible { opacity: 1; }
+    .fullscreen-btn:focus-visible { outline: 2px solid #9be564; outline-offset: 2px; }
+    .fullscreen-btn svg { width: 1.1rem; height: 1.1rem; }
+    .stage:fullscreen { display: grid; place-items: center; background: #000; border: 0; border-radius: 0; }
+    .stage:fullscreen .frame { width: min(100vw, calc(100vh * 16 / 9)); }
+    .fs-hint { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 3; margin: 0; padding: .35rem .8rem;
+               border-radius: 999px; background: rgb(8 12 16 / .6); color: #fff; font-size: .85rem; pointer-events: none; }
     canvas.before-log { visibility: hidden; }
     /* Both sliders' labels share a width so the two bars line up. */
     .scrub-label { font-weight: 600; font-size: .92rem; flex: 0 0 7.5rem; }
@@ -546,6 +575,9 @@ export class OverlayExportComponent {
 
   // ---- playing the pilot's own video behind the preview ----
   private bgVideo = viewChild<ElementRef<HTMLVideoElement>>('bgVideo');
+  private stage = viewChild<ElementRef<HTMLDivElement>>('stage');
+  /** The preview is filling the screen. */
+  fullscreen = signal(false);
   videoUrl = signal<string | null>(null);
   videoName = signal('');
   /** Seconds into the video where the log (arming) starts. */
@@ -745,6 +777,22 @@ export class OverlayExportComponent {
   setBackdrop(v: Backdrop) {
     this.backdrop.set(v);
     try { localStorage.setItem(BACKDROP_KEY, v); } catch { /* not remembered */ }
+  }
+
+  toggleFullscreen() {
+    if (document.fullscreenElement) { document.exitFullscreen().catch(() => undefined); return; }
+    this.stage()?.nativeElement.requestFullscreen().catch(() => this.backdropError.set("This browser won't go full screen here."));
+  }
+
+  onFullscreenChange() {
+    this.fullscreen.set(document.fullscreenElement === this.stage()?.nativeElement);
+  }
+
+  /** In full screen, Space plays and pauses the video (Esc exits, handled by the browser). */
+  onFullscreenKey(e: KeyboardEvent) {
+    if (!this.fullscreen() || e.key !== ' ' || !this.videoUrl()) return;
+    e.preventDefault();
+    this.toggleVideo();
   }
 
   onVideoFile(e: Event) {
