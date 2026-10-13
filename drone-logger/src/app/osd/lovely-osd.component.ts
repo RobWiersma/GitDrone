@@ -62,7 +62,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
           <section aria-labelledby="osd-export-heading">
             <h2 id="osd-export-heading">Video overlay</h2>
-            <p class="hint">It starts at arming, so line it up with your takeoff in Premiere or After Effects.</p>
+            <p class="hint">It starts at arming. Play it over your own video to check the layout and line it up with your takeoff.</p>
             <app-overlay-export [data]="overlayData()!" [seconds]="s.flight.durationMs / 1000" [fileStem]="fileStem()" />
           </section>
         }

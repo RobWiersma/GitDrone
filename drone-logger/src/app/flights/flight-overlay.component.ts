@@ -17,7 +17,7 @@ import { BlackboxTipsComponent } from './blackbox-tips.component';
         <h1>Video overlay</h1>
         <p class="hint">
           A transparent QuickTime video of the HUD, to put on a track above your footage in Premiere or After Effects.
-          It starts at arming, so line it up with your takeoff.
+          It starts at arming. Play it over your own video below to check the layout and line it up with your takeoff.
         </p>
         @if (data(); as d) {
           <app-overlay-export [data]="d" [seconds]="f.durationMs / 1000" [fileStem]="'gitdrone-overlay-' + f.id" />

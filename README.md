@@ -94,16 +94,30 @@ its altitude from either.
 
 ## Video overlay
 
-Each flight page has **Export video overlay** (`/flights/:id/overlay`): a transparent HUD video to put on a
-track above your footage in Premiere Pro or After Effects. It shows speed and acceleration, altitude, distance
-from home, satellites, battery (pack and per-cell voltage, amps, mAh used, watts), both sticks in
-Blackbox Explorer style (modes 1–4), a flight timer and a mini map, and can draw everything with your goggles'
-Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format) including Betaflight's own icons.
+Each flight page has **Export video overlay** (`/flights/:id/overlay`), and LovelyOSD has the same tool: a
+transparent HUD video to put on a track above your footage in Premiere Pro or After Effects. It shows:
+
+- a **speed panel**: speed, G-force, current and power;
+- a **battery panel**: per-cell and pack voltage, flight time and mAh used;
+- a **mini map** with an **RSSI panel** under it: satellites, RSSI, distance from home and height (GPS or barometer);
+- both **sticks** in Blackbox Explorer style (modes 1–4) with motion trails;
+- a Betaflight-style **stats screen** at the end (a 0.1 s blank, then TOTAL ARM, MAX SPEED, MIN BATTERY, ...).
+
+It can draw everything with your goggles' Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format),
+including Betaflight's own icons.
 
 **Layout.** Drag any element on the preview to move it, and set each one's size (50–200%) under Layout; the same
 controls also move elements from the keyboard. The timer, RSSI, speed and battery panels also let you size each reading
 inside them (speed, G-force, satellites, pack voltage, mAh, ...), and the panel grows or shrinks to fit. Positions are stored as fractions of the frame, so a layout looks the
 same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.
+
+**Preview over your own video.** Pick **Play it over your video** under the preview to play your flight footage
+behind the overlay, synced live (the file plays from your computer; nothing is uploaded). To line them up, move the
+**Flight footage** slider (◀ ▶ step single frames) to the moment you leave the ground and press **Takeoff is here**:
+GitDrone finds takeoff in the log as the first throttle punch over 20%, or the first GPS movement without stick data.
+**Arming is here** does the same on the arming moment, and **Log starts at** holds the result, so you can type it too.
+The overlay is hidden before the log starts, like in your editor. H.264 MP4s play everywhere; H.265 only in some
+browsers. Checkerboard and Sky backdrops are there too; none of them end up in the export.
 
 **How it renders.** Everything happens in the browser; nothing is uploaded. Each frame is drawn on a canvas
 straight from the decoded log data (no playback, no screen capture), encoded as a PNG, and written into a
@@ -118,8 +132,9 @@ live ETA while it works.
 **Size.** The video is lossless, so it's large: about 170 KB per 1080p frame, roughly 2.2 GB for that
 7-minute flight. Your editor's final export brings it back to normal size.
 
-In Premiere: import the `.mov`, put it on a track above the footage, and slide it so the timer starts when the
-quad arms. If it shows black instead of transparent, set Interpret Footage → Alpha Channel to Straight.
+In Premiere: import the `.mov` and put it on a track above the footage. If you synced it to your video in the
+preview, the page tells you where the clip starts in your footage; otherwise slide it until it matches your takeoff.
+If it shows black instead of transparent, set Interpret Footage → Alpha Channel to Straight.
 
 ## LovelyOSD Overlay
 

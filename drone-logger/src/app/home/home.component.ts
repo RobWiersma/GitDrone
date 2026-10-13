@@ -64,7 +64,8 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
             <h3><a routerLink="/osd">LovelyOSD overlays</a></h3>
             <p>
               Drop in a blackbox log and export a transparent <strong>.mov</strong> for Premiere or After Effects: speed, battery,
-              sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, resize and recolour every element.
+              sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, resize and recolour every element,
+              and preview it playing over your own footage.
             </p>
           </li>
           <li class="panel">
@@ -92,8 +93,9 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
         <h2 id="steps-heading">An overlay in three steps</h2>
         <ol>
           <li><strong>Load a log.</strong> Any Betaflight <code>.bbl</code> or <code>.bfl</code> file from your flight controller or SD card.</li>
-          <li><strong>Make it yours.</strong> Load your goggles' <code>font_bf.bin</code>, move things around, pick colours, check the preview.</li>
-          <li><strong>Export.</strong> A lossless video with transparency. Put it on a track above your footage and line it up with takeoff.</li>
+          <li><strong>Make it yours.</strong> Load your goggles' <code>font_bf.bin</code>, move things around and pick colours, with your own
+            flight video playing behind it, synced to your takeoff.</li>
+          <li><strong>Export.</strong> A lossless video with transparency. Put it on a track above your footage, at the time the page gives you.</li>
         </ol>
         <a class="btn btn-primary" routerLink="/osd">Try LovelyOSD</a>
       </section>

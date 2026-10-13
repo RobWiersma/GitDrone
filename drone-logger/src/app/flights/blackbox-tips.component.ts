@@ -7,7 +7,7 @@ import { Component, input } from '@angular/core';
 @Component({
   selector: 'app-blackbox-tips',
   template: `
-    <details class="panel tips" [open]="open()">
+    <details class="panel tips callout" [open]="open()">
       <summary><h2>Getting a good log</h2></summary>
 
       <h3>1. Turn on the right log fields</h3>

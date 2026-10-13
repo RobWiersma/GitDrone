@@ -60,6 +60,12 @@ code { background: var(--wash); padding: .05rem .3rem; border-radius: 4px; font-
 .bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.25rem;
          box-shadow: var(--shadow); }
+/* How-to and description text: a soft accent tint and stripe so instructions stand out from ordinary hints.
+   Text stays in the main ink colour (not muted) so it keeps full contrast on the tint. */
+.callout { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); color: var(--ink);
+           border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-left: 4px solid var(--accent);
+           border-radius: 10px; padding: .75rem 1rem; }
+.callout.panel { padding: 1.1rem 1.25rem; }
 
 /* Small uppercase labels, OSD style. */
 .eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }

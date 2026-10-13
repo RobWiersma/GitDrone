@@ -1,4 +1,4 @@
-import { Component, ElementRef, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ELEMENT_ITEMS, ELEMENT_LABELS, ElementKey, ElementPlacement, ITEM_SCALE_MAX, ITEM_SCALE_MIN, ItemKey, OverlayData, OverlayLayout,
   OverlayOptions, OverlayRenderer, STATS_GAP_S } from './overlay-renderer';
@@ -87,6 +87,23 @@ function saveItemScales(scales: ItemScales) {
   try { localStorage.setItem(ITEMS_KEY, JSON.stringify(scales)); } catch { /* not remembered */ }
 }
 
+type Backdrop = 'checker' | 'sky' | 'video';
+const BACKDROP_KEY = 'gitdrone-overlay-backdrop';
+
+function readBackdrop(): Backdrop {
+  try {
+    const v = localStorage.getItem(BACKDROP_KEY);
+    if (v === 'checker' || v === 'sky') return v;
+  } catch { /* default */ }
+  return 'sky';
+}
+
+/** "0:02.10": minutes, seconds and hundredths, rounded once so 2.0999 reads 2.10, not 2.09. */
+function preciseClock(seconds: number) {
+  const cs = Math.round(Math.max(0, seconds) * 100);
+  return `${clock(Math.floor(cs / 100))}.${(cs % 100).toString().padStart(2, '0')}`;
+}
+
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 function saveColors(o: typeof DEFAULT_COLORS) {
@@ -101,19 +118,89 @@ function saveColors(o: typeof DEFAULT_COLORS) {
         <div class="layout">
           <section class="panel preview-panel" aria-labelledby="preview-heading">
             <h2 id="preview-heading">Preview</h2>
-            <div class="stage" [class.dark]="darkBackdrop()">
-              <canvas #preview width="1920" height="1080" role="img"
+            <div class="stage" [class.dark]="backdrop() === 'sky'">
+              @if (backdrop() === 'video' && videoUrl()) {
+                <video #bgVideo class="bg-video" [src]="videoUrl()" [muted]="muted()" playsinline preload="auto" aria-hidden="true"
+                       (loadedmetadata)="onVideoMeta(); seekVideoToPreview()" (durationchange)="onVideoMeta()"
+                       (timeupdate)="onVideoTime()" (seeked)="onVideoTime()"
+                       (pause)="videoPlaying.set(false)" (play)="videoPlaying.set(true)"></video>
+              }
+              <canvas #preview [class.before-log]="backdrop() === 'video' && beforeLog()" width="1920" height="1080" role="img"
                       [attr.aria-label]="'Overlay preview at ' + previewClock() + '. Drag an element to move it; the layout controls below do the same from the keyboard.'"
                       [style.cursor]="dragging() ? 'grabbing' : hoverKey() ? 'grab' : 'default'"
                       (pointerdown)="onPointerDown($event)" (pointermove)="onPointerMove($event)"
                       (pointerup)="onPointerUp()" (pointercancel)="onPointerUp()" (pointerleave)="hoverKey.set(null)"></canvas>
             </div>
+            @if (backdrop() === 'video' && videoUrl()) {
+              <!-- Moves only the video, to find the takeoff frame; the overlay stays put until "Takeoff is here". -->
+              <div class="video-scrub">
+                <label for="videoTime" class="scrub-label">Flight footage</label>
+                <button class="btn small step" type="button" (click)="stepVideo(-1)" aria-label="Back one frame">◀</button>
+                <input id="videoTime" type="range" min="0" [max]="videoDuration()" step="0.01" [ngModel]="videoTime()"
+                       (ngModelChange)="scrubVideo(+$event)" [disabled]="!videoDuration()" />
+                <button class="btn small step" type="button" (click)="stepVideo(1)" aria-label="Forward one frame">▶</button>
+                <span class="mono">{{ videoClock() }}</span>
+              </div>
+            }
             <div class="scrub">
-              <label for="previewTime" class="sr-only">Preview time</label>
-              <input id="previewTime" type="range" min="0" [max]="previewMax()" step="0.1" [ngModel]="previewTime()"
-                     (ngModelChange)="previewTime.set(+$event)" />
+              <label for="previewTime" class="scrub-label">OSD overlay</label>
+              <button class="btn small step" type="button" (click)="stepOverlay(-1)" aria-label="Overlay back one frame">◀</button>
+              <input id="previewTime" type="range" min="0" [max]="previewMax()" step="0.01" [ngModel]="previewTime()"
+                     (ngModelChange)="onScrub(+$event)" />
+              <button class="btn small step" type="button" (click)="stepOverlay(1)" aria-label="Overlay forward one frame">▶</button>
               <span class="mono">{{ previewClock() }}</span>
-              <label class="check"><input type="checkbox" [ngModel]="darkBackdrop()" (ngModelChange)="darkBackdrop.set($event)" /> Dark backdrop</label>
+            </div>
+            <div class="backdrop">
+              <label for="backdrop">Preview backdrop</label>
+              <select id="backdrop" [ngModel]="backdrop()" (ngModelChange)="setBackdrop($event)">
+                <option value="checker">Checkerboard (shows transparency)</option>
+                <option value="sky">Sky</option>
+                <option value="video" [disabled]="!videoUrl()">Your video (plays with the overlay)</option>
+              </select>
+              <label class="btn small">
+                {{ videoUrl() ? 'Change video' : 'Play it over your video' }}
+                <input class="sr-only" type="file" accept="video/*" (change)="onVideoFile($event)" />
+              </label>
+            </div>
+            @if (backdropError()) { <p class="error">{{ backdropError() }}</p> }
+            @if (backdrop() === 'video' && videoUrl()) {
+              <div class="video-sync">
+                <!-- Sync buttons on top, kept together on one line. -->
+                <div class="sync-buttons">
+                  @if (takeoffTime() !== null) {
+                    <button class="btn btn-primary small" type="button" (click)="takeoffHere()">Takeoff is here</button>
+                  }
+                  <button class="btn small" type="button" (click)="logStartsHere()">Arming is here</button>
+                </div>
+                <!-- Playback and the start time underneath. -->
+                <div class="playback-row">
+                  <button class="btn small" type="button" (click)="toggleVideo()">{{ videoPlaying() ? 'Pause' : 'Play' }}</button>
+                  <button class="btn small" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()">{{ muted() ? 'Sound off' : 'Sound on' }}</button>
+                  <div class="offset">
+                    <label for="video-offset">Log starts at</label>
+                    <input id="video-offset" type="number" step="0.1" [ngModel]="videoOffset()" (ngModelChange)="setOffset(+$event)" />
+                    <span>s in the video</span>
+                  </div>
+                </div>
+              </div>
+            }
+            <!-- All the how-to text for the preview in one callout, under its controls. -->
+            <div class="callout preview-help">
+              @if (backdrop() === 'video' && videoUrl()) {
+                @if (videoOffset() < 0) { <p>A negative start means you armed before the video started.</p> }
+                <p>
+                  @if (takeoffTime() !== null) {
+                    To line them up: use the <strong>Flight footage</strong> slider (and ◀ ▶ for single frames) to find the moment you leave
+                    the ground, then press <strong>Takeoff is here</strong>
+                    (the log has takeoff at {{ takeoffClock() }}, the first throttle punch{{ takeoffFromGps() ? ' or move on GPS' : '' }}).
+                    Or pause on arming and press <strong>Arming is here</strong>.
+                  } @else {
+                    To line them up: pause the video on the moment you arm, then press <strong>Arming is here</strong>.
+                  }
+                  The overlay is hidden before the log starts, like in your editor. {{ videoName() }} plays from this computer and isn't uploaded.
+                </p>
+              }
+              <p>The backdrop is only for the preview: the exported video stays transparent.</p>
             </div>
 
             <fieldset class="layout-edit" [disabled]="busy()">
@@ -263,7 +350,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <span>s</span>
               </div>
               @if (opts().showStats) {
-                <p class="hint stats-hint">After the log ends: a {{ gapMs }} ms blank, then the stats. Drag the preview past the end to see them.</p>
+                <p class="callout stats-hint">After the log ends: a {{ gapMs }} ms blank, then the stats. Drag the preview past the end to see them.</p>
               }
               <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi() && !data().track" /> RSSI panel (satellites, RSSI, distance, height)</label>
             </fieldset>
@@ -306,11 +393,19 @@ function saveColors(o: typeof DEFAULT_COLORS) {
           </section>
         </div>
 
-        <section class="panel howto" aria-labelledby="howto-heading">
+        <section class="panel howto callout" aria-labelledby="howto-heading">
           <h2 id="howto-heading">Using it in Premiere Pro</h2>
           <ol>
             <li>Import the <strong>.mov</strong> like any clip and drop it on a track above your footage.</li>
-            <li>Slide it so the timer starts when the quad arms (usually just before takeoff).</li>
+            @if (placeAt(); as at) {
+              <li>Start the overlay clip at <strong>{{ at }}</strong> in {{ videoName() }}: that's where your sync in the preview puts it.</li>
+            } @else if (placeTrimmed(); as cut) {
+              <li>Your footage starts after arming, so start the clip at the very beginning of {{ videoName() }} and trim the first
+                <strong>{{ cut }}</strong> off the overlay (or set <strong>Start</strong> to that before exporting).</li>
+            } @else {
+              <li>Slide it until it lines up with your takeoff. Easier: play it over your video above and press <strong>Takeoff is here</strong>,
+                and this step tells you exactly where it goes.</li>
+            }
             <li>If the background shows black instead of see-through: right-click the clip, <strong>Modify → Interpret Footage</strong>, and set Alpha Channel to <strong>Straight</strong>.</li>
           </ol>
           <p class="hint">The video is lossless (PNG frames inside a .mov), so it's big. Render it into your final export as usual.</p>
@@ -325,9 +420,29 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .stage { border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
              background: repeating-conic-gradient(#c9d1d9 0 25%, #eef2f6 0 50%) 0 0 / 24px 24px; }
     .stage.dark { background: linear-gradient(180deg, #4b6a88, #2b3a2b); }
+    .backdrop { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin-top: .6rem; font-size: .92rem; }
+    .backdrop label[for] { font-weight: 600; }
+    .backdrop select { width: auto; }
+    .preview-help { margin: .75rem 0 0; font-size: .88rem; line-height: 1.5; display: grid; gap: .5rem; }
+    .preview-help p { margin: 0; }
+    .stage { position: relative; }
+    .stage canvas { position: relative; z-index: 1; }
+    .bg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+    canvas.before-log { visibility: hidden; }
+    /* Both sliders' labels share a width so the two bars line up. */
+    .scrub-label { font-weight: 600; font-size: .92rem; flex: 0 0 7.5rem; }
+    .video-sync { display: grid; gap: .5rem; margin-top: .6rem; font-size: .92rem; justify-items: start; }
+    .playback-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .6rem; }
+    .video-sync .offset { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+    .video-sync .offset label { font-weight: 600; }
+    .video-sync .offset input { width: 5.5rem; }
+    .sync-buttons { display: flex; flex-wrap: nowrap; gap: .5rem; white-space: nowrap; }
     canvas { display: block; width: 100%; height: auto; }
-    .scrub { display: flex; align-items: center; gap: .75rem; margin-top: .6rem; flex-wrap: wrap; }
-    .scrub input[type=range] { flex: 1 1 12rem; accent-color: var(--accent); }
+    /* The footage and overlay sliders share one look so they read as a pair. */
+    .scrub, .video-scrub { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; font-size: .92rem; }
+    .scrub input[type=range], .video-scrub input[type=range] { flex: 1 1 10rem; min-width: 0; accent-color: var(--accent); }
+    .scrub .step, .video-scrub .step { padding: .2rem .55rem; line-height: 1; }
+    .scrub .mono, .video-scrub .mono { min-width: 4.6rem; text-align: right; }
     canvas { touch-action: none; } /* dragging an element shouldn't scroll the page on touch screens */
     .layout-edit { margin: 1rem 0 0; }
     .layout-edit .hint { margin: 0 0 .5rem; }
@@ -340,7 +455,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .stats-time { display: flex; align-items: center; gap: .5rem; margin: .1rem 0 .3rem 1.6rem; font-size: .92rem; }
     .stats-time label { font-weight: normal; }
     .stats-time input { width: 4.5rem; }
-    .stats-hint { margin: 0 0 .4rem 1.6rem; font-size: .85rem; }
+    .stats-hint { margin: .1rem 0 .5rem 1.6rem; font-size: .85rem; line-height: 1.45; padding: .5rem .7rem; }
     .layout-actions { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: .4rem; font-size: .92rem; }
     .check { display: flex; align-items: center; justify-content: flex-start; gap: .45rem; font-weight: normal; margin: .2rem 0; }
     /* The site-wide .field input rule makes inputs full width; checkboxes shouldn't be. */
@@ -424,8 +539,26 @@ export class OverlayExportComponent {
   });
 
   previewTime = linkedSignal({ source: this.range, computation: r => Math.min(60, r.seconds / 2) });
-  previewClock = computed(() => clock(this.previewTime()));
-  darkBackdrop = signal(true);
+  previewClock = computed(() => preciseClock(this.previewTime()));
+  /** What's behind the preview canvas. Never part of the export. */
+  backdrop = signal<Backdrop>(readBackdrop());
+  backdropError = signal('');
+
+  // ---- playing the pilot's own video behind the preview ----
+  private bgVideo = viewChild<ElementRef<HTMLVideoElement>>('bgVideo');
+  videoUrl = signal<string | null>(null);
+  videoName = signal('');
+  /** Seconds into the video where the log (arming) starts. */
+  videoOffset = signal(0);
+  videoPlaying = signal(false);
+  muted = signal(true);
+  /** The background video's own clock, for its slider. */
+  videoTime = signal(0);
+  videoDuration = signal(0);
+  videoClock = computed(() => preciseClock(this.videoTime()));
+  /** The video is before arming, so the overlay isn't drawn yet. */
+  beforeLog = signal(false);
+  private frameRequest: number | null = null;
 
   // ---- end-of-flight stats ----
   readonly gapMs = Math.round(STATS_GAP_S * 1000);
@@ -458,6 +591,11 @@ export class OverlayExportComponent {
 
     // Redraw the preview whenever anything it shows changes.
     afterNextRender(() => this.drawPreview());
+    inject(DestroyRef).onDestroy(() => {
+      this.stopVideo();
+      const url = this.videoUrl();
+      if (url) URL.revokeObjectURL(url);
+    });
     effect(() => this.drawPreview());
   }
 
@@ -602,6 +740,149 @@ export class OverlayExportComponent {
 
   setStatsSeconds(v: number) {
     if (Number.isFinite(v)) this.statsSeconds.set(Math.min(30, Math.max(0.5, v)));
+  }
+
+  setBackdrop(v: Backdrop) {
+    this.backdrop.set(v);
+    try { localStorage.setItem(BACKDROP_KEY, v); } catch { /* not remembered */ }
+  }
+
+  onVideoFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.stopVideo();
+    const old = this.videoUrl();
+    if (old) URL.revokeObjectURL(old);
+    // Played straight from the file on this computer; nothing is uploaded.
+    this.videoUrl.set(URL.createObjectURL(file));
+    this.videoName.set(file.name);
+    this.backdropError.set('');
+    this.setBackdrop('video');
+  }
+
+  onVideoMeta() {
+    const v = this.bgVideo()?.nativeElement;
+    if (!v) return;
+    // Some recordings don't say how long they are up front; the seekable range does.
+    const d = Number.isFinite(v.duration) ? v.duration : v.seekable.length ? v.seekable.end(v.seekable.length - 1) : 0;
+    this.videoDuration.set(d);
+  }
+
+  onVideoTime() {
+    const v = this.bgVideo()?.nativeElement;
+    if (v) this.videoTime.set(v.currentTime);
+  }
+
+  /** Moves only the video (pausing it), so you can find a frame without the overlay moving. */
+  scrubVideo(t: number) {
+    const v = this.bgVideo()?.nativeElement;
+    if (!v || !Number.isFinite(t)) return;
+    v.pause();
+    v.currentTime = Math.max(0, t);
+    this.videoTime.set(v.currentTime);
+  }
+
+  /** The overlay one frame back or forward at the export frame rate; a paused video follows, like the slider. */
+  stepOverlay(dir: -1 | 1) {
+    const t = Math.min(this.previewMax(), Math.max(0, this.previewTime() + dir / this.fps()));
+    this.onScrub(Math.round(t * 1000) / 1000);
+  }
+
+  /** One frame back or forward (at 30 fps; close enough for 25-60 fps footage). */
+  stepVideo(dir: -1 | 1) {
+    this.scrubVideo(this.videoTime() + dir / 30);
+  }
+
+  /** The slider moves the overlay; a paused video follows it. */
+  onScrub(t: number) {
+    this.previewTime.set(t);
+    if (!this.videoPlaying()) this.seekVideoToPreview();
+  }
+
+  seekVideoToPreview() {
+    const v = this.bgVideo()?.nativeElement;
+    if (!v) return;
+    v.currentTime = Math.max(0, this.previewTime() + this.videoOffset());
+    this.beforeLog.set(false);
+  }
+
+  toggleVideo() {
+    const v = this.bgVideo()?.nativeElement;
+    if (!v) return;
+    if (!v.paused) { v.pause(); return; }
+    v.play().then(() => this.followVideo(), () => this.backdropError.set("This browser can't play that video. Try an H.264 MP4."));
+  }
+
+  setOffset(v: number) {
+    if (!Number.isFinite(v)) return;
+    this.videoOffset.set(Math.round(v * 100) / 100);
+    if (!this.videoPlaying()) this.seekVideoToPreview(); // keep the overlay where it is and slide the video under it
+  }
+
+  /**
+   * When the quad left the ground, in seconds since arming: the first time the throttle stick goes over 20%, or without
+   * stick data, the first time GPS shows it moving or climbing. Null when the log has neither.
+   */
+  takeoffTime = computed(() => {
+    const sticks = this.data().sticks;
+    if (sticks?.length) {
+      const hit = sticks.find(p => p[4] >= 1200);
+      if (hit) return hit[0];
+    }
+    const hit = this.data().track?.points.find(p => p[4] > 2 || p[3] > 1);
+    return hit ? hit[0] : null;
+  });
+  takeoffFromGps = computed(() => !this.data().sticks?.some(p => p[4] >= 1200));
+  takeoffClock = computed(() => {
+    const t = this.takeoffTime();
+    return t === null ? '' : `${clock(t)}.${Math.floor((t % 1) * 10)}`;
+  });
+
+  /** Where the exported clip (which begins at Start) goes in the pilot's footage, once the preview is synced. */
+  private placeSeconds = computed(() => (this.videoUrl() ? this.videoOffset() + this.start() : null));
+  placeAt = computed(() => { const t = this.placeSeconds(); return t !== null && t >= 0 ? preciseClock(t) : null; });
+  /** The footage starts after the clip would: how much of the clip's start to cut. */
+  placeTrimmed = computed(() => { const t = this.placeSeconds(); return t !== null && t < 0 ? preciseClock(-t) : null; });
+
+  /** Use the frame on screen as the moment of takeoff: the overlay jumps there and the video stays put. */
+  takeoffHere() {
+    const v = this.bgVideo()?.nativeElement;
+    const t = this.takeoffTime();
+    if (!v || t === null) return;
+    this.videoOffset.set(Math.round((v.currentTime - t) * 100) / 100);
+    this.previewTime.set(t);
+    this.beforeLog.set(false);
+  }
+
+  /** Use the frame on screen as the moment of arming. */
+  logStartsHere() {
+    const v = this.bgVideo()?.nativeElement;
+    if (!v) return;
+    this.videoOffset.set(Math.round(v.currentTime * 100) / 100);
+    this.previewTime.set(0);
+    this.beforeLog.set(false);
+  }
+
+  /** While the video plays, the overlay follows its clock, frame by frame where the browser supports it. */
+  private followVideo() {
+    const v = this.bgVideo()?.nativeElement;
+    if (!v || v.paused) return;
+    const t = v.currentTime - this.videoOffset();
+    this.beforeLog.set(t < 0);
+    this.previewTime.set(Math.min(this.previewMax(), Math.max(0, t)));
+    const next = () => this.followVideo();
+    if ('requestVideoFrameCallback' in v) {
+      this.frameRequest = (v as HTMLVideoElement & { requestVideoFrameCallback(cb: () => void): number }).requestVideoFrameCallback(next);
+    } else {
+      this.frameRequest = requestAnimationFrame(next);
+    }
+  }
+
+  private stopVideo() {
+    this.bgVideo()?.nativeElement.pause();
+    this.videoPlaying.set(false);
   }
 
   clampTime(v: number) {
