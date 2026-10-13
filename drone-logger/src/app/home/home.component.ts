@@ -1,5 +1,5 @@
-import { Component, inject, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { DatePipe, NgOptimizedImage } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FlightService } from '../flights/flight.service';
 import { Flight, flightDate, formatDistance, formatDuration } from '../flights/flight.models';
@@ -8,7 +8,7 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
 /** Welcome page: what GitDrone does, the way into LovelyOSD, and the latest flights. */
 @Component({
   selector: 'app-home',
-  imports: [DatePipe, RouterLink, FlightThumbComponent],
+  imports: [DatePipe, NgOptimizedImage, RouterLink, FlightThumbComponent],
   template: `
     <div class="page home">
       <section class="hero" aria-labelledby="hero-heading">
@@ -26,15 +26,35 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
           <p class="hint">LovelyOSD is free and needs no account.</p>
         </div>
 
-        <!-- Decorative: a still of what an overlay looks like. The real thing is drawn from your log. -->
-        <div class="screen" aria-hidden="true">
-          <div class="osd map"><svg viewBox="0 0 100 100"><path d="M12 80 C 4 40, 28 6, 58 12 S 96 42, 82 70 S 40 94, 26 66 S 50 34, 66 50"
-            fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" /><circle cx="66" cy="50" r="7" fill="#fff" /></svg></div>
-          <div class="osd info"><span>24 SAT</span><span>53% RSSI</span><span>⌂ 81 m</span><span>▲ 8 m</span></div>
-          <div class="osd speed"><span class="big">64</span> km/h <span class="r">9.3 A</span><span>0.8G</span><span class="r">294 W</span></div>
-          <div class="osd sticks"><i></i><i></i></div>
-          <div class="osd battery"><span class="big">3.52</span> V/cell <span class="r">2:11</span><span>21.1 V</span><span class="r">287 mAh</span></div>
-        </div>
+        <figure class="reel">
+          <div class="frames" aria-roledescription="carousel" aria-label="LovelyOSD overlay on real footage">
+            @for (f of frames; track f.src; let i = $index) {
+              <div class="frame" [class.on]="i === current()" [attr.aria-hidden]="i !== current()"
+                   [attr.aria-roledescription]="'slide'" [attr.aria-label]="(i + 1) + ' of ' + frames.length">
+                <img [ngSrc]="f.src" fill [priority]="i === 0" [alt]="f.alt" />
+              </div>
+            }
+            <div class="reel-controls">
+              <button type="button" class="pause" (click)="togglePlay()"
+                      [attr.aria-label]="playing() ? 'Pause the slideshow' : 'Play the slideshow'">
+                @if (playing()) {
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="3" stroke-linecap="round" /></svg>
+                } @else {
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor" /></svg>
+                }
+              </button>
+              <div class="dots">
+                @for (f of frames; track f.src; let i = $index) {
+                  <button type="button" [class.on]="i === current()" [attr.aria-current]="i === current() ? 'true' : null"
+                          [attr.aria-label]="'Show frame ' + (i + 1)" (click)="show(i)"></button>
+                }
+              </div>
+            </div>
+          </div>
+          <figcaption class="hint">
+            Real footage with a LovelyOSD overlay.
+          </figcaption>
+        </figure>
       </section>
 
       <section aria-labelledby="features-heading">
@@ -123,32 +143,28 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
     .lede { font-size: 1.08rem; line-height: 1.55; margin: 0 0 1.2rem; max-width: 36rem; }
     .cta { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: .5rem; }
 
-    /* The pretend video frame. */
-    .screen { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
-              background: linear-gradient(180deg, #5d82a8 0%, #8fb0c9 46%, #4f6b3e 47%, #2f4426 100%); box-shadow: var(--shadow);
-              font-family: var(--mono); color: #fff; font-weight: 700;
-              container-type: inline-size; /* everything inside scales with the frame, not the window */ }
-    .screen > * { font-size: 2.3cqw; }
-    .osd { position: absolute; background: rgb(8 12 16 / .45); border-radius: .6em; padding: .5em .8em; white-space: nowrap;
-           text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
-    .map { top: 4%; right: 3%; width: 25cqw; height: 25cqw; padding: 0; color: #9be564; }
-    .map svg { display: block; width: 100%; height: 100%; padding: 8%; box-sizing: border-box; }
-    .info { top: calc(4% + 26.5cqw); right: 3%; width: 25cqw; box-sizing: border-box; display: grid; grid-template-columns: 1fr auto; gap: .25em .6em; }
-    .speed, .battery { bottom: 5%; width: 34cqw; box-sizing: border-box; display: grid; grid-template-columns: auto 1fr auto;
-                       align-items: baseline; column-gap: .4em; row-gap: .25em; }
-    .speed { left: 3%; }
-    .battery { right: 3%; }
-    .speed .big, .battery .big { font-size: 1.9em; line-height: 1; }
-    .speed .r, .battery .r { text-align: right; }
-    .speed > span:nth-child(4), .battery > span:nth-child(4) { grid-column: 1 / 3; }
-    .sticks { bottom: 5%; left: 50%; transform: translateX(-50%); display: flex; gap: .8em; background: none; padding: 0; }
-    .sticks i { width: 3.9em; height: 3.9em; border-radius: 6px; background: rgb(28 28 28 / .75); position: relative;
-                background-image: linear-gradient(rgb(255 255 255 / .35), rgb(255 255 255 / .35)), linear-gradient(90deg, rgb(255 255 255 / .35), rgb(255 255 255 / .35));
-                background-size: 1px 100%, 100% 1px; background-position: center; background-repeat: no-repeat; }
-    .sticks i::after { content: ''; position: absolute; width: .6em; height: .6em; border-radius: 50%; background: #ff5a5a; left: 50%; top: 50%;
-                       transform: translate(-50%, -50%); }
-    .sticks i:first-child::after { top: 82%; }
-    .sticks i:last-child::after { left: 64%; top: 38%; }
+    /* Slideshow of real footage with the overlay. */
+    .reel { margin: 0; display: grid; gap: .45rem; }
+    .reel figcaption { margin: 0; font-size: .85rem; }
+    .frames { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
+              background: #0a0f14; box-shadow: var(--shadow); }
+    .frame { position: absolute; inset: 0; opacity: 0; transition: opacity 1s ease; }
+    .frame.on { opacity: 1; }
+    .frame img { object-fit: cover; }
+    @media (prefers-reduced-motion: reduce) { .frame { transition: none; } }
+    .reel-controls { position: absolute; left: .6rem; right: .6rem; bottom: .6rem; display: flex; align-items: center; justify-content: space-between;
+                     pointer-events: none; }
+    .reel-controls > * { pointer-events: auto; }
+    .pause { width: 2rem; height: 2rem; border-radius: 50%; border: 0; background: rgb(8 12 16 / .65); color: #fff; display: grid; place-items: center;
+             cursor: pointer; padding: 0; }
+    .pause svg { width: .9rem; height: .9rem; }
+    .dots { display: flex; gap: .35rem; background: rgb(8 12 16 / .55); padding: .4rem .55rem; border-radius: 999px; }
+    /* Each dot is a 24px tap target around an 8px dot. */
+    .dots button { width: 1.5rem; height: 1.5rem; margin: -.5rem -.25rem; border: 0; padding: 0; background: none; cursor: pointer; position: relative; }
+    .dots button::after { content: ''; position: absolute; inset: 50% auto auto 50%; width: .5rem; height: .5rem; border-radius: 50%;
+                          transform: translate(-50%, -50%); background: rgb(255 255 255 / .5); }
+    .dots button.on::after { background: #fff; width: 1rem; border-radius: 999px; }
+    .pause:focus-visible, .dots button:focus-visible { outline: 2px solid #9be564; outline-offset: 2px; border-radius: 999px; }
 
     .features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
     .features h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
@@ -177,8 +193,43 @@ export class HomeComponent {
   private flights = inject(FlightService);
   latest = signal<Flight[]>([]);
 
+  /** Frames from a real flight with a LovelyOSD overlay (Speedybee Mario 5 X). */
+  readonly frames = [
+    { src: 'home/osd-hillside.jpg', alt: 'FPV view over a sunny hillside and bay, with the overlay showing a speed of 47, 3.94 V per cell, the mini map and both sticks' },
+    { src: 'home/osd-treetop.jpg', alt: 'Looking straight down at a tree from above, with the overlay showing speed, battery, flight time and the mini map' },
+    { src: 'home/osd-field.jpg', alt: 'Diving toward a dirt field, with the overlay showing a speed of 11, satellites, RSSI and the stick positions' },
+    { src: 'home/osd-picnic.jpg', alt: 'Low over a picnic area, with the overlay showing 3.73 V per cell, 402 mAh used and 3:10 flight time' },
+    { src: 'home/osd-treeline.jpg', alt: 'Skimming the grass toward a tree line under blue sky, with the overlay showing a speed of 28 and 454 mAh used' },
+  ];
+  current = signal(0);
+  /** Auto-advance, unless the visitor asked for reduced motion. */
+  playing = signal(!matchMedia('(prefers-reduced-motion: reduce)').matches);
+  private timer: ReturnType<typeof setInterval> | null = null;
+
   constructor() {
     this.flights.feed(0, 3).subscribe({ next: p => this.latest.set(p.flights), error: () => this.latest.set([]) });
+    if (this.playing()) this.start();
+    inject(DestroyRef).onDestroy(() => this.stop());
+  }
+
+  show(i: number) {
+    this.current.set(i);
+    if (this.playing()) { this.stop(); this.start(); } // a full interval on the frame you picked
+  }
+
+  togglePlay() {
+    this.playing.update(p => !p);
+    if (this.playing()) this.start(); else this.stop();
+  }
+
+  private start() {
+    this.stop();
+    this.timer = setInterval(() => this.current.update(i => (i + 1) % this.frames.length), 5000);
+  }
+
+  private stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
   }
 
   date(f: Flight) {
