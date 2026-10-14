@@ -117,7 +117,26 @@ behind the overlay, synced live (the file plays from your computer; nothing is u
 GitDrone finds takeoff in the log as the first throttle punch over 20%, or the first GPS movement without stick data.
 **Arming is here** does the same on the arming moment, and **Log starts at** holds the result, so you can type it too.
 The overlay is hidden before the log starts, like in your editor. H.264 MP4s play everywhere; H.265 only in some
-browsers. Checkerboard and Sky backdrops are there too; none of them end up in the export.
+browsers. If the footage has its own sound (an onboard camera hears its motors), **Sync from motor sound** finds Log
+starts at for you: it slides the footage's loudness (high-passed at 800 Hz, on a log scale) along the throttle trace and
+keeps the best correlation, and only applies it when the match clearly beats every other position.
+
+**A sound track from another recording.** **Add a sound track** plays a second file's sound (a phone on the ground,
+say) instead of the footage's own. It's its own track, placed on the log just like the footage, with its own
+**Log starts at**, so moving the footage never moves the sound. Its loudness is drawn with what was heard in it marked
+(hover to read times), and the **Sound track** slider (or a click on the graph) moves only the sound, to find a moment in
+it. Ways to place it (`flights/clap.ts`):
+
+- **Arming and launch sound**, done for you when the file is added. A phone near the quad hears the motors arm, a jump
+  from quiet to a steady idle, then the launch exactly as long after as the log says; that moment is where the log
+  starts. No sound is needed in the footage.
+- **Takeoff is here / Arming is here** under the sound track, after moving it to that moment by ear or by the graph.
+- **A clap**, with footage loaded. The audio is high-passed at 2.5 kHz and the first sudden burst far above the half
+  second before it is the clap. Pick which clap in the sound, find it in the footage (found from the footage's own sound,
+  or step to the frame and press **Clap is here**), and **Sync on the clap** places the sound so the two land together.
+
+It works without footage too: with the Checkerboard or Sky backdrop, **Play** runs the overlay along with the sound.
+Preview only: the exported overlay has no sound; in Premiere, Synchronize → Audio lines the two up. Checkerboard and Sky backdrops are there too; none of them end up in the export.
 
 **How it renders.** Everything happens in the browser; nothing is uploaded. Each frame is drawn on a canvas
 straight from the decoded log data (no playback, no screen capture), encoded as a PNG, and written into a

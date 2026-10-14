@@ -7,6 +7,7 @@ import { GlyphFont, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font
 import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
+import { ArmingMatch, MotorMatch, SoundProfile, findArming, findClaps, matchMotorSound, soundProfile } from './clap';
 
 const RESOLUTIONS = [
   { label: '1080p (1920×1080)', w: 1920, h: 1080 },
@@ -136,10 +137,14 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               }
               <div class="frame">
               @if (backdrop() === 'video' && videoUrl()) {
-                <video #bgVideo class="bg-video" [src]="videoUrl()" [muted]="muted()" playsinline preload="auto" aria-hidden="true"
+                <video #bgVideo class="bg-video" [src]="videoUrl()" [muted]="muted() || !!audioUrl()" playsinline preload="auto" aria-hidden="true"
                        (loadedmetadata)="onVideoMeta(); seekVideoToPreview()" (durationchange)="onVideoMeta()"
-                       (timeupdate)="onVideoTime()" (seeked)="onVideoTime()"
-                       (pause)="videoPlaying.set(false)" (play)="videoPlaying.set(true)"></video>
+                       (timeupdate)="onVideoTime()" (seeked)="onVideoTime(); syncAudio(true)"
+                       (pause)="videoPlaying.set(false); syncAudio()" (play)="videoPlaying.set(true); syncAudio(true)"></video>
+              }
+              @if (audioUrl()) {
+                <audio #extAudio [src]="audioUrl()" [muted]="muted()" preload="auto"
+                       (play)="audioPlaying.set(true)" (pause)="audioPlaying.set(false)"></audio>
               }
               <canvas #preview [class.before-log]="backdrop() === 'video' && beforeLog()" width="1920" height="1080" role="img"
                       [attr.aria-label]="'Overlay preview at ' + previewClock() + '. Drag an element to move it; the layout controls below do the same from the keyboard.'"
@@ -188,7 +193,11 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     <button class="btn btn-primary small" type="button" (click)="takeoffHere()">Takeoff is here</button>
                   }
                   <button class="btn small" type="button" (click)="logStartsHere()">Arming is here</button>
+                  @if (canMatchMotors()) {
+                    <button class="btn small" type="button" (click)="syncFromMotors()" [disabled]="!!motorStatus()">Sync from motor sound</button>
+                  }
                 </div>
+                @if (motorStatus()) { <span class="hint" role="status">{{ motorStatus() }}</span> }
                 <!-- Playback and the start time underneath. -->
                 <div class="playback-row">
                   <button class="btn small" type="button" (click)="toggleVideo()">{{ videoPlaying() ? 'Pause' : 'Play' }}</button>
@@ -201,6 +210,104 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 </div>
               </div>
             }
+            <!-- Sound from another recording (a phone on the ground) is its own track, lined up to the log like the footage. -->
+            <div class="video-sync audio-panel">
+              <div class="audio-sync">
+                <label class="btn small">
+                  {{ audioUrl() ? 'Change sound track' : 'Add a sound track' }}
+                  <input class="sr-only" type="file" accept="audio/*,video/*" (change)="onAudioFile($event)" />
+                </label>
+                @if (audioUrl()) {
+                  <span class="audio-name">{{ audioName() }}</span>
+                  <button class="link" type="button" (click)="removeAudio()">Remove</button>
+                }
+              </div>
+              @if (audioUrl()) {
+                @if (clapStatus()) { <span class="hint" role="status">{{ clapStatus() }}</span> }
+                @if (audioProfile(); as prof) {
+                  <!-- The recording's loudness with what was heard in it marked; click to move the sound track there. -->
+                  <figure class="sound-profile">
+                    <figcaption>
+                      <span>Sound track: {{ audioName() }}</span>
+                      <span class="mono">{{ profileHover() !== null ? clockOf(profileHover()!) : clockOf(prof.duration) + ' long' }}</span>
+                    </figcaption>
+                    <svg viewBox="0 0 1000 60" preserveAspectRatio="none" role="img" [attr.aria-label]="profileLabel()"
+                         (mousemove)="hoverProfile($event)" (mouseleave)="profileHover.set(null)" (click)="seekProfile($event)">
+                      <path class="level" [attr.d]="profilePath()" />
+                      @for (c of audioClaps(); track c; let i = $index) {
+                        <line class="mark clap" [class.chosen]="hasVideo() && i === audioClapIndex()"
+                              [attr.x1]="profileX(c)" [attr.x2]="profileX(c)" y1="0" y2="60"><title>Clap at {{ clockOf(c) }}</title></line>
+                      }
+                      @if (audioArming(); as arm) {
+                        <line class="mark arm" [class.chosen]="audioLogStart() === arm.logStart" [attr.x1]="profileX(arm.logStart)" [attr.x2]="profileX(arm.logStart)"
+                              y1="0" y2="60"><title>Arming heard at {{ clockOf(arm.logStart) }}</title></line>
+                        @if (launchInAudio() !== null) {
+                          <line class="mark arm" [class.chosen]="audioLogStart() === arm.logStart" [attr.x1]="profileX(launchInAudio()!)" [attr.x2]="profileX(launchInAudio()!)"
+                                y1="0" y2="60"><title>Launch heard at {{ clockOf(launchInAudio()!) }}</title></line>
+                        }
+                      }
+                      <line class="mark now" [attr.x1]="profileX(soundCursor())" [attr.x2]="profileX(soundCursor())" y1="0" y2="60" />
+                    </svg>
+                    <div class="profile-key">
+                      @if (audioArming()) { <span><i class="key arm"></i>Arming and launch heard</span> }
+                      @if (audioClaps().length) { <span><i class="key clap"></i>Claps</span> }
+                      <span><i class="key now"></i>Sound track position</span>
+                    </div>
+                  </figure>
+                }
+                <!-- Moves only the sound, to find arming or takeoff in it; nothing else moves until a button below. -->
+                <div class="video-scrub">
+                  <label for="soundTime" class="scrub-label">Sound track</label>
+                  <button class="btn small step" type="button" (click)="stepSound(-1)" aria-label="Sound track back one frame">◀</button>
+                  <input id="soundTime" type="range" min="0" [max]="audioProfile()?.duration ?? 0" step="0.01" [ngModel]="soundCursor()"
+                         (ngModelChange)="scrubSound(+$event)" [disabled]="!audioProfile()" />
+                  <button class="btn small step" type="button" (click)="stepSound(1)" aria-label="Sound track forward one frame">▶</button>
+                  <span class="mono">{{ clockOf(soundCursor()) }}</span>
+                </div>
+                <div class="sync-buttons">
+                  @if (takeoffTime() !== null) {
+                    <button class="btn btn-primary small" type="button" (click)="soundTakeoffHere()" aria-label="Takeoff is here in the sound track">Takeoff is here</button>
+                  }
+                  <button class="btn small" type="button" (click)="soundArmingHere()" aria-label="Arming is here in the sound track">Arming is here</button>
+                  @if (audioArming(); as arm) {
+                    @if (audioLogStart() !== arm.logStart) {
+                      <button class="btn small" type="button" (click)="useHeardArming()">Use the arming it heard</button>
+                    }
+                  }
+                </div>
+                <div class="playback-row">
+                  @if (audioOnly()) {
+                    <button class="btn small" type="button" (click)="toggleAudioPreview()">{{ audioPlaying() ? 'Pause' : 'Play' }}</button>
+                    <button class="btn small" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()">{{ muted() ? 'Sound off' : 'Sound on' }}</button>
+                  }
+                  <div class="offset">
+                    <label for="audio-log-start">Log starts at</label>
+                    <input id="audio-log-start" type="number" step="0.1" [ngModel]="audioLogStart()" (ngModelChange)="setAudioLogStart(+$event)" />
+                    <span>s in the sound</span>
+                  </div>
+                </div>
+                @if (hasVideo() && audioClaps().length) {
+                  <!-- Or line the sound up with the footage on a clap heard in both. -->
+                  <div class="audio-claps">
+                    <div class="clap-field">
+                      <label for="phone-clap">Clap in the sound</label>
+                      <select id="phone-clap" [ngModel]="audioClapIndex()" (ngModelChange)="audioClapIndex.set(+$event)">
+                        @for (c of audioClaps(); track c; let i = $index) {
+                          <option [value]="i">{{ i === 0 ? 'First' : i === 1 ? 'Second' : 'Third' }} clap at {{ clockOf(c) }}</option>
+                        }
+                      </select>
+                    </div>
+                    <div class="clap-field">
+                      <span class="clap-label">Clap in the footage</span>
+                      <span class="mono">{{ footageClap() === null ? 'not set' : clockOf(footageClap()!) }}</span>
+                      @if (footageClapAuto() && footageClap() !== null) { <span class="hint">(found)</span> }
+                      <button class="btn small" type="button" (click)="footageClapHere()">Clap is here</button>
+                      <button class="btn small" type="button" (click)="syncOnClap()">Sync on the clap</button>
+                    </div>
+                  </div>
+                }
+              }
+            </div>
             <!-- All the how-to text for the preview in one callout, under its controls. -->
             <div class="callout preview-help">
               @if (backdrop() === 'video' && videoUrl()) {
@@ -215,6 +322,37 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     To line them up: pause the video on the moment you arm, then press <strong>Arming is here</strong>.
                   }
                   The overlay is hidden before the log starts, like in your editor. {{ videoName() }} plays from this computer and isn't uploaded.
+                </p>
+              }
+              @if (motorMatch(); as m) {
+                <p>
+                  @if (m.confident) {
+                    <strong>Synced from the motor sound.</strong> The footage's sound follows your throttle best with the log starting at
+                    {{ clockOf(m.offset < 0 ? -m.offset : m.offset) }}{{ m.offset < 0 ? ' before' : ' into' }} the video (match {{ m.score }}).
+                    Press Play and check a punch-out or two.
+                  } @else {
+                    <strong>The motor sound didn't match clearly</strong> (best match {{ m.score }}), so your start time wasn't changed.
+                    Use <strong>Takeoff is here</strong> instead; wind noise and music can drown the motors out.
+                    <button class="link" type="button" (click)="applyMotorGuess()">Use the best guess anyway</button>
+                  }
+                </p>
+              }
+              @if (audioUrl()) {
+                <p>
+                  @if (audioArming()?.confident && audioLogStart() === audioArming()!.logStart) {
+                    <strong>Sound track lined up on arming.</strong> The motors arm {{ clockOf(audioLogStart()) }} into {{ audioName() }}
+                    and launch {{ takeoffClock() }} later, as in the log.
+                  } @else {
+                    The sound is its own track, lined up to the log like the footage: move the <strong>Sound track</strong> slider (or
+                    click the graph) to where the motors arm or you launch, and press <strong>Arming is here</strong> or
+                    <strong>Takeoff is here</strong> under it.
+                    @if (hasVideo() && audioClaps().length) { Or line it up with the footage on a clap: <strong>Sync on the clap</strong>. }
+                  }
+                  @if (hasVideo()) {
+                    It plays with your footage (starting {{ audioStartText() }}) and stays on the log when you move the footage.
+                  } @else {
+                    <strong>Play</strong> runs the overlay with it; add your footage to see all three together.
+                  }
                 </p>
               }
               <p>The backdrop is only for the preview: the exported video stays transparent.</p>
@@ -465,6 +603,28 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .video-sync .offset { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
     .video-sync .offset label { font-weight: 600; }
     .video-sync .offset input { width: 5.5rem; }
+    .audio-sync { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }
+    .audio-name { font-family: var(--mono); font-size: .82rem; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .audio-claps { display: grid; gap: .4rem; justify-self: stretch; }
+    .audio-panel .video-scrub, .audio-panel .sound-profile { justify-self: stretch; margin-top: 0; }
+    .clap-field { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
+    .clap-field label, .clap-label { font-weight: 600; }
+    .clap-field select { width: auto; }
+    .sound-profile { margin: 0; display: grid; gap: .25rem; }
+    .sound-profile figcaption { display: flex; justify-content: space-between; gap: .75rem; font-size: .82rem; color: var(--muted); }
+    .sound-profile figcaption span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sound-profile svg { display: block; width: 100%; height: 64px; background: var(--raised); border: 1px solid var(--line);
+                         border-radius: 6px; cursor: pointer; }
+    .sound-profile .level { fill: var(--chart-area); stroke: var(--chart-line); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+    .sound-profile .mark { stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+    .sound-profile .mark.chosen { stroke-width: 2.5; }
+    .sound-profile .clap, .profile-key .clap { stroke: var(--warn); border-color: var(--warn); stroke-dasharray: 4 3; }
+    .sound-profile .arm, .profile-key .arm { stroke: var(--accent); border-color: var(--accent); }
+    .sound-profile .now, .profile-key .now { stroke: var(--ink); border-color: var(--ink); }
+    .profile-key { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .8rem; color: var(--muted); }
+    .profile-key span { display: inline-flex; align-items: center; gap: .35rem; }
+    .key { display: inline-block; width: 0; height: .9rem; border-left: 2px solid; }
+    .key.clap { border-left-style: dashed; }
     .sync-buttons { display: flex; flex-wrap: nowrap; gap: .5rem; white-space: nowrap; }
     canvas { display: block; width: 100%; height: auto; }
     /* The footage and overlay sliders share one look so they read as a pair. */
@@ -591,6 +751,121 @@ export class OverlayExportComponent {
   /** The video is before arming, so the overlay isn't drawn yet. */
   beforeLog = signal(false);
   private frameRequest: number | null = null;
+  private footageFile: File | null = null;
+
+  // ---- sound from another recording: its own track, placed on the log ----
+  private extAudio = viewChild<ElementRef<HTMLAudioElement>>('extAudio');
+  audioUrl = signal<string | null>(null);
+  audioName = signal('');
+  /** Claps found in the phone recording, in seconds, earliest first. */
+  audioClaps = signal<number[]>([]);
+  audioClapIndex = signal(0);
+  /** The same clap in the flight footage, found from its audio or set by hand. */
+  footageClap = signal<number | null>(null);
+  footageClapAuto = signal(false);
+  clapStatus = signal('');
+  /** Arming and launch heard in the phone recording, which ties it to the log (and through Log starts at, to the footage). */
+  audioArming = signal<ArmingMatch | null>(null);
+  /** Seconds into the phone recording where the log starts: where it armed, or set by hand. */
+  audioLogStart = signal(0);
+  audioPlaying = signal(false);
+  /**
+   * Where the sound track is, in seconds into the recording. Follows the overlay; the Sound track slider moves it on its
+   * own (to find arming or takeoff in it) until the overlay moves again.
+   */
+  soundCursor = linkedSignal(() => this.previewTime() + this.audioLogStart());
+  hasVideo = computed(() => this.backdrop() === 'video' && !!this.videoUrl());
+  /** Phone sound without footage on screen: it drives the preview itself. */
+  audioOnly = computed(() => !!this.audioUrl() && !this.hasVideo());
+  private audioFrame: number | null = null;
+  audioProfile = signal<SoundProfile | null>(null);
+  /** Phone-recording time under the pointer on the sound profile. */
+  profileHover = signal<number | null>(null);
+  profilePath = computed(() => {
+    const prof = this.audioProfile();
+    if (!prof) return '';
+    const n = prof.levels.length, pts: string[] = [];
+    for (let i = 0; i < n; i++) pts.push(`${((i + 0.5) / n * 1000).toFixed(1)},${(58 - prof.levels[i] * 54).toFixed(1)}`);
+    return `M0,60 L${pts.join(' L')} L1000,60 Z`;
+  });
+  launchInAudio = computed(() => {
+    const arm = this.audioArming(), t = this.takeoffTime();
+    return arm && t !== null ? arm.logStart + t : null;
+  });
+  profileLabel = computed(() => {
+    const arm = this.audioArming(), claps = this.audioClaps(), launch = this.launchInAudio();
+    const parts = [`Loudness of ${this.audioName()} over ${preciseClock(this.audioProfile()?.duration ?? 0)}`];
+    if (arm) parts.push(`arming at ${preciseClock(arm.logStart)}` + (launch !== null ? `, launch at ${preciseClock(launch)}` : ''));
+    if (claps.length) parts.push(`claps at ${claps.map(c => preciseClock(c)).join(', ')}`);
+    return parts.join('; ');
+  });
+  /** Footage time at which the sound track starts: both are placed on the log. Null without footage. */
+  audioOffset = computed(() => (this.hasVideo() ? this.videoOffset() - this.audioLogStart() : null));
+  audioStartText = computed(() => {
+    const o = this.audioOffset();
+    if (o === null) return '';
+    return o >= 0 ? `${preciseClock(o)} into your footage` : `${preciseClock(-o)} before your footage`;
+  });
+  readonly clockOf = preciseClock;
+  profileX(t: number) {
+    const d = this.audioProfile()?.duration;
+    return d ? (Math.min(d, Math.max(0, t)) / d) * 1000 : 0;
+  }
+  private profileTime(e: MouseEvent) {
+    const d = this.audioProfile()?.duration ?? 0, box = (e.currentTarget as Element).getBoundingClientRect();
+    return Math.min(d, Math.max(0, ((e.clientX - box.left) / box.width) * d));
+  }
+  hoverProfile(e: MouseEvent) { this.profileHover.set(this.profileTime(e)); }
+  seekProfile(e: MouseEvent) { this.scrubSound(this.profileTime(e)); }
+
+  /** Moves only the sound track, like the Flight footage slider moves only the footage. */
+  scrubSound(t: number) {
+    const d = this.audioProfile()?.duration ?? 0;
+    if (this.videoPlaying() || this.audioPlaying()) this.stopVideo();
+    this.soundCursor.set(Math.round(Math.min(d, Math.max(0, t)) * 1000) / 1000);
+  }
+
+  stepSound(dir: -1 | 1) { this.scrubSound(this.soundCursor() + dir / 30); }
+
+  /** The sound track's position is arming: the log starts there, and the overlay jumps to its start. */
+  soundArmingHere() {
+    this.audioLogStart.set(Math.round(this.soundCursor() * 100) / 100);
+    this.previewTime.set(0);
+    this.seekVideoToPreview();
+    this.syncAudio(true);
+  }
+
+  /** The sound track's position is the launch; the overlay jumps to the log's takeoff. */
+  soundTakeoffHere() {
+    const t = this.takeoffTime();
+    if (t === null) return;
+    this.audioLogStart.set(Math.round((this.soundCursor() - t) * 100) / 100);
+    this.previewTime.set(t);
+    this.seekVideoToPreview();
+    this.syncAudio(true);
+  }
+
+  useHeardArming() {
+    const arm = this.audioArming();
+    if (arm) this.setAudioLogStart(arm.logStart);
+  }
+
+  /** Places the sound track so the chosen clap lands on the clap in the footage. */
+  async syncOnClap() {
+    if (this.footageClap() === null) await this.findFootageClap();
+    const f = this.footageClap(), c = this.audioClaps()[this.audioClapIndex()];
+    if (f === null) { this.clapStatus.set('Step Flight footage to the frame where your hands meet and press Clap is here.'); return; }
+    if (c === undefined) return;
+    this.clapStatus.set('');
+    this.setAudioLogStart(c - (f - this.videoOffset()));
+  }
+
+  // ---- matching the footage's motor sound to the log's throttle ----
+  motorStatus = signal('');
+  motorMatch = signal<MotorMatch | null>(null);
+  /** Needs the log's throttle and a footage file small enough to decode in the browser. */
+  canMatchMotors = computed(() => (this.data().sticks?.length ?? 0) > 250 && !!this.videoUrl() && this.footageSize() <= OverlayExportComponent.MAX_DECODE_BYTES);
+  private footageSize = signal(0);
 
   // ---- end-of-flight stats ----
   readonly gapMs = Math.round(STATS_GAP_S * 1000);
@@ -627,6 +902,8 @@ export class OverlayExportComponent {
       this.stopVideo();
       const url = this.videoUrl();
       if (url) URL.revokeObjectURL(url);
+      const audio = this.audioUrl();
+      if (audio) URL.revokeObjectURL(audio);
     });
     effect(() => this.drawPreview());
   }
@@ -775,6 +1052,7 @@ export class OverlayExportComponent {
   }
 
   setBackdrop(v: Backdrop) {
+    this.stopVideo(); // the sound plays with whichever is driving the preview, so start again from paused
     this.backdrop.set(v);
     try { localStorage.setItem(BACKDROP_KEY, v); } catch { /* not remembered */ }
   }
@@ -806,8 +1084,129 @@ export class OverlayExportComponent {
     // Played straight from the file on this computer; nothing is uploaded.
     this.videoUrl.set(URL.createObjectURL(file));
     this.videoName.set(file.name);
+    this.footageFile = file;
+    this.footageSize.set(file.size);
+    this.motorMatch.set(null);
     this.backdropError.set('');
     this.setBackdrop('video');
+    this.footageClap.set(null);
+  }
+
+  /** A sound track from a second recording: draws it, places it on the log from the arming it hears, and finds its claps. */
+  async onAudioFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const old = this.audioUrl();
+    if (old) URL.revokeObjectURL(old);
+    this.audioUrl.set(URL.createObjectURL(file)); // plays from this computer, like the footage
+    this.audioName.set(file.name);
+    this.audioClaps.set([]);
+    this.audioClapIndex.set(0);
+    this.audioArming.set(null);
+    this.audioProfile.set(null);
+    this.audioLogStart.set(0);
+    this.muted.set(false); // adding sound means wanting to hear it
+    this.clapStatus.set(`Listening for arming and claps in ${file.name}...`);
+    try {
+      this.audioProfile.set(await soundProfile(file));
+      const claps = (await findClaps(file, 4)).claps;
+      const takeoff = this.takeoffTime();
+      const arm = takeoff === null ? null : await findArming(file, takeoff);
+      if (arm) {
+        this.audioArming.set(arm);
+        this.audioLogStart.set(arm.logStart);
+      }
+      // The motors spinning up is sudden and loud too; that one is arming, not a clap.
+      this.audioClaps.set(claps.filter(c => !arm?.confident || Math.abs(c - arm.logStart) > 0.3).slice(0, 3));
+    } catch {
+      this.backdropError.set(`Couldn't read the sound in ${file.name}. Try an MP4, M4A, MP3 or WAV.`);
+    }
+    this.clapStatus.set('');
+    this.syncAudio(true);
+  }
+
+  /** Big files can't be decoded in the browser in one go; past this, the footage's clap is set by hand. */
+  private static readonly MAX_DECODE_BYTES = 1.5e9;
+
+  private async findFootageClap() {
+    const file = this.footageFile;
+    if (!file || file.size > OverlayExportComponent.MAX_DECODE_BYTES) return;
+    this.clapStatus.set(`Listening for the clap in ${file.name}...`);
+    try {
+      const first = (await findClaps(file, 1)).claps[0];
+      if (first !== undefined && this.footageClap() === null) { this.footageClap.set(first); this.footageClapAuto.set(true); }
+    } catch { /* no usable sound track: set the clap by hand */ }
+    this.clapStatus.set('');
+    this.syncAudio(true);
+  }
+
+  /** Sets "Log starts at" by matching the loudness of the footage's motor sound to the throttle trace in the log. */
+  async syncFromMotors() {
+    const file = this.footageFile, sticks = this.data().sticks;
+    if (!file || !sticks?.length) return;
+    this.motorStatus.set('Listening to the motors and matching them to your throttle...');
+    this.motorMatch.set(null);
+    try {
+      const m = await matchMotorSound(file, sticks);
+      if (m) {
+        this.motorMatch.set(m);
+        if (m.confident) this.applyMotorGuess(); // an unclear match leaves the current sync alone
+      } else {
+        this.backdropError.set('There was too little sound or log to match.');
+      }
+    } catch {
+      this.backdropError.set(`Couldn't read the sound in ${file.name}.`);
+    }
+    this.motorStatus.set('');
+  }
+
+  applyMotorGuess() {
+    const m = this.motorMatch();
+    if (!m) return;
+    this.setOffset(m.offset);
+    const t = this.takeoffTime();
+    if (t !== null && !this.videoPlaying()) { this.previewTime.set(t); this.seekVideoToPreview(); } // show the takeoff to check against
+  }
+
+  /** The footage frame on screen is the clap: line the sound track up on it. */
+  footageClapHere() {
+    const v = this.bgVideo()?.nativeElement;
+    if (!v) return;
+    this.footageClap.set(Math.round(v.currentTime * 1000) / 1000);
+    this.footageClapAuto.set(false);
+    this.syncOnClap();
+  }
+
+  removeAudio() {
+    this.extAudio()?.nativeElement.pause();
+    const url = this.audioUrl();
+    if (url) URL.revokeObjectURL(url);
+    this.audioUrl.set(null);
+    this.audioClaps.set([]);
+    this.audioArming.set(null);
+    this.audioProfile.set(null);
+    this.footageClap.set(null);
+  }
+
+  /**
+   * While the footage drives the preview, keeps the sound track at the same log time: same play/pause state, and
+   * re-seeked when it drifts more than 60 ms (or on every seek). Silent where the recording hasn't started yet or has ended.
+   */
+  syncAudio(force = false) {
+    const v = this.bgVideo()?.nativeElement, a = this.extAudio()?.nativeElement, o = this.audioOffset();
+    if (!v) return; // no footage on screen: the sound plays on its own
+    if (!a || o === null) { a?.pause(); return; }
+    const target = v.currentTime - o;
+    const inside = target >= 0 && (!Number.isFinite(a.duration) || target < a.duration);
+    if (!inside || v.paused) {
+      if (!a.paused) a.pause();
+      if (inside && (force || Math.abs(a.currentTime - target) > 0.06)) a.currentTime = target;
+      return;
+    }
+    if (force || Math.abs(a.currentTime - target) > 0.06) a.currentTime = target;
+    if (a.paused) a.play().catch(() => undefined);
   }
 
   onVideoMeta() {
@@ -843,10 +1242,43 @@ export class OverlayExportComponent {
     this.scrubVideo(this.videoTime() + dir / 30);
   }
 
-  /** The slider moves the overlay; a paused video follows it. */
+  /** The slider moves the overlay; a paused video follows it, and so does sound playing on its own. */
   onScrub(t: number) {
     this.previewTime.set(t);
     if (!this.videoPlaying()) this.seekVideoToPreview();
+    const a = this.extAudio()?.nativeElement;
+    if (a && this.audioOnly() && !a.paused) a.currentTime = Math.max(0, t + this.audioLogStart());
+  }
+
+  private clampPreview(t: number) {
+    return Math.round(Math.min(this.previewMax(), Math.max(0, t)) * 1000) / 1000;
+  }
+
+  setAudioLogStart(v: number) {
+    if (!Number.isFinite(v)) return;
+    this.audioLogStart.set(Math.round(v * 100) / 100); // negative: the recording started after arming
+    const a = this.extAudio()?.nativeElement;
+    if (a && this.audioOnly() && !a.paused) a.currentTime = this.previewTime() + this.audioLogStart();
+    this.syncAudio(true);
+  }
+
+  /** Without footage, the phone sound is the clock: play it from the overlay's moment and let the overlay follow. */
+  toggleAudioPreview() {
+    const a = this.extAudio()?.nativeElement;
+    if (!a) return;
+    if (!a.paused) { a.pause(); return; }
+    if (this.previewTime() >= this.previewMax() - 0.05) this.previewTime.set(0);
+    a.currentTime = Math.max(0, this.previewTime() + this.audioLogStart());
+    a.play().then(() => this.followAudio(), () => this.backdropError.set("This browser can't play that sound. Try an MP4, M4A, MP3 or WAV."));
+  }
+
+  private followAudio() {
+    const a = this.extAudio()?.nativeElement;
+    if (!a || a.paused || !this.audioOnly()) return;
+    const t = a.currentTime - this.audioLogStart();
+    if (t > this.previewMax()) { a.pause(); this.previewTime.set(this.previewMax()); return; }
+    this.previewTime.set(Math.max(0, t));
+    this.audioFrame = requestAnimationFrame(() => this.followAudio());
   }
 
   seekVideoToPreview() {
@@ -896,6 +1328,7 @@ export class OverlayExportComponent {
 
   /** Use the frame on screen as the moment of takeoff: the overlay jumps there and the video stays put. */
   takeoffHere() {
+    this.motorMatch.set(null);
     const v = this.bgVideo()?.nativeElement;
     const t = this.takeoffTime();
     if (!v || t === null) return;
@@ -906,6 +1339,7 @@ export class OverlayExportComponent {
 
   /** Use the frame on screen as the moment of arming. */
   logStartsHere() {
+    this.motorMatch.set(null);
     const v = this.bgVideo()?.nativeElement;
     if (!v) return;
     this.videoOffset.set(Math.round(v.currentTime * 100) / 100);
@@ -920,6 +1354,7 @@ export class OverlayExportComponent {
     const t = v.currentTime - this.videoOffset();
     this.beforeLog.set(t < 0);
     this.previewTime.set(Math.min(this.previewMax(), Math.max(0, t)));
+    this.syncAudio();
     const next = () => this.followVideo();
     if ('requestVideoFrameCallback' in v) {
       this.frameRequest = (v as HTMLVideoElement & { requestVideoFrameCallback(cb: () => void): number }).requestVideoFrameCallback(next);
@@ -930,6 +1365,8 @@ export class OverlayExportComponent {
 
   private stopVideo() {
     this.bgVideo()?.nativeElement.pause();
+    this.extAudio()?.nativeElement.pause();
+    if (this.audioFrame !== null) { cancelAnimationFrame(this.audioFrame); this.audioFrame = null; }
     this.videoPlaying.set(false);
   }
 
