@@ -1,24 +1,146 @@
-https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/
+<div align="center">
 
-# Drone Logger (Angular frontend)
+<img src="drone-logger/public/favicon.svg" alt="" width="72" height="72">
 
-Aircraft collection with photo upload and Betaflight tune history.
-These are the `src/` files only. Drop them into a fresh Angular project.
+# GitDrone
 
-## Setup (Angular 19 or newer)
+**Your flights, your tunes, and an OSD overlay for every video.**
 
-1. `ng new drone-logger --style=css` (answer the prompts as you like)
-2. Copy `src/app/aircraft`, `src/app/tunes`, `src/app/api.config.ts`,
-   `src/app/app.config.ts`, `src/app/app.routes.ts` and `src/styles.css`
-   into the generated project, replacing files with the same name.
-3. Make the root component's template just `<router-outlet />`.
-4. `ng serve`
+GitDrone reads Betaflight blackbox logs and turns them into maps, charts and stick replays, keeps your tune
+history, and makes a transparent OSD overlay for your FPV footage in your goggles' own font.
 
-`USE_MOCK` in `src/app/api.config.ts` is `true`, so the app runs entirely
-in memory with sample data. Set it to `false` and point `API_BASE` at your
-ASP.NET Core API when the backend is ready.
+[![Deploy to Azure](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml/badge.svg)](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml)
+[![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+![Angular 22](https://img.shields.io/badge/Angular-22-dd0031?logo=angular&logoColor=white)
+![.NET 10](https://img.shields.io/badge/.NET-10-512bd4?logo=dotnet&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-EF%20Core-003b57?logo=sqlite&logoColor=white)
+![Leaflet](https://img.shields.io/badge/maps-Leaflet%20%2B%20OSM-199900?logo=leaflet&logoColor=white)
 
-## Routes
+**[Open the live site](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/)** ·
+[Try LovelyOSD](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/osd) ·
+[Features](#features) ·
+[Getting started](#getting-started) ·
+[How it works](#comparing-tunes)
+
+<img src="drone-logger/public/home/osd-hillside.jpg" alt="FPV view over a sunny hillside and bay, with the LovelyOSD overlay showing speed, battery per cell, the mini map and both sticks" width="860">
+
+<sub>Real footage with a LovelyOSD overlay rendered by GitDrone.</sub>
+
+</div>
+
+---
+
+## Features
+
+### 🎬 LovelyOSD overlays
+
+Drop in a blackbox log and export a transparent `.mov` for Premiere Pro or After Effects: speed, battery,
+sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, resize and recolour every element,
+draw it all in your goggles' `font_bf.bin`, and preview it full screen, playing over your own footage with sound,
+synced to your takeoff automatically from the motor sound, the arming beep or a clap.
+Free, no account, and nothing is uploaded: the video is rendered in your browser.
+
+<p align="center">
+  <img src="docs/screenshots/overlay.png" alt="The video overlay editor: a preview with speed, battery, stick and mini map panels over a sky backdrop, layout controls below it and export options on the right" width="860">
+</p>
+
+<table>
+  <tr>
+    <td><img src="drone-logger/public/home/osd-treetop.jpg" alt="Looking straight down at a tree, with the overlay showing speed, battery, flight time and the mini map"></td>
+    <td><img src="drone-logger/public/home/osd-field.jpg" alt="Diving toward a dirt field, with the overlay showing speed, satellites, RSSI and the stick positions"></td>
+    <td><img src="drone-logger/public/home/osd-treeline.jpg" alt="Skimming the grass toward a tree line, with the overlay showing speed and mAh used"></td>
+  </tr>
+</table>
+
+### 🗺️ Flight analysis
+
+Every flight gets a GPS map (Leaflet + OpenStreetMap) with the path coloured by speed, a stick replay, charts for
+height (GPS and barometer), speed, RSSI, voltage and current, and the numbers that matter: top speed, lowest cell,
+mAh used, peak power, furthest distance from home.
+
+<p align="center">
+  <img src="docs/screenshots/flight.png" alt="A flight page: stat tiles for distance, speed, height, RSSI, mAh, lowest cell, current and power, a map of the flight path coloured by speed, and a playback panel with both sticks" width="860">
+</p>
+
+### 🎛️ Tune history
+
+Paste a `diff all` after each change and see what you changed, grouped by profile and category (PIDs, filters,
+rates, motors, ...). Compare any two tunes, even across aircraft, and see which tune each flight was flown on.
+
+<p align="center">
+  <img src="docs/screenshots/compare.png" alt="Compare tunes: two snapshots picked side by side, a summary of changed, newly set and back-to-default settings, and a table of filter changes" width="860">
+</p>
+
+### 🛩️ Your hangar
+
+Each quad with its photo, specs, tune timeline (with firmware updates marked) and flights in one place.
+
+<p align="center">
+  <img src="docs/screenshots/hangar.png" alt="An aircraft page: photo and specs of a Speedybee Mario 5 X, a table of flights with map thumbnails, and the start of its tune history" width="860">
+</p>
+
+### 🏠 And a front page to show it off
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="The GitDrone home page: headline, a footage carousel with the overlay, four feature cards, an overlay-in-three-steps section and the latest flights with map thumbnails" width="860">
+</p>
+
+## Tech stack
+
+| Layer | What |
+|---|---|
+| Frontend | [Angular 22](https://angular.dev/) (standalone components, signals), TypeScript, [Leaflet](https://leafletjs.com/) + OpenStreetMap, Canvas 2D for the overlay renderer |
+| Backend | ASP.NET Core minimal APIs on .NET 10, Entity Framework Core with SQLite |
+| Log decoding | `Services/BlackboxDecoder.cs`, a C# port of Betaflight's Blackbox Explorer decoder |
+| Video | PNG frames in a QuickTime `.mov` written in the browser (`flights/mov-writer.ts`), alpha kept |
+| Hosting | One free Linux Azure App Service (F1), deployed by GitHub Actions on every push to `master` |
+| Auth | App Service Authentication (Microsoft), owner-only writes |
+
+## Getting started
+
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download) and [Node.js](https://nodejs.org/) 24.
+
+```bash
+# 1. API (https://localhost:5001)
+cd DroneLogger.Api
+dotnet run --launch-profile https
+
+# 2. Frontend (http://localhost:4200), in a second terminal
+cd drone-logger
+npm install
+npx ng serve
+```
+
+Open http://localhost:4200. The Angular dev server proxies `/api` and `/uploads` to https://localhost:5001
+(`drone-logger/proxy.conf.json`). The database is SQLite and is created on first run. A sample `diff all` to import
+lives in `DroneLogger.Api/samples/diff-all-sample.txt`.
+
+## Project structure
+
+```text
+GitDrone/
+├── DroneLogger.Api/              ASP.NET Core API (.NET 10)
+│   ├── Endpoints/                Aircraft, tunes, flights, visits
+│   ├── Services/                 BlackboxDecoder, FlightTrack, TuneParser, TuneDiff, stores
+│   ├── Domain/ · Data/           Entities and EF Core DbContext
+│   ├── Migrations/               EF Core migrations (SQLite)
+│   └── samples/                  Sample Betaflight diff all
+├── drone-logger/                 Angular 22 frontend
+│   ├── public/                   Icons and home page footage stills
+│   └── src/app/
+│       ├── aircraft/             Hangar: list, detail, form
+│       ├── flights/              Flight pages, map, charts, playback, overlay renderer and export
+│       ├── osd/                  LovelyOSD (no-account overlay tool)
+│       ├── tunes/                Import, timeline, compare
+│       └── home/ · stats/        Front page and visitor stats
+├── docs/screenshots/             Images for this README
+└── .github/workflows/deploy.yml  Build Angular into wwwroot and deploy to Azure
+```
+
+## Reference
+
+<details>
+<summary><b>Routes</b></summary>
 
 | Route                        | Component                  |
 |------------------------------|----------------------------|
@@ -35,37 +157,45 @@ ASP.NET Core API when the backend is ready.
 | /flights/:id                 | FlightDetailComponent      |
 | /flights/:id/overlay         | FlightOverlayComponent     |
 | /osd                         | LovelyOsdComponent         |
+| /stats                       | StatsComponent (signed in) |
 
-## API contract
+</details>
 
-- GET    /api/aircraft
-- GET    /api/aircraft/{id}
-- POST   /api/aircraft            multipart/form-data (fields + `image` file)
-- PUT    /api/aircraft/{id}       multipart/form-data (fields + `image`, `removeImage`)
-- DELETE /api/aircraft/{id}
-- GET    /api/aircraft/{id}/tunes
-- POST   /api/aircraft/{id}/tunes  body: { label, notes?, rawText }
+<details>
+<summary><b>API contract</b></summary>
+
+```text
+GET    /api/aircraft
+GET    /api/aircraft/{id}
+POST   /api/aircraft            multipart/form-data (fields + `image` file)
+PUT    /api/aircraft/{id}       multipart/form-data (fields + `image`, `removeImage`)
+DELETE /api/aircraft/{id}
+GET    /api/aircraft/{id}/tunes
+POST   /api/aircraft/{id}/tunes  body: { label, notes?, rawText }
                                    returns: { snapshot, duplicateOf }
-- POST   /api/aircraft/{id}/tunes/bulk  body: { items: [{ label, notes?, rawText, createdAt? }] } (max 500)
+POST   /api/aircraft/{id}/tunes/bulk  body: { items: [{ label, notes?, rawText, createdAt? }] } (max 500)
                                    returns: [{ index, status: created|duplicate|error, snapshot, duplicateOf, error }]
                                    Each item lands at its createdAt; one identical to the snapshot before it is skipped.
-- GET    /api/tunes/{id}/raw        returns: { id, rawText }
-- GET    /api/tunes/compare?from={snapshotId}&to={snapshotId}
+GET    /api/tunes/{id}/raw        returns: { id, rawText }
+GET    /api/tunes/compare?from={snapshotId}&to={snapshotId}
                                    returns: { from, to, changed, added, removed, unchanged,
                                               groups: [{ scope, scopeLabel, category, changes: [{ key, from, to, kind }] }] }
                                    from/to on a change is null when that side is at the firmware default.
-- GET    /api/aircraft/{id}/flights
-- POST   /api/aircraft/{id}/flights  multipart/form-data: file (.bbl/.bfl, max 64 MB), tuneSnapshotId? (empty = match by date), notes?
+GET    /api/aircraft/{id}/flights
+POST   /api/aircraft/{id}/flights  multipart/form-data: file (.bbl/.bfl, max 64 MB), tuneSnapshotId? (empty = match by date), notes?
                                    returns: { flights, duplicate }  (one flight per armed session in the file)
-- GET    /api/flights/{id}
-- PUT    /api/flights/{id}          body: { tuneSnapshotId, notes }
-- DELETE /api/flights/{id}
-- GET    /api/flights/{id}/telemetry  returns: { points: [[t, rssi %|null, baro height above takeoff (m)|null], ...] } at 10 Hz,
+GET    /api/flights/{id}
+PUT    /api/flights/{id}          body: { tuneSnapshotId, notes }
+DELETE /api/flights/{id}
+GET    /api/flights/{id}/telemetry  returns: { points: [[t, rssi %|null, baro height above takeoff (m)|null], ...] } at 10 Hz,
                                    or 404 when the log has neither rssi nor baroAlt
-- POST   /api/osd/analyze          multipart/form-data: file (.bbl/.bfl, max 64 MB)
+POST   /api/osd/analyze          multipart/form-data: file (.bbl/.bfl, max 64 MB)
                                    returns: { fileName, sessions: [{ flight, track, sticks, battery, telemetry }] }
                                    Decodes in memory and stores nothing. flight.id is 0; track/sticks/battery match the
                                    per-flight endpoints, or null.
+```
+
+</details>
 
 ## Comparing tunes
 
@@ -164,11 +294,6 @@ page, so leaving it clears them. A file with several armed sessions gets a sessi
 aren't signed in, since nothing is stored; to protect the small App Service plan, the API decodes at most two logs at
 once (two more wait, the rest get a "busy, try again" 503).
 
-## Local development
-
-Run the API (`dotnet run --launch-profile https` in `DroneLogger.Api`) and `ng serve` in `drone-logger`.
-The Angular app calls `/api`; `proxy.conf.json` forwards `/api` and `/uploads` to https://localhost:5001.
-
 ## Deploying to Azure (free tier)
 
 One Linux App Service (F1) hosts both: CI builds Angular into the API's `wwwroot`
@@ -221,4 +346,3 @@ GitDrone stands on the open-source FPV world:
   loaded from your own computer and never uploaded or bundled here.
 - **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause) and **[OpenStreetMap](https://www.openstreetmap.org/copyright)**
   contributors (ODbL) for the flight maps.
-
