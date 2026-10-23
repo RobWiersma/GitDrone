@@ -22,6 +22,7 @@
     "@angular/ssr": "^22.2.1",
     "express": "^5.1.0",
     "leaflet": "^1.9.4",
+    "mediabunny": "1.61.2",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

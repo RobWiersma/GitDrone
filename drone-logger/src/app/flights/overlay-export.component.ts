@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, afterNextRender, computed, effect, inject, input, linkedSignal, model, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ELEMENT_ITEMS, ELEMENT_LABELS, ElementKey, ElementPlacement, ITEM_SCALE_MAX, ITEM_SCALE_MIN, ItemKey, OverlayData, OverlayLayout,
   OverlayOptions, OverlayRenderer, STATS_GAP_S } from './overlay-renderer';
@@ -8,16 +8,54 @@ import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundProfile, findArming, findClaps, matchMotorSound, soundProfile } from './clap';
+import { RenderCancelled, RenderPlan, RenderTarget, renderVideo } from './video-render';
+import { RangeWindowComponent } from './range-window.component';
 
 const RESOLUTIONS = [
   { label: '1080p (1920×1080)', w: 1920, h: 1080 },
   { label: '1440p (2560×1440)', w: 2560, h: 1440 },
   { label: '4K (3840×2160)', w: 3840, h: 2160 },
 ];
+/** The same sizes on their side, for Shorts, Reels and TikTok. */
+const VERTICAL_RESOLUTIONS = [
+  { label: '1080p (1080×1920)', w: 1080, h: 1920 },
+  { label: '1440p (1440×2560)', w: 1440, h: 2560 },
+  { label: '4K (2160×3840)', w: 2160, h: 3840 },
+];
+
+const FORMAT_KEY = 'gitdrone-overlay-format';
+
+const FADE_KEY = 'gitdrone-render-fade';
+
+/** The finished video's fade-out in seconds: 1.5 until changed, 0 once switched off. */
+function readFadeOut(): number {
+  try {
+    const saved = localStorage.getItem(FADE_KEY);
+    const v = saved === null ? NaN : Number(saved);
+    if (v >= 0 && v <= 10) return v;
+  } catch { /* default */ }
+  return 1.5;
+}
+
+type SaveFilePicker =(o: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) =>
+  Promise<{ createWritable(): Promise<WritableStream> }>;
+
+/** Where the preview's footage and stick cam sliders start, and what Reset goes back to (percent; pan in % of the box). */
+const FOOTAGE_DEFAULTS = { brightness: 100, contrast: 110, saturation: 135, zoom: 100 };
+const CAM_DEFAULTS = { brightness: 70, contrast: 100, saturation: 100, zoom: 215, panX: 0, panY: 0 };
+
+/** CSS filter for preview-only brightness, contrast and saturation (percent); null when all are as recorded. */
+const gradeFilter = (brightness: number, contrast: number, saturation: number) =>
+  brightness === 100 && contrast === 100 && saturation === 100 ? null
+    : `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
+
+function readVertical(): boolean {
+  try { return localStorage.getItem(FORMAT_KEY) === 'vertical'; } catch { return false; }
+}
 const FPS = [24, 25, 30, 50, 60];
 
 const DEFAULT_PATH_COLORS = { pathRecentColor: '#9be564', pathOldColor: '#2c4a1f' };
-const DEFAULT_STICK_COLORS = { stickDotColor: '#ff5a5a', stickTrailColor: '#9a9a9a', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
+const DEFAULT_STICK_COLORS = { stickDotColor: '#e086b0', stickTrailColor: '#86a858', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
 const DEFAULT_COLORS = { ...DEFAULT_PATH_COLORS, ...DEFAULT_STICK_COLORS };
 type ColorKey = keyof typeof DEFAULT_COLORS;
 const COLORS_KEY = 'gitdrone-overlay-path-colors';
@@ -46,15 +84,15 @@ function readTrailIntensity(): number {
 }
 
 const LAYOUT_KEY = 'gitdrone-overlay-layout';
-const SCALE_MIN = 0.5, SCALE_MAX = 2;
-/** The preview canvas is always drawn at 1080p; placements are fractions, so this is only for pointer maths. */
-const PREVIEW_W = 1920, PREVIEW_H = 1080;
+const SCALE_MIN = 0.5, SCALE_MAX = 3;
+/** Landscape and vertical frames want different layouts, so each keeps its own. */
+const layoutKey = (vertical: boolean) => (vertical ? `${LAYOUT_KEY}-vertical` : LAYOUT_KEY);
 
 /** Moved/resized elements remembered in this browser. Anything malformed is dropped, so that element goes back to default. */
-function readLayout(): OverlayLayout {
+function readLayout(vertical: boolean): OverlayLayout {
   const layout: OverlayLayout = {};
   try {
-    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null');
+    const saved = JSON.parse(localStorage.getItem(layoutKey(vertical)) ?? 'null');
     for (const key of Object.keys(ELEMENT_LABELS) as ElementKey[]) {
       const v = saved?.[key];
       const ok = (n: unknown, lo: number, hi: number) => typeof n === 'number' && n >= lo && n <= hi;
@@ -64,8 +102,8 @@ function readLayout(): OverlayLayout {
   return layout;
 }
 
-function saveLayout(layout: OverlayLayout) {
-  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* not remembered */ }
+function saveLayout(layout: OverlayLayout, vertical: boolean) {
+  try { localStorage.setItem(layoutKey(vertical), JSON.stringify(layout)); } catch { /* not remembered */ }
 }
 
 const ITEMS_KEY = 'gitdrone-overlay-item-sizes';
@@ -107,6 +145,33 @@ function preciseClock(seconds: number) {
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
+/** Title and craft name: text and colours, remembered in this browser. Colours match a real Short's title. */
+const DEFAULT_LABELS = {
+  titleText: '', titleColor: '#dc8bad', titleAccentText: '', titleAccentColor: '#8aa860', titleStrokeColor: '#000000', titleBgColor: '',
+  craftText: '', craftColor: '#afa0a9', craftStrokeColor: '#330a0a',
+};
+type LabelKey = keyof typeof DEFAULT_LABELS;
+const LABELS_KEY = 'gitdrone-overlay-labels';
+
+function readLabels(): typeof DEFAULT_LABELS {
+  const labels = { ...DEFAULT_LABELS };
+  try {
+    const saved = JSON.parse(localStorage.getItem(LABELS_KEY) ?? 'null');
+    for (const key of Object.keys(labels) as LabelKey[]) {
+      const v: unknown = saved?.[key];
+      if (typeof v !== 'string') continue;
+      // Colours are #rrggbb; the background may also be '' (no box). Text is capped so a paste can't flood the frame.
+      if (key.endsWith('Color') ? /^#[0-9a-f]{6}$/i.test(v) || (key === 'titleBgColor' && v === '') : v.length <= 60) labels[key] = v;
+    }
+  } catch { /* defaults */ }
+  return labels;
+}
+
+function saveLabels(o: typeof DEFAULT_LABELS) {
+  const labels = Object.fromEntries((Object.keys(DEFAULT_LABELS) as LabelKey[]).map(k => [k, o[k]]));
+  try { localStorage.setItem(LABELS_KEY, JSON.stringify(labels)); } catch { /* not remembered */ }
+}
+
 function saveColors(o: typeof DEFAULT_COLORS) {
   const colors = Object.fromEntries((Object.keys(DEFAULT_COLORS) as ColorKey[]).map(k => [k, o[k]]));
   try { localStorage.setItem(COLORS_KEY, JSON.stringify(colors)); } catch { /* not remembered */ }
@@ -118,12 +183,12 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     '(document:fullscreenchange)': 'onFullscreenChange()',
     '(document:keydown)': 'onFullscreenKey($event)',
   },
-  imports: [FormsModule],
+  imports: [FormsModule, RangeWindowComponent],
   template: `
         <div class="layout">
           <section class="panel preview-panel" aria-labelledby="preview-heading">
             <h2 id="preview-heading">Preview</h2>
-            <div #stage class="stage" [class.dark]="backdrop() === 'sky'">
+            <div #stage class="stage" [class.dark]="backdrop() === 'sky'" [class.vertical]="vertical()">
               <button class="fullscreen-btn" type="button" (click)="toggleFullscreen()"
                       [attr.aria-label]="fullscreen() ? 'Exit full screen' : 'Full screen preview'" [title]="fullscreen() ? 'Exit full screen (Esc)' : 'Full screen'">
                 @if (fullscreen()) {
@@ -137,14 +202,29 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               }
               <div class="frame">
               @if (backdrop() === 'video' && videoUrl()) {
-                <video #bgVideo class="bg-video" [src]="videoUrl()" [muted]="muted() || !!audioUrl()" playsinline preload="auto" aria-hidden="true"
-                       (loadedmetadata)="onVideoMeta(); seekVideoToPreview()" (durationchange)="onVideoMeta()"
-                       (timeupdate)="onVideoTime()" (seeked)="onVideoTime(); syncAudio(true)"
-                       (pause)="videoPlaying.set(false); syncAudio()" (play)="videoPlaying.set(true); syncAudio(true)"></video>
+                <!-- The footage's own box: the whole frame in landscape, the top half in vertical. Zoom stays inside it. -->
+                <div class="footage-box" [class.selected]="mediaSelected() === 'footage'">
+                  <video #bgVideo class="bg-video" [class.fit]="footage43() && !vertical()" [style.filter]="footageFilter()"
+                         [style.transform]="footageZoom() === 100 ? null : 'scale(' + footageZoom() / 100 + ')'"
+                         [src]="videoUrl()" [muted]="muted() || !!audioUrl()" playsinline preload="auto" aria-hidden="true"
+                         (loadedmetadata)="onVideoMeta(); seekVideoToPreview()" (durationchange)="onVideoMeta()"
+                         (timeupdate)="onVideoTime()" (seeked)="onVideoTime(); syncAudio(true)"
+                         (pause)="videoPlaying.set(false); syncAudio()" (play)="videoPlaying.set(true); syncAudio(true)"></video>
+                </div>
               }
               @if (audioUrl()) {
-                <audio #extAudio [src]="audioUrl()" [muted]="muted()" preload="auto"
-                       (play)="audioPlaying.set(true)" (pause)="audioPlaying.set(false)"></audio>
+                @if (audioIsVideo()) {
+                  <!-- A stick cam (or any second video): its sound plays, and its picture sits in the corner (landscape)
+                       or fills the bottom half under the HUD (vertical). -->
+                  <div class="pip" [class.hidden]="!showPip()" [class.selected]="mediaSelected() === 'cam'">
+                    <video #extAudio [style.filter]="camFilter()" [style.transform]="camTransform()"
+                           [src]="audioUrl()" [muted]="muted()" playsinline preload="auto"
+                           aria-hidden="true" (play)="audioPlaying.set(true)" (pause)="audioPlaying.set(false)"></video>
+                  </div>
+                } @else {
+                  <audio #extAudio [src]="audioUrl()" [muted]="muted()" preload="auto"
+                         (play)="audioPlaying.set(true)" (pause)="audioPlaying.set(false)"></audio>
+                }
               }
               <canvas #preview [class.before-log]="backdrop() === 'video' && beforeLog()" width="1920" height="1080" role="img"
                       [attr.aria-label]="'Overlay preview at ' + previewClock() + '. Drag an element to move it; the layout controls below do the same from the keyboard.'"
@@ -163,26 +243,46 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <button class="btn small step" type="button" (click)="stepVideo(1)" aria-label="Forward one frame">▶</button>
                 <span class="mono">{{ videoClock() }}</span>
               </div>
+              <!-- The part of the footage the finished video covers, on its own two-handle slider lined up with the one above.
+                   Dragging a handle shows that frame in the preview. -->
+              <div class="video-scrub">
+                <span class="scrub-label" id="render-range-label">Render</span>
+                <span class="btn small step" style="visibility: hidden" aria-hidden="true">◀</span>
+                <app-range-window label="Render" [max]="videoDuration()" [step]="0.1" [valueText]="clockText" [disabled]="rendering() || !videoDuration()"
+                                  [(start)]="renderStart" [(end)]="renderEnd" (startChange)="scrubVideo($event)" (endChange)="scrubVideo($event)" />
+                <span class="btn small step" style="visibility: hidden" aria-hidden="true">▶</span>
+                <span class="mono">{{ clock(renderEnd() - renderStart()) }}</span>
+              </div>
+              <div class="export-window">
+                <span class="mono" aria-live="polite">Render {{ clipText() }}</span>
+                @if (!wholeClip()) {
+                  <button class="link" type="button" (click)="useWholeClip()" [disabled]="rendering()">Whole clip</button>
+                }
+              </div>
             }
             <div class="scrub">
               <label for="previewTime" class="scrub-label">OSD overlay</label>
               <button class="btn small step" type="button" (click)="stepOverlay(-1)" aria-label="Overlay back one frame">◀</button>
-              <input id="previewTime" type="range" min="0" [max]="previewMax()" step="0.01" [ngModel]="previewTime()"
-                     (ngModelChange)="onScrub(+$event)" />
+              <!-- The bar under the slider marks the part that gets exported. -->
+              <div class="scrub-track">
+                <input id="previewTime" type="range" min="0" [max]="previewMax()" step="0.01" [ngModel]="previewTime()"
+                       (ngModelChange)="onScrub(+$event)" />
+                @if (!wholeFlight()) {
+                  <span class="window-bar" aria-hidden="true" [style.left.%]="windowLeft()" [style.width.%]="windowWidth()"></span>
+                }
+              </div>
               <button class="btn small step" type="button" (click)="stepOverlay(1)" aria-label="Overlay forward one frame">▶</button>
               <span class="mono">{{ previewClock() }}</span>
             </div>
-            <div class="backdrop">
-              <label for="backdrop">Preview backdrop</label>
-              <select id="backdrop" [ngModel]="backdrop()" (ngModelChange)="setBackdrop($event)">
-                <option value="checker">Checkerboard (shows transparency)</option>
-                <option value="sky">Sky</option>
-                <option value="video" [disabled]="!videoUrl()">Your video (plays with the overlay)</option>
-              </select>
-              <label class="btn small">
-                {{ videoUrl() ? 'Change video' : 'Play it over your video' }}
-                <input class="sr-only" type="file" accept="video/*" (change)="onVideoFile($event)" />
-              </label>
+            <!-- Export only part of the flight: scrub to a moment and mark it. -->
+            <div class="export-window">
+              <span class="scrub-label">Export</span>
+              <button class="btn small" type="button" (click)="startHere()" [disabled]="busy() || previewTime() >= end()">Start here</button>
+              <button class="btn small" type="button" (click)="endHere()" [disabled]="busy() || previewTime() <= start()">End here</button>
+              <span class="mono" aria-live="polite">{{ windowText() }}</span>
+              @if (!wholeFlight()) {
+                <button class="link" type="button" (click)="useWholeFlight()" [disabled]="busy()">Whole flight</button>
+              }
             </div>
             @if (backdropError()) { <p class="error">{{ backdropError() }}</p> }
             @if (backdrop() === 'video' && videoUrl()) {
@@ -210,19 +310,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 </div>
               </div>
             }
-            <!-- Sound from another recording (a phone on the ground) is its own track, lined up to the log like the footage. -->
-            <div class="video-sync audio-panel">
-              <div class="audio-sync">
-                <label class="btn small">
-                  {{ audioUrl() ? 'Change sound track' : 'Add a sound track' }}
-                  <input class="sr-only" type="file" accept="audio/*,video/*" (change)="onAudioFile($event)" />
-                </label>
-                @if (audioUrl()) {
-                  <span class="audio-name">{{ audioName() }}</span>
-                  <button class="link" type="button" (click)="removeAudio()">Remove</button>
-                }
-              </div>
-              @if (audioUrl()) {
+            <!-- Sound from another recording (a phone on the ground) is its own track, lined up to the log like the footage.
+                 It's picked in Options; lining it up happens here, under the preview. -->
+            @if (audioUrl()) {
+              <div class="video-sync audio-panel">
                 @if (clapStatus()) { <span class="hint" role="status">{{ clapStatus() }}</span> }
                 @if (audioProfile(); as prof) {
                   <!-- The recording's loudness with what was heard in it marked; click to move the sound track there. -->
@@ -306,8 +397,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     </div>
                   </div>
                 }
-              }
-            </div>
+              </div>
+            }
             <!-- All the how-to text for the preview in one callout, under its controls. -->
             <div class="callout preview-help">
               @if (backdrop() === 'video' && videoUrl()) {
@@ -365,7 +456,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <div class="layout-grid">
                   <div class="field">
                     <label for="el">Element</label>
-                    <select id="el" [ngModel]="c.key" (ngModelChange)="selected.set($event)">
+                    <select id="el" [ngModel]="c.key" (ngModelChange)="pickElement($event)">
                       @for (p of placed(); track p.key) { <option [value]="p.key">{{ labels[p.key] }}</option> }
                     </select>
                   </div>
@@ -463,6 +554,98 @@ function saveColors(o: typeof DEFAULT_COLORS) {
 
           <section class="panel options" aria-labelledby="options-heading">
             <h2 id="options-heading">Options</h2>
+            <!-- What plays behind and with the preview; none of it goes into the export. -->
+            <div class="field">
+              <label for="backdrop">Preview backdrop</label>
+              <select id="backdrop" [ngModel]="backdrop()" (ngModelChange)="setBackdrop($event)">
+                <option value="checker">Checkerboard (shows transparency)</option>
+                <option value="sky">Sky</option>
+                <option value="video" [disabled]="!videoUrl()">Your video (plays with the overlay)</option>
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label" id="footage-label">Flight footage</span>
+              @if (videoUrl()) { <p class="source-row"><span class="mono">{{ videoName() }}</span></p> }
+              <label class="btn small">
+                {{ videoUrl() ? 'Change video' : 'Play it over your video' }}
+                <input class="sr-only" type="file" accept="video/*" aria-labelledby="footage-label" (change)="onVideoFile($event)" />
+              </label>
+              @if (hasVideo() && mediaSelected() !== 'footage') {
+                <p class="source-row"><button class="link" type="button" (click)="selectMedia('footage')">Adjust picture</button>
+                  <span class="hint">or click it in the preview</span></p>
+              }
+              @if (hasVideo() && mediaSelected() === 'footage') {
+                <!-- Flat D-Log-ish footage is hard to judge the overlay against; this only changes the preview. -->
+                <div class="grade">
+                  <label for="brightness">Brightness</label>
+                  <input id="brightness" type="range" min="50" max="200" step="5" [ngModel]="brightness()" (ngModelChange)="brightness.set(+$event)" />
+                  <span class="mono">{{ brightness() }}%</span>
+                  <label for="contrast">Contrast</label>
+                  <input id="contrast" type="range" min="50" max="200" step="5" [ngModel]="contrast()" (ngModelChange)="contrast.set(+$event)" />
+                  <span class="mono">{{ contrast() }}%</span>
+                  <label for="saturation">Saturation</label>
+                  <input id="saturation" type="range" min="0" max="250" step="5" [ngModel]="saturation()" (ngModelChange)="saturation.set(+$event)" />
+                  <span class="mono">{{ saturation() }}%</span>
+                  <label for="zoom">Zoom</label>
+                  <input id="zoom" type="range" min="50" max="300" step="5" [ngModel]="footageZoom()" (ngModelChange)="footageZoom.set(+$event)" />
+                  <span class="mono">{{ footageZoom() }}%</span>
+                </div>
+                <p class="source-row">
+                  <span class="hint">Only for the preview.</span>
+                  @if (footageAdjusted()) {
+                    <button class="link" type="button" (click)="resetFootage()">Reset</button>
+                  }
+                  <button class="link" type="button" (click)="selectMedia(null)">Done</button>
+                </p>
+              }
+            </div>
+            <div class="field">
+              <span class="field-label" id="sound-label">Sound track</span>
+              @if (audioUrl()) {
+                <p class="source-row"><span class="mono">{{ audioName() }}</span>
+                  <button class="link" type="button" (click)="removeAudio()">Remove</button></p>
+                @if (audioIsVideo()) {
+                  <label class="check"><input type="checkbox" [ngModel]="showPip()" (ngModelChange)="showPip.set($event)" />
+                    Show its picture {{ vertical() ? 'in the bottom half' : 'in the corner' }}</label>
+                  @if (showPip() && mediaSelected() !== 'cam') {
+                    <p class="source-row"><button class="link" type="button" (click)="selectMedia('cam')">Adjust picture</button>
+                      <span class="hint">or click it in the preview</span></p>
+                  }
+                  @if (showPip() && mediaSelected() === 'cam') {
+                    <div class="grade">
+                      <label for="cam-brightness">Brightness</label>
+                      <input id="cam-brightness" type="range" min="50" max="200" step="5" [ngModel]="camBrightness()" (ngModelChange)="camBrightness.set(+$event)" />
+                      <span class="mono">{{ camBrightness() }}%</span>
+                      <label for="cam-contrast">Contrast</label>
+                      <input id="cam-contrast" type="range" min="50" max="200" step="5" [ngModel]="camContrast()" (ngModelChange)="camContrast.set(+$event)" />
+                      <span class="mono">{{ camContrast() }}%</span>
+                      <label for="cam-saturation">Saturation</label>
+                      <input id="cam-saturation" type="range" min="0" max="250" step="5" [ngModel]="camSaturation()" (ngModelChange)="camSaturation.set(+$event)" />
+                      <span class="mono">{{ camSaturation() }}%</span>
+                      <label for="cam-zoom">Zoom</label>
+                      <input id="cam-zoom" type="range" min="50" max="300" step="5" [ngModel]="camZoom()" (ngModelChange)="camZoom.set(+$event)" />
+                      <span class="mono">{{ camZoom() }}%</span>
+                      <label for="cam-pan-x">Left/right</label>
+                      <input id="cam-pan-x" type="range" min="-50" max="50" step="1" [ngModel]="camPanX()" (ngModelChange)="camPanX.set(+$event)" />
+                      <span class="mono">{{ camPanX() }}%</span>
+                      <label for="cam-pan-y">Up/down</label>
+                      <input id="cam-pan-y" type="range" min="-50" max="50" step="1" [ngModel]="camPanY()" (ngModelChange)="camPanY.set(+$event)" />
+                      <span class="mono">{{ camPanY() }}%</span>
+                    </div>
+                    <p class="source-row">
+                      @if (camAdjusted()) { <button class="link" type="button" (click)="resetCam()">Reset</button> }
+                      <button class="link" type="button" (click)="selectMedia(null)">Done</button>
+                    </p>
+                  }
+                }
+              } @else {
+                <p class="hint">A phone recording or stick cam video, for its sound.</p>
+              }
+              <label class="btn small">
+                {{ audioUrl() ? 'Change sound track' : 'Add a sound track' }}
+                <input class="sr-only" type="file" accept="audio/*,video/*" aria-labelledby="sound-label" (change)="onAudioFile($event)" />
+              </label>
+            </div>
             <div class="field">
               <span class="field-label" id="font-label">OSD font</span>
               @if (font(); as fnt) {
@@ -478,9 +661,19 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               @if (fontError()) { <p class="error">{{ fontError() }}</p> }
             </div>
             <div class="field">
+              <label for="format">Format</label>
+              <select id="format" [ngModel]="vertical()" (ngModelChange)="setVertical($event)" [disabled]="busy()">
+                <option [ngValue]="false">Landscape 16:9 (YouTube)</option>
+                <option [ngValue]="true">Vertical 9:16 (Shorts, Reels, TikTok)</option>
+              </select>
+              @if (vertical()) {
+                <p class="hint">Its own layout, kept clear of the Shorts buttons at the bottom. In the preview your footage fills the top half (use Zoom to frame it) and the OSD sits below.</p>
+              }
+            </div>
+            <div class="field">
               <label for="res">Resolution</label>
               <select id="res" [ngModel]="resIndex()" (ngModelChange)="resIndex.set(+$event)" [disabled]="busy()">
-                @for (r of resolutions; track r.label; let i = $index) { <option [value]="i">{{ r.label }}</option> }
+                @for (r of resolutions(); track r.label; let i = $index) { <option [value]="i">{{ r.label }}</option> }
               </select>
             </div>
             <div class="field">
@@ -509,6 +702,62 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               }
               <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi() && !data().track" /> RSSI panel (satellites, RSSI, distance, height)</label>
             </fieldset>
+            <!-- Part of the overlay (exported), like the HUD; each shows while it has text. Its settings show only while
+                 it's picked (on the preview, under Layout, or with its Edit/Add button here). -->
+            <fieldset class="field labels" [disabled]="busy()">
+              <legend>{{ titleOpen() ? 'Title' : craftOpen() ? 'Craft name' : 'Title and craft name' }}</legend>
+              @if (titleOpen()) {
+              <div class="label-row">
+                <label for="title-text" class="sr-only">Title</label>
+                <input id="title-text" type="text" maxlength="60" placeholder="Title, e.g. BRIDGE" [ngModel]="opts().titleText"
+                       (ngModelChange)="setLabel('titleText', $event)" />
+                <input type="color" aria-label="Title colour" [ngModel]="opts().titleColor" (ngModelChange)="setLabel('titleColor', $event)" />
+              </div>
+              <div class="label-row">
+                <label for="title-accent" class="sr-only">Second part of the title</label>
+                <input id="title-accent" type="text" maxlength="60" placeholder="Second part, e.g. BOI" [ngModel]="opts().titleAccentText"
+                       (ngModelChange)="setLabel('titleAccentText', $event)" />
+                <input type="color" aria-label="Second part colour" [ngModel]="opts().titleAccentColor" (ngModelChange)="setLabel('titleAccentColor', $event)" />
+              </div>
+              @if (current()?.key === 'title') {
+                <div class="label-row">
+                  <label for="title-size">Size</label>
+                  <input id="title-size" type="range" [min]="scaleMin" [max]="scaleMax" step="0.05" [ngModel]="current()!.scale"
+                         (ngModelChange)="updatePlacement('scale', +$event)" />
+                  <span class="mono">{{ (current()!.scale * 100).toFixed(0) }}%</span>
+                </div>
+              }
+              <div class="label-row">
+                <span>Outline</span>
+                <input type="color" aria-label="Title outline colour" [ngModel]="opts().titleStrokeColor" (ngModelChange)="setLabel('titleStrokeColor', $event)" />
+                <label class="check"><input type="checkbox" [ngModel]="!!opts().titleBgColor"
+                       (ngModelChange)="setLabel('titleBgColor', $event ? '#000000' : '')" /> Box behind the title</label>
+                @if (opts().titleBgColor) {
+                  <input type="color" aria-label="Title box colour" [ngModel]="opts().titleBgColor" (ngModelChange)="setLabel('titleBgColor', $event)" />
+                }
+              </div>
+              } @else if (craftOpen()) {
+              <div class="label-row">
+                <label for="craft-text" class="sr-only">Craft name</label>
+                <input id="craft-text" type="text" maxlength="60" placeholder="Craft name, e.g. FLYFISH VOLADOR VX 3.5" [ngModel]="opts().craftText"
+                       (ngModelChange)="setLabel('craftText', $event)" />
+                <input type="color" aria-label="Craft name colour" [ngModel]="opts().craftColor" (ngModelChange)="setLabel('craftColor', $event)" />
+                <input type="color" aria-label="Craft name outline colour" title="Outline" [ngModel]="opts().craftStrokeColor"
+                       (ngModelChange)="setLabel('craftStrokeColor', $event)" />
+              </div>
+              } @else {
+                <p class="source-row">
+                  <button class="btn small" type="button" (click)="pickElement('title')">{{ hasTitle() ? 'Edit title' : 'Add title' }}</button>
+                  <button class="btn small" type="button" (click)="pickElement('craft')">{{ hasCraft() ? 'Edit craft name' : 'Add craft name' }}</button>
+                </p>
+              }
+              @if (titleOpen() || craftOpen()) {
+                <p class="source-row"><span class="hint">Drag it on the preview to move it.</span>
+                  <button class="link" type="button" (click)="selected.set(null)">Done</button></p>
+              } @else {
+                <p class="hint">Or click one on the preview.</p>
+              }
+            </fieldset>
             <div class="field">
               <label for="opacity">Panel background: {{ (opts().panelOpacity * 100).toFixed(0) }}%</label>
               <input id="opacity" type="range" min="0" max="0.8" step="0.05" [ngModel]="opts().panelOpacity"
@@ -517,11 +766,11 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             <div class="range">
               <div class="field">
                 <label for="start">Start (s)</label>
-                <input id="start" type="number" min="0" [max]="end()" step="0.5" [ngModel]="start()" (ngModelChange)="start.set(clampTime(+$event))" [disabled]="busy()" />
+                <input id="start" type="number" min="0" [max]="end()" step="0.1" [ngModel]="start()" (ngModelChange)="start.set(clampTime(+$event))" [disabled]="busy()" />
               </div>
               <div class="field">
                 <label for="end">End (s)</label>
-                <input id="end" type="number" [min]="start()" [max]="seconds()" step="0.5" [ngModel]="end()" (ngModelChange)="end.set(clampTime(+$event))" [disabled]="busy()" />
+                <input id="end" type="number" [min]="start()" [max]="seconds()" step="0.1" [ngModel]="end()" (ngModelChange)="end.set(clampTime(+$event))" [disabled]="busy()" />
               </div>
             </div>
             <p class="hint">{{ frameCount() }} frames, {{ clock(exportSeconds()) }} long{{ opts().showStats ? ' with the stats' : '' }}, roughly {{ sizeEstimate() }} on disk.</p>
@@ -545,6 +794,44 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             }
             @if (message()) { <p class="note" role="status">{{ message() }}</p> }
             @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+
+            @if (hasVideo()) {
+              <!-- Everything baked into one video, ready to upload: no editor needed. -->
+              <hr />
+              <div class="field">
+                <p class="field-label" id="finished-heading">Finished video</p>
+                <p class="hint">
+                  Your footage{{ audioIsVideo() && showPip() ? ', stick cam' : '' }}, {{ audioUrl() ? audioName() + "'s sound" : 'its sound' }}
+                  and the OSD in one .mp4, as in the preview: {{ clipText() }} at {{ resolutions()[resIndex()].label }}, {{ fps() }} fps.
+                  Set the range under the Flight footage slider.
+                </p>
+                <div class="label-row">
+                  <label class="check"><input type="checkbox" [ngModel]="fadeOut() > 0" (ngModelChange)="setFadeOut($event ? 1.5 : 0)"
+                         [disabled]="rendering()" /> Fade out at the end</label>
+                  @if (fadeOut() > 0) {
+                    <label class="sr-only" for="fade-seconds">Fade length in seconds</label>
+                    <input id="fade-seconds" type="number" min="0.5" max="10" step="0.5" [ngModel]="fadeOut()" (ngModelChange)="setFadeOut(+$event)"
+                           [disabled]="rendering()" style="width: 4.5rem" />
+                    <span>s, picture to black and sound to silence</span>
+                  }
+                </div>
+                @if (renderStage()) { <p class="hint" role="status" aria-live="polite">{{ renderStage() }}</p> }
+                @if (rendering()) {
+                  <div class="progress">
+                    <!-- No value until the first frame: an indeterminate bar while the sound and first frames load. -->
+                    <progress [attr.value]="renderTotal() ? renderDone() : null" [max]="renderTotal() || 1"></progress>
+                    @if (renderTotal()) {
+                      <span class="mono">{{ renderDone() }} / {{ renderTotal() }}{{ renderEta() ? ', about ' + renderEta() + ' left' : '' }}</span>
+                    }
+                  </div>
+                  <button class="btn" type="button" (click)="cancelRender()">Cancel</button>
+                } @else {
+                  <button class="btn btn-primary" type="button" (click)="renderFinished()" [disabled]="busy() || renderEnd() <= renderStart()">Render .mp4</button>
+                }
+                @if (renderMessage()) { <p class="note" role="status">{{ renderMessage() }}</p> }
+                @if (renderError()) { <p class="error" role="alert">{{ renderError() }}</p> }
+              </div>
+            }
           </section>
         </div>
 
@@ -576,9 +863,6 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .stage { border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
              background: repeating-conic-gradient(#c9d1d9 0 25%, #eef2f6 0 50%) 0 0 / 24px 24px; }
     .stage.dark { background: linear-gradient(180deg, #4b6a88, #2b3a2b); }
-    .backdrop { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin-top: .6rem; font-size: .92rem; }
-    .backdrop label[for] { font-weight: 600; }
-    .backdrop select { width: auto; }
     .preview-help { margin: .75rem 0 0; font-size: .88rem; line-height: 1.5; display: grid; gap: .5rem; }
     .preview-help p { margin: 0; }
     .stage { position: relative; }
@@ -586,6 +870,24 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .frame { position: relative; aspect-ratio: 16 / 9; }
     .frame canvas { position: relative; z-index: 1; }
     .bg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+    .bg-video.fit { object-fit: contain; }
+    /* Vertical: a tall frame, no taller than most of the window, centred in the preview panel. */
+    .stage.vertical { width: min(100%, calc(78vh * 9 / 16)); margin-inline: auto; }
+    .stage.vertical .frame { aspect-ratio: 9 / 16; }
+    .stage.vertical:fullscreen { width: 100%; }
+    .stage.vertical:fullscreen .frame { width: min(100vw, calc(100vh * 9 / 16)); }
+    .footage-box { position: absolute; inset: 0; overflow: hidden; background: #000; }
+    /*
+     * Vertical is a split screen in three layers: the stick cam at the back (below the split), the flight footage over
+     * it (above), and the HUD on top. The split sits 53.7% down, as on a real Short. Neither video is clipped to its
+     * part, so zooming or panning one into the other's overlaps it, with the footage always in front. The stage clips
+     * both at the frame's edges.
+     */
+    .stage.vertical .footage-box { bottom: 46.3%; overflow: visible; background: none; z-index: 1; }
+    .stage.vertical:has(.footage-box) .frame { background: #000; }
+    .stage.vertical .frame canvas { z-index: 2; }
+    .stage.vertical .pip { inset: 53.7% 0 0 0; width: auto; aspect-ratio: auto; overflow: visible; z-index: 0;
+                           border: 0; border-radius: 0; box-shadow: none; }
     .fullscreen-btn { position: absolute; top: .5rem; right: .5rem; z-index: 3; width: 2.1rem; height: 2.1rem; display: grid; place-items: center;
                       border: 0; border-radius: 8px; background: rgb(8 12 16 / .6); color: #fff; cursor: pointer; padding: 0; opacity: .75; }
     .fullscreen-btn:hover, .fullscreen-btn:focus-visible { opacity: 1; }
@@ -596,6 +898,12 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .fs-hint { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 3; margin: 0; padding: .35rem .8rem;
                border-radius: 999px; background: rgb(8 12 16 / .6); color: #fff; font-size: .85rem; pointer-events: none; }
     canvas.before-log { visibility: hidden; }
+    /* Above the overlay but out of its way: clicks go through to the canvas, so elements under it can still be dragged. */
+    /* The whole picture, never cropped to the box; Zoom and Pan frame it from there. */
+    .pip video { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .pip { position: absolute; right: 2%; bottom: 3%; width: 26%; aspect-ratio: 16 / 9; overflow: hidden; z-index: 2; pointer-events: none;
+           border: 2px solid rgba(255, 255, 255, .85); border-radius: 6px; background: #000; box-shadow: 0 2px 10px rgba(0, 0, 0, .5); }
+    .pip.hidden { display: none; }
     /* Both sliders' labels share a width so the two bars line up. */
     .scrub-label { font-weight: 600; font-size: .92rem; flex: 0 0 7.5rem; }
     .video-sync { display: grid; gap: .5rem; margin-top: .6rem; font-size: .92rem; justify-items: start; }
@@ -603,8 +911,6 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .video-sync .offset { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
     .video-sync .offset label { font-weight: 600; }
     .video-sync .offset input { width: 5.5rem; }
-    .audio-sync { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }
-    .audio-name { font-family: var(--mono); font-size: .82rem; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .audio-claps { display: grid; gap: .4rem; justify-self: stretch; }
     .audio-panel .video-scrub, .audio-panel .sound-profile { justify-self: stretch; margin-top: 0; }
     .clap-field { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
@@ -632,6 +938,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .scrub input[type=range], .video-scrub input[type=range] { flex: 1 1 10rem; min-width: 0; accent-color: var(--accent); }
     .scrub .step, .video-scrub .step { padding: .2rem .55rem; line-height: 1; }
     .scrub .mono, .video-scrub .mono { min-width: 4.6rem; text-align: right; }
+    .scrub-track { position: relative; flex: 1 1 10rem; min-width: 0; display: flex; }
+    .scrub-track input[type=range] { width: 100%; }
+    .window-bar { position: absolute; bottom: -3px; height: 4px; border-radius: 2px; background: var(--accent); opacity: .85; pointer-events: none; }
+    .export-window { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; margin-top: .5rem; font-size: .92rem; }
     canvas { touch-action: none; } /* dragging an element shouldn't scroll the page on touch screens */
     .layout-edit { margin: 1rem 0 0; }
     .layout-edit .hint { margin: 0 0 .5rem; }
@@ -652,7 +962,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .colors { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: .2rem 0 .3rem; font-size: .92rem; }
     .color { display: inline-flex; align-items: center; gap: .4rem; font-weight: normal; }
     /* Colour wells: override the site-wide full-width input rule. */
-    .color input { width: 2.2rem; height: 1.6rem; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+    .color input, .label-row input[type=color] { width: 2.2rem; height: 1.6rem; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
     .color input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     fieldset { border: 0; padding: 0; margin: 0 0 1rem; }
     legend { font-weight: 600; margin-bottom: .2rem; }
@@ -661,7 +971,16 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     progress { width: 100%; accent-color: var(--accent); }
     .note { color: var(--ok); margin: .6rem 0 0; }
     .field-label { font-weight: 600; }
-    .font-row { margin: 0; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+    .font-row, .source-row { margin: 0; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+    .labels { display: grid; gap: .4rem; }
+    .label-row { display: flex; align-items: center; gap: .5rem; }
+    .label-row input[type=text], .label-row input[type=range] { flex: 1; min-width: 0; }
+    .labels .hint { margin: 0; }
+    .footage-box.selected, .pip.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+    .grade { display: grid; grid-template-columns: auto 1fr 3.2rem; align-items: center; gap: .35rem .6rem; margin: .4rem 0 .1rem; font-size: .92rem; }
+    .grade input[type=range] { width: 100%; min-width: 0; accent-color: var(--accent); }
+    .grade .mono { text-align: right; font-size: .82rem; }
+    .source-row .mono { font-size: .82rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .small { padding: .3rem .75rem; font-size: .88rem; justify-self: start; }
     .link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
     .howto ol { margin: 0; padding-left: 1.25rem; display: grid; gap: .35rem; }
@@ -678,10 +997,13 @@ export class OverlayExportComponent {
   seconds = input.required<number>();
   /** File name before the "-1920x1080-30fps.mov" part. */
   fileStem = input.required<string>();
+  /** The pilot's footage, picked here or by the page above; either way it plays behind the preview. */
+  video = model<File | null>(null);
+  /** A sound track from a second recording (the phone), shared with the page the same way. */
+  sound = model<File | null>(null);
 
   private canvas = viewChild<ElementRef<HTMLCanvasElement>>('preview');
 
-  readonly resolutions = RESOLUTIONS;
   readonly fpsOptions = FPS;
   readonly toDisk = canSaveToDisk();
   readonly clock = clock;
@@ -694,14 +1016,20 @@ export class OverlayExportComponent {
 
   /** New data (another flight or session) resets the range to the whole flight. */
   private range = computed(() => ({ data: this.data(), seconds: this.seconds() }));
+  /** Vertical 9:16 output for Shorts, Reels and TikTok instead of landscape 16:9. */
+  vertical = signal(readVertical());
+  resolutions = computed(() => (this.vertical() ? VERTICAL_RESOLUTIONS : RESOLUTIONS));
+  /** The preview canvas is drawn at 1080p in the chosen shape; placements are fractions, so this is only for pointer maths. */
+  previewW = computed(() => (this.vertical() ? 1080 : 1920));
+  previewH = computed(() => (this.vertical() ? 1920 : 1080));
   resIndex = signal(0);
   fps = signal(30);
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    showSticks: true, stickTrails: true, showSpeed: true, showBattery: true, showMap: true, showTimer: true, showRssi: true, altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
-    ...readColors(), stickTrailIntensity: readTrailIntensity(),
-    stickMode: readStickMode(), panelOpacity: 0.35, font: null, speedUnit: 'kmh', layout: readLayout(), itemScale: readItemScales(),
+    showSticks: true, stickTrails: true, showSpeed: !this.vertical(), showBattery: true, showMap: !this.vertical(), showTimer: true, showRssi: !this.vertical(), altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
+    ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
+    stickMode: readStickMode(), panelOpacity: this.vertical() ? 0 : 0.35, font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
   });
   private units = inject(UnitsService);
 
@@ -710,7 +1038,7 @@ export class OverlayExportComponent {
   readonly scaleMin = SCALE_MIN;
   readonly scaleMax = SCALE_MAX;
   /** Elements currently drawn, with their boxes on the 1080p preview. */
-  placed = computed(() => this.renderer().placements(PREVIEW_W, PREVIEW_H, this.opts()));
+  placed = computed(() => this.renderer().placements(this.previewW(), this.previewH(), this.opts()));
   /** Picked by click or from the list; null until the user starts editing, so no outline shows before then. */
   selected = signal<ElementKey | null>(null);
   hoverKey = signal<ElementKey | null>(null);
@@ -724,7 +1052,7 @@ export class OverlayExportComponent {
   current = computed(() => {
     const placed = this.placed();
     const p = placed.find(e => e.key === this.selected()) ?? placed[0];
-    return p ? { key: p.key, x: (p.x + p.w / 2) / PREVIEW_W, y: (p.y + p.h / 2) / PREVIEW_H, scale: p.scale } : null;
+    return p ? { key: p.key, x: (p.x + p.w / 2) / this.previewW(), y: (p.y + p.h / 2) / this.previewH(), scale: p.scale } : null;
   });
 
   previewTime = linkedSignal({ source: this.range, computation: r => Math.min(60, r.seconds / 2) });
@@ -748,13 +1076,74 @@ export class OverlayExportComponent {
   videoTime = signal(0);
   videoDuration = signal(0);
   videoClock = computed(() => preciseClock(this.videoTime()));
+  /** Width over height of the footage, once it has loaded. */
+  videoAspect = signal(16 / 9);
+  /** 4:3 footage (O4 at 4:3, older cams) is shown whole in the middle of the 16:9 preview, with black bars at the sides. */
+  footage43 = computed(() => this.videoAspect() < 1.5);
+  /** Preview-only colour for the footage, in percent (100 = as recorded); starts a little punchier than recorded. */
+  brightness = signal(FOOTAGE_DEFAULTS.brightness);
+  contrast = signal(FOOTAGE_DEFAULTS.contrast);
+  saturation = signal(FOOTAGE_DEFAULTS.saturation);
+  /** Preview-only zoom of the footage inside its box, in percent. */
+  footageZoom = signal(FOOTAGE_DEFAULTS.zoom);
+  footageFilter = computed(() => gradeFilter(this.brightness(), this.contrast(), this.saturation()));
+  footageAdjusted = computed(() =>
+    this.brightness() !== FOOTAGE_DEFAULTS.brightness || this.contrast() !== FOOTAGE_DEFAULTS.contrast
+    || this.saturation() !== FOOTAGE_DEFAULTS.saturation || this.footageZoom() !== FOOTAGE_DEFAULTS.zoom);
+
+  resetFootage() {
+    this.brightness.set(FOOTAGE_DEFAULTS.brightness);
+    this.contrast.set(FOOTAGE_DEFAULTS.contrast);
+    this.saturation.set(FOOTAGE_DEFAULTS.saturation);
+    this.footageZoom.set(FOOTAGE_DEFAULTS.zoom);
+  }
+
+  /** The same for a stick cam's picture, plus panning; it starts zoomed in on the hands and a little darker. */
+  camBrightness = signal(CAM_DEFAULTS.brightness);
+  camContrast = signal(CAM_DEFAULTS.contrast);
+  camSaturation = signal(CAM_DEFAULTS.saturation);
+  camZoom = signal(CAM_DEFAULTS.zoom);
+  /** Moves the stick cam inside its box, as a percentage of the box: + is right and down. */
+  camPanX = signal(CAM_DEFAULTS.panX);
+  camPanY = signal(CAM_DEFAULTS.panY);
+  camFilter = computed(() => gradeFilter(this.camBrightness(), this.camContrast(), this.camSaturation()));
+  camTransform = computed(() => {
+    const z = this.camZoom(), x = this.camPanX(), y = this.camPanY();
+    return z === 100 && x === 0 && y === 0 ? null : `translate(${x}%, ${y}%) scale(${z / 100})`;
+  });
+  camAdjusted = computed(() =>
+    this.camBrightness() !== CAM_DEFAULTS.brightness || this.camContrast() !== CAM_DEFAULTS.contrast
+    || this.camSaturation() !== CAM_DEFAULTS.saturation || this.camZoom() !== CAM_DEFAULTS.zoom
+    || this.camPanX() !== CAM_DEFAULTS.panX || this.camPanY() !== CAM_DEFAULTS.panY);
+
+  resetCam() {
+    this.camBrightness.set(CAM_DEFAULTS.brightness);
+    this.camContrast.set(CAM_DEFAULTS.contrast);
+    this.camSaturation.set(CAM_DEFAULTS.saturation);
+    this.camZoom.set(CAM_DEFAULTS.zoom);
+    this.camPanX.set(CAM_DEFAULTS.panX);
+    this.camPanY.set(CAM_DEFAULTS.panY);
+  }
   /** The video is before arming, so the overlay isn't drawn yet. */
   beforeLog = signal(false);
   private frameRequest: number | null = null;
   private footageFile: File | null = null;
+  private footageFromPage = effect(() => {
+    const file = this.video();
+    if (file && file !== this.footageFile) untracked(() => this.loadVideo(file));
+  });
+  private soundFile: File | null = null;
+  private soundFromPage = effect(() => {
+    const file = this.sound();
+    if (file === this.soundFile) return;
+    untracked(() => (file ? this.loadAudio(file) : this.removeAudio()));
+  });
 
   // ---- sound from another recording: its own track, placed on the log ----
-  private extAudio = viewChild<ElementRef<HTMLAudioElement>>('extAudio');
+  private extAudio = viewChild<ElementRef<HTMLMediaElement>>('extAudio');
+  /** The sound track came from a video, so its picture can show in the corner of the preview. */
+  audioIsVideo = signal(false);
+  showPip = signal(true);
   audioUrl = signal<string | null>(null);
   audioName = signal('');
   /** Claps found in the phone recording, in seconds, earliest first. */
@@ -877,7 +1266,7 @@ export class OverlayExportComponent {
 
   frameCount = computed(() => Math.max(0, Math.floor(this.exportSeconds() * this.fps())));
   /** Measured about 170 KB per 1080p frame with all elements on; scales with pixel count. */
-  estimatedBytes = computed(() => this.frameCount() * 170_000 * (RESOLUTIONS[this.resIndex()].h / 1080) ** 2);
+  estimatedBytes = computed(() => this.frameCount() * 170_000 * ((this.resolutions()[this.resIndex()].w * this.resolutions()[this.resIndex()].h) / (1920 * 1080)));
   sizeEstimate = computed(() => {
     const b = this.estimatedBytes();
     return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`;
@@ -940,6 +1329,25 @@ export class OverlayExportComponent {
     saveColors(this.opts());
   }
 
+  /** Title and craft name text or colour, remembered for next time. Editing one picks it, so its settings stay open. */
+  setLabel(key: LabelKey, value: string) {
+    this.set(key, key.endsWith('Text') ? value.slice(0, 60) : value);
+    saveLabels(this.opts());
+    this.pickElement(key.startsWith('craft') ? 'craft' : 'title');
+  }
+
+  /** Picks an OSD element (outlined on the preview, its settings shown) and drops any picked video. */
+  pickElement(key: ElementKey) {
+    this.selected.set(key);
+    this.mediaSelected.set(null);
+  }
+
+  hasTitle = computed(() => !!(this.opts().titleText + this.opts().titleAccentText).trim());
+  hasCraft = computed(() => !!this.opts().craftText.trim());
+  /** Their settings show only while they're picked (on the preview, under Layout, or with their Edit/Add button). */
+  titleOpen = computed(() => this.selected() === 'title');
+  craftOpen = computed(() => this.selected() === 'craft');
+
   setTrailIntensity(value: number) {
     this.set('stickTrailIntensity', value);
     try { localStorage.setItem(TRAIL_KEY, String(value)); } catch { /* not remembered */ }
@@ -957,7 +1365,7 @@ export class OverlayExportComponent {
 
   private setPlacement(key: ElementKey, placement: ElementPlacement, save = true) {
     this.opts.update(o => ({ ...o, layout: { ...o.layout, [key]: placement } }));
-    if (save) saveLayout(this.opts().layout);
+    if (save) saveLayout(this.opts().layout, this.vertical());
   }
 
   updatePlacement(field: keyof ElementPlacement, value: number) {
@@ -994,13 +1402,26 @@ export class OverlayExportComponent {
       layout: Object.fromEntries(Object.entries(o.layout).filter(([k]) => k !== key)),
       itemScale: Object.fromEntries(Object.entries(o.itemScale).filter(([k]) => !itemKeys.has(k))),
     }));
-    saveLayout(this.opts().layout);
+    saveLayout(this.opts().layout, this.vertical());
     saveItemScales(this.opts().itemScale);
+  }
+
+  /**
+   * Switches between landscape and vertical; each has its own remembered layout, so neither overwrites the other.
+   * Vertical starts without the speed panel, mini map and RSSI panel (big sticks and the battery are what fit), and
+   * with no panel backgrounds, so the readouts sit straight on the stick cam like a real Short.
+   */
+  setVertical(vertical: boolean) {
+    this.vertical.set(vertical);
+    try { localStorage.setItem(FORMAT_KEY, vertical ? 'vertical' : 'landscape'); } catch { /* not remembered */ }
+    this.selected.set(null);
+    this.opts.update(o => ({ ...o, layout: readLayout(vertical), showSpeed: !vertical, showMap: !vertical, showRssi: !vertical,
+      panelOpacity: vertical ? 0 : 0.35 }));
   }
 
   resetLayout() {
     this.opts.update(o => ({ ...o, layout: {}, itemScale: {} }));
-    saveLayout({});
+    saveLayout({}, this.vertical());
     saveItemScales({});
   }
 
@@ -1008,7 +1429,7 @@ export class OverlayExportComponent {
   private canvasPoint(e: PointerEvent) {
     const c = this.canvas()!.nativeElement;
     const r = c.getBoundingClientRect();
-    return { x: ((e.clientX - r.left) / r.width) * PREVIEW_W, y: ((e.clientY - r.top) / r.height) * PREVIEW_H };
+    return { x: ((e.clientX - r.left) / r.width) * this.previewW(), y: ((e.clientY - r.top) / r.height) * this.previewH() };
   }
 
   /** Topmost element under a point (drawn last = on top). */
@@ -1020,9 +1441,14 @@ export class OverlayExportComponent {
     if (this.busy()) return;
     const pt = this.canvasPoint(e);
     const p = this.hit(pt.x, pt.y);
-    if (!p) return;
+    if (!p) {
+      // Not on an OSD element: pick the video under the pointer, so its settings show in Options.
+      this.selectMedia(this.mediaAt(pt.x, pt.y));
+      return;
+    }
     e.preventDefault();
     this.selected.set(p.key);
+    this.mediaSelected.set(null);
     this.drag = { key: p.key, dx: pt.x - (p.x + p.w / 2), dy: pt.y - (p.y + p.h / 2) };
     this.dragging.set(true);
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
@@ -1031,8 +1457,8 @@ export class OverlayExportComponent {
   onPointerMove(e: PointerEvent) {
     const pt = this.canvasPoint(e);
     if (!this.drag) { this.hoverKey.set(this.busy() ? null : this.hit(pt.x, pt.y)?.key ?? null); return; }
-    let x = clamp01((pt.x - this.drag.dx) / PREVIEW_W);
-    let y = clamp01((pt.y - this.drag.dy) / PREVIEW_H);
+    let x = clamp01((pt.x - this.drag.dx) / this.previewW());
+    let y = clamp01((pt.y - this.drag.dy) / this.previewH());
     // Snap to the frame's centre lines, which are the hardest spots to hit by hand.
     if (Math.abs(x - 0.5) < 0.008) x = 0.5;
     if (Math.abs(y - 0.5) < 0.012) y = 0.5;
@@ -1044,7 +1470,7 @@ export class OverlayExportComponent {
     if (!this.drag) return;
     this.drag = null;
     this.dragging.set(false);
-    saveLayout(this.opts().layout);
+    saveLayout(this.opts().layout, this.vertical());
   }
 
   setStatsSeconds(v: number) {
@@ -1077,7 +1503,10 @@ export class OverlayExportComponent {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    if (!file) return;
+    if (file) this.loadVideo(file);
+  }
+
+  loadVideo(file: File) {
     this.stopVideo();
     const old = this.videoUrl();
     if (old) URL.revokeObjectURL(old);
@@ -1085,6 +1514,8 @@ export class OverlayExportComponent {
     this.videoUrl.set(URL.createObjectURL(file));
     this.videoName.set(file.name);
     this.footageFile = file;
+    this.video.set(file);
+    this.videoAspect.set(16 / 9); // until the new file says otherwise
     this.footageSize.set(file.size);
     this.motorMatch.set(null);
     this.backdropError.set('');
@@ -1093,15 +1524,21 @@ export class OverlayExportComponent {
   }
 
   /** A sound track from a second recording: draws it, places it on the log from the arming it hears, and finds its claps. */
-  async onAudioFile(e: Event) {
+  onAudioFile(e: Event) {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    if (!file) return;
+    if (file) this.loadAudio(file);
+  }
+
+  async loadAudio(file: File) {
+    this.soundFile = file;
+    this.sound.set(file);
     const old = this.audioUrl();
     if (old) URL.revokeObjectURL(old);
     this.audioUrl.set(URL.createObjectURL(file)); // plays from this computer, like the footage
     this.audioName.set(file.name);
+    this.audioIsVideo.set(file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name));
     this.audioClaps.set([]);
     this.audioClapIndex.set(0);
     this.audioArming.set(null);
@@ -1180,10 +1617,13 @@ export class OverlayExportComponent {
   }
 
   removeAudio() {
+    this.soundFile = null;
+    this.sound.set(null);
     this.extAudio()?.nativeElement.pause();
     const url = this.audioUrl();
     if (url) URL.revokeObjectURL(url);
     this.audioUrl.set(null);
+    this.audioIsVideo.set(false);
     this.audioClaps.set([]);
     this.audioArming.set(null);
     this.audioProfile.set(null);
@@ -1215,6 +1655,7 @@ export class OverlayExportComponent {
     // Some recordings don't say how long they are up front; the seekable range does.
     const d = Number.isFinite(v.duration) ? v.duration : v.seekable.length ? v.seekable.end(v.seekable.length - 1) : 0;
     this.videoDuration.set(d);
+    if (v.videoWidth && v.videoHeight) this.videoAspect.set(v.videoWidth / v.videoHeight);
   }
 
   onVideoTime() {
@@ -1374,12 +1815,205 @@ export class OverlayExportComponent {
     return Math.min(this.seconds(), Math.max(0, Number.isFinite(v) ? v : 0));
   }
 
+  // ---- picking a video in the preview ----
+  /** The video whose picture settings show in Options; only one thing (a video or an OSD element) is picked at a time. */
+  mediaSelected = signal<'footage' | 'cam' | null>(null);
+  private hasFootage = computed(() => this.hasVideo());
+  private hasCam = computed(() => !!this.audioUrl() && this.audioIsVideo() && this.showPip());
+
+  /** Which video is under a point on the preview canvas, matching where the CSS puts them. */
+  private mediaAt(x: number, y: number): 'footage' | 'cam' | null {
+    const W = this.previewW(), H = this.previewH();
+    if (this.vertical()) {
+      if (y < 0.537 * H) return this.hasFootage() ? 'footage' : null; // above the split (see .stage.vertical)
+      return this.hasCam() ? 'cam' : this.hasFootage() ? 'footage' : null;
+    }
+    // Landscape: the stick cam is the corner picture (.pip: right 2%, bottom 3%, 26% wide, 16:9) over the footage.
+    const pw = 0.26 * W, ph = (pw * 9) / 16, px = 0.98 * W - pw, py = 0.97 * H - ph;
+    if (this.hasCam() && x >= px && x <= px + pw && y >= py && y <= py + ph) return 'cam';
+    return this.hasFootage() ? 'footage' : null;
+  }
+
+  /** Picks a video, or nothing (clicking empty preview), and drops any picked OSD element either way. */
+  selectMedia(media: 'footage' | 'cam' | null) {
+    this.mediaSelected.set(media);
+    this.selected.set(null);
+  }
+
+  // ---- finished video: the footage range to render, set from the footage slider ----
+  /** A new clip (or its length becoming known) resets the range to the whole clip. */
+  private clip = computed(() => ({ url: this.videoUrl(), duration: this.videoDuration() }));
+  renderStart = linkedSignal({ source: this.clip, computation: () => 0 });
+  renderEnd = linkedSignal({ source: this.clip, computation: c => c.duration });
+  wholeClip = computed(() => this.renderStart() === 0 && this.renderEnd() === this.videoDuration());
+  clipText = computed(() => this.wholeClip()
+    ? `the whole clip (${preciseClock(this.videoDuration())})`
+    : `${preciseClock(this.renderStart())} – ${preciseClock(this.renderEnd())} (${preciseClock(this.renderEnd() - this.renderStart())})`);
+  /** How the render slider's handles read out to assistive tech. */
+  readonly clockText = (v: number) => preciseClock(v);
+
+  useWholeClip() {
+    this.renderStart.set(0);
+    this.renderEnd.set(this.videoDuration());
+  }
+
+  /** Seconds the finished video fades to black and silence at its end; 0 for no fade. Remembered in this browser. */
+  fadeOut = signal(readFadeOut());
+
+  setFadeOut(seconds: number) {
+    const v = Number.isFinite(seconds) ? Math.min(10, Math.max(0, seconds)) : 0;
+    this.fadeOut.set(v);
+    try { localStorage.setItem(FADE_KEY, String(v)); } catch { /* not remembered */ }
+  }
+
+  rendering = signal(false);
+  /** What the render is doing right now, so a slow start (reading sound, finding frames) doesn't look like nothing. */
+  renderStage = signal('');
+  renderDone = signal(0);
+  renderTotal = signal(0);
+  renderEta = signal('');
+  renderMessage = signal('');
+  renderError = signal('');
+  private renderControl = { cancelled: false };
+
+  /** Bakes footage, stick cam, sound and OSD into one MP4, laid out and graded exactly like the preview. */
+  async renderFinished() {
+    this.renderMessage.set('');
+    this.renderError.set('');
+    const footage = this.footageFile;
+    if (!footage) {
+      this.renderError.set('Load your flight footage first (Flight footage, above).');
+      return;
+    }
+    const { w, h } = this.resolutions()[this.resIndex()];
+    const fps = this.fps();
+    const name = `${this.fileStem()}-video-${w}x${h}-${fps}fps.mp4`;
+
+    let target: RenderTarget | null = null;
+    let fallbackNote = '';
+    if (this.toDisk) {
+      this.renderStage.set('Choosing where to save...');
+      let handle: Awaited<ReturnType<SaveFilePicker>>;
+      try {
+        handle = await (window as unknown as { showSaveFilePicker: SaveFilePicker }).showSaveFilePicker({
+          suggestedName: name, types: [{ description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } }],
+        });
+      } catch (e) {
+        this.renderStage.set('');
+        // Closing the dialog is a choice, not a failure; anything else gets said.
+        if (!(e instanceof DOMException && e.name === 'AbortError')) {
+          console.error('[render] save dialog', e);
+          this.renderError.set(`Couldn't open the save dialog: ${e instanceof Error ? e.message : e}`);
+        }
+        return;
+      }
+      try {
+        target = { kind: 'disk', writable: await handle.createWritable() };
+      } catch (e) {
+        // Chrome can refuse to write to the chosen place (protected or synced folders, a file open elsewhere). Render
+        // anyway and download the result, rather than stopping.
+        console.warn('[render] writing to the chosen file was refused; downloading instead', e);
+        fallbackNote = ` Chrome wouldn't let GitDrone write to the place you picked, so it went to your Downloads folder instead.`;
+      }
+    }
+
+    const sound = this.soundFile && this.audioUrl() ? { file: this.soundFile, offset: this.audioOffset() ?? 0 } : null;
+    const plan: RenderPlan = {
+      width: w, height: h, fps, vertical: this.vertical(),
+      footage: {
+        file: footage, start: this.renderStart(), end: this.renderEnd(), fit: this.footage43(),
+        picture: { brightness: this.brightness(), contrast: this.contrast(), saturation: this.saturation(), zoom: this.footageZoom() },
+      },
+      cam: sound && this.audioIsVideo() && this.showPip() ? {
+        ...sound,
+        picture: { brightness: this.camBrightness(), contrast: this.camContrast(), saturation: this.camSaturation(), zoom: this.camZoom(),
+                   panX: this.camPanX(), panY: this.camPanY() },
+      } : null,
+      sound,
+      // The stats follow the whole flight here, not the overlay export's window.
+      overlay: { renderer: this.renderer(), opts: { ...this.opts(), statsAfter: this.seconds() }, logOffset: this.videoOffset(),
+                 logEnd: this.seconds() + this.tail() },
+      fadeOut: this.fadeOut(),
+    };
+
+    this.stopVideo();
+    this.rendering.set(true);
+    this.renderDone.set(0);
+    this.renderTotal.set(0);
+    this.renderEta.set('');
+    this.renderControl = { cancelled: false };
+    const started = performance.now();
+    try {
+      const blob = await renderVideo(plan, target, (done, total) => {
+        this.renderDone.set(done);
+        this.renderTotal.set(total);
+        this.renderStage.set(`Rendering frame ${done} of ${total}...`);
+        if (done % 15 === 0) this.renderEta.set(clock((((performance.now() - started) / done) * (total - done)) / 1000));
+      }, this.renderControl, what => {
+        console.info('[render]', what);
+        this.renderStage.set(what);
+      });
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+      this.renderMessage.set(`Rendered ${name} (${this.renderTotal()} frames).${fallbackNote}`);
+    } catch (e) {
+      if (e instanceof RenderCancelled) this.renderMessage.set('Render cancelled; nothing was saved.');
+      else {
+        console.error('[render] failed while:', this.renderStage(), e);
+        this.renderError.set(`The render stopped while ${this.renderStage().replace(/\.\.\.$/, '').toLowerCase() || 'starting'}: `
+          + (e instanceof Error && e.message ? e.message : String(e)));
+      }
+    } finally {
+      this.rendering.set(false);
+      this.renderStage.set('');
+    }
+  }
+
+  cancelRender() {
+    this.renderControl.cancelled = true;
+  }
+
+  // ---- export window, set from the preview ----
+  wholeFlight = computed(() => this.start() === 0 && this.end() === this.seconds());
+  windowLeft = computed(() => (this.start() / (this.previewMax() || 1)) * 100);
+  windowWidth = computed(() => ((this.end() - this.start()) / (this.previewMax() || 1)) * 100);
+  windowText = computed(() => this.wholeFlight()
+    ? `Whole flight (${preciseClock(this.seconds())})`
+    : `${preciseClock(this.start())} – ${preciseClock(this.end())} (${preciseClock(this.end() - this.start())})`);
+
+  /** Rounded to a tenth, like the Start/End boxes show it. */
+  private here() {
+    return this.clampTime(Math.round(this.previewTime() * 10) / 10);
+  }
+
+  startHere() {
+    this.start.set(Math.min(this.here(), this.end()));
+  }
+
+  endHere() {
+    this.end.set(Math.max(this.here(), this.start()));
+  }
+
+  useWholeFlight() {
+    this.start.set(0);
+    this.end.set(this.seconds());
+  }
+
   private drawPreview() {
     const r = this.renderer();
     const c = this.canvas()?.nativeElement;
     const t = this.previewTime();
     const o = this.opts();
     if (!c) return;
+    // Sized here rather than in the template, so the canvas and what's drawn on it change shape together.
+    const w = this.previewW(), h = this.previewH();
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const ctx = c.getContext('2d')!;
     r.draw(ctx, t, o);
     // Outline the element being edited. Preview only: the exported frames never get it.
@@ -1399,7 +2033,7 @@ export class OverlayExportComponent {
     this.error.set('');
     this.message.set('');
 
-    const { w, h } = RESOLUTIONS[this.resIndex()];
+    const { w, h } = this.resolutions()[this.resIndex()];
     const fps = this.fps();
     const name = `${this.fileStem()}-${w}x${h}-${fps}fps.mov`;
     let writer: MovWriter;

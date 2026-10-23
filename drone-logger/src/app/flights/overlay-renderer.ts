@@ -11,10 +11,11 @@ export interface OverlayData {
   telemetry: TelemetryPoint[] | null;
 }
 
-export type ElementKey = 'rssi' | 'map' | 'speed' | 'battery' | 'sticks';
+export type ElementKey = 'rssi' | 'map' | 'speed' | 'battery' | 'sticks' | 'title' | 'craft';
 
 export const ELEMENT_LABELS: Record<ElementKey, string> = {
   rssi: 'RSSI panel', map: 'Mini map', speed: 'Speed panel', battery: 'Battery panel', sticks: 'Sticks',
+  title: 'Title', craft: 'Craft name',
 };
 
 /**
@@ -87,6 +88,20 @@ export interface OverlayOptions {
   /** Betaflight OSD font to draw text with; null uses the built-in monospace font. */
   font: GlyphFont | null;
   speedUnit: SpeedUnit;
+  /**
+   * A channel-style title in two colours ("BRIDGE" + "BOI") on an optional background box, and the craft's name.
+   * Each shows only while it has text. Drawn in a bold display font, not the OSD font.
+   */
+  titleText: string;
+  titleColor: string;
+  titleAccentText: string;
+  titleAccentColor: string;
+  titleStrokeColor: string;
+  /** #rrggbb, or '' for no box. */
+  titleBgColor: string;
+  craftText: string;
+  craftColor: string;
+  craftStrokeColor: string;
   layout: OverlayLayout;
   /** Text size multipliers for items inside panels; missing means 100%. */
   itemScale: Partial<Record<ItemKey, number>>;
@@ -124,6 +139,21 @@ const ROW1 = 60, ROW2 = 106, ONE_ROW_H = 86, TWO_ROW_H = 128;
 /** The mini map is a square this size (1080p px); the RSSI panel under it matches its width. */
 const MAP_SIZE = 300;
 
+/**
+ * Title and craft name: Impact with a flat fill and an outer stroke, sized (1080p px at 100%) from a real Short's
+ * Premiere setup (a 1215x2160 sequence: Impact 100 at 69% x 76%, 15 px stroke) brought to a 1080-wide frame.
+ */
+const DISPLAY_FONT = 'Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif';
+const TITLE_SIZE = 77, TITLE_PAD_X = 13, TITLE_H = 84, TITLE_STROKE = 8;
+const CRAFT_SIZE = 47, CRAFT_H = 60, CRAFT_STROKE = 7;
+
+/** Width of display-font text at `size` (1080p px). */
+function displayWidth(s: string, size: number) {
+  measureCtx ??= document.createElement('canvas').getContext('2d')!;
+  measureCtx.font = `${size}px ${DISPLAY_FONT}`;
+  return measureCtx.measureText(s).width;
+}
+
 /** Width of the drawn speed gauge (1080p px at 100%), standing in for Betaflight's speed glyph in the built-in font. */
 const SPEED_ICON_W = 40;
 
@@ -140,7 +170,8 @@ const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.
 
 /**
  * Draws one HUD frame for time t (seconds since log start) onto a transparent canvas.
- * Layout is designed at 1080p and scaled by canvas height, so 1440p and 4K look identical, only sharper.
+ * Layout is designed at 1080p and scaled by the canvas's short side, so 1440p and 4K look identical, only sharper,
+ * and a vertical 1080x1920 frame draws its elements at the same size as landscape 1920x1080.
  */
 export class OverlayRenderer {
   private trackTimes: number[];
@@ -200,7 +231,7 @@ export class OverlayRenderer {
 
   draw(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {
     const { width: W, height: H } = ctx.canvas;
-    const u = H / 1080;
+    const u = Math.min(W, H) / 1080;
     ctx.clearRect(0, 0, W, H);
     glyphs = o.font;
     speedUnit = o.speedUnit;
@@ -219,6 +250,8 @@ export class OverlayRenderer {
         case 'speed': this.drawSpeed(ctx, t, p.x, p.y, s, o); break;
         case 'battery': this.drawBattery(ctx, t, p.x, p.y, s, o); break;
         case 'sticks': this.drawSticks(ctx, t, p.x, p.y, s, o); break;
+        case 'title': drawTitle(ctx, p.x, p.y, s, o); break;
+        case 'craft': drawCraft(ctx, p.x, p.y, s, o); break;
       }
     }
   }
@@ -230,14 +263,18 @@ export class OverlayRenderer {
   placements(W: number, H: number, o: OverlayOptions): PlacedElement[] {
     glyphs = o.font; // panel widths depend on the font being measured
     speedUnit = o.speedUnit;
-    const u = H / 1080;
+    const u = Math.min(W, H) / 1080;
     const m = 48 * u;
     const out: PlacedElement[] = [];
-    // w and h are 1080p sizes at scale 1; (dx, dy) is the default top-left.
-    const add = (key: ElementKey, show: boolean, w: number, h: number, dx: number, dy: number) => {
+    // Vertical (Shorts, Reels) is a split screen: footage on top, stick cam below, with the HUD over the stick cam.
+    // The app's header covers the top strip, so anything at the top starts below it.
+    const vertical = H > W;
+    const top = vertical ? 200 * u : m;
+    // w and h are 1080p sizes at scale 1; (dx, dy) is the default top-left at the default scale.
+    const add = (key: ElementKey, show: boolean, w: number, h: number, dx: number, dy: number, defaultScale = 1) => {
       if (!show) return;
       const pl = o.layout?.[key];
-      const scale = pl?.scale ?? 1;
+      const scale = pl?.scale ?? defaultScale;
       const pw = w * u * scale, ph = h * u * scale;
       // Kept fully inside the frame, so growing a corner element pushes it inward instead of cutting it off.
       const inside = (v: number, size: number, max: number) => Math.min(Math.max(0, v), Math.max(0, max - size));
@@ -246,17 +283,54 @@ export class OverlayRenderer {
         : { key, x: dx, y: dy, w: pw, h: ph, scale });
     };
     const speed = this.geometry('speed', o), battery = this.geometry('battery', o);
-    add('map', o.showMap && this.mapXY.length > 1, MAP_SIZE, MAP_SIZE, W - m - MAP_SIZE * u, m);
+    add('map', o.showMap && this.mapXY.length > 1, MAP_SIZE, MAP_SIZE, W - m - MAP_SIZE * u, top);
     // Breakout under the map: right-aligned with wherever the map is, or in the corner when the map is hidden.
     const rssi = this.geometry('rssi', o);
     const mapBox = out.find(e => e.key === 'map');
     const rw = rssi.w * u;
     add('rssi', o.showRssi && (this.hasRssi || this.trackTimes.length > 0), rssi.w, rssi.h,
         mapBox ? Math.max(0, mapBox.x + mapBox.w - rw) : W - m - rw,
-        mapBox ? Math.min(H - rssi.h * u, mapBox.y + mapBox.h + 12 * u) : m);
-    add('speed', o.showSpeed && this.trackTimes.length > 0, speed.w, speed.h, m, H - m - speed.h * u);
-    add('battery', o.showBattery && this.batteryTimes.length > 0, battery.w, battery.h, W - m - battery.w * u, H - m - battery.h * u);
-    add('sticks', o.showSticks && !!this.data.sticks?.length, 330, 150, W / 2 - 165 * u, H - m - 150 * u);
+        mapBox ? Math.min(H - rssi.h * u, mapBox.y + mapBox.h + 12 * u) : top);
+
+    // Title and craft name. Landscape: stacked in the top-left corner. Vertical, as on a real Short: the title boxed in
+    // the top-right corner, and the craft name at the top-left of the stick cam half, just under the split.
+    const title = (o.titleText ?? '') + (o.titleAccentText ?? '');
+    const titleW = title.trim() ? displayWidth(title, TITLE_SIZE) + 2 * TITLE_PAD_X : 0;
+    const craftW = o.craftText?.trim() ? displayWidth(o.craftText, CRAFT_SIZE) + 2 * CRAFT_STROKE : 0;
+    if (vertical) {
+      const ts = 1.15; // a touch bigger than the measured Short, set by eye
+      add('title', titleW > 0, titleW, TITLE_H, Math.min(W - titleW * u * ts, 0.8 * W - (titleW * u * ts) / 2), 0.039 * H - (TITLE_H * u * ts) / 2, ts);
+      add('craft', craftW > 0, craftW, CRAFT_H, 0.031 * W, 0.556 * H - (CRAFT_H * u) / 2);
+    } else {
+      add('title', titleW > 0, titleW, TITLE_H, m, m);
+      add('craft', craftW > 0, craftW, CRAFT_H, m, m + (titleW > 0 ? (TITLE_H + 8) * u : 0));
+    }
+
+    const showSpeed = o.showSpeed && this.trackTimes.length > 0;
+    const showBattery = o.showBattery && this.batteryTimes.length > 0;
+    const showSticks = o.showSticks && !!this.data.sticks?.length;
+
+    if (!vertical) {
+      const bottom = H - m;
+      add('speed', showSpeed, speed.w, speed.h, m, bottom - speed.h * u);
+      add('battery', showBattery, battery.w, battery.h, W - m - battery.w * u, bottom - battery.h * u);
+      add('sticks', showSticks, 330, 150, W / 2 - 165 * u, bottom - 150 * u);
+      return out;
+    }
+
+    // Vertical, measured off a real Short: big sticks centred in the stick cam half, and the panels in a centred row
+    // under them at 200%. With speed and battery both on, the row shrinks to fit the width.
+    const sticksScale = 2.1, sticksCy = 0.655 * H;
+    add('sticks', showSticks, 330, 150, W / 2 - 165 * u * sticksScale, sticksCy - 75 * u * sticksScale, sticksScale);
+    const gap = 16 * u, rowCy = 0.79 * H;
+    const row = [showSpeed && speed, showBattery && battery].filter((g): g is Geometry => !!g);
+    const rowScale = Math.min(2, (W * 0.94 - gap * Math.max(0, row.length - 1)) / (row.reduce((sum, g) => sum + g.w, 0) * u || 1));
+    let x = (W - (row.reduce((sum, g) => sum + g.w * u * rowScale, 0) + gap * Math.max(0, row.length - 1))) / 2;
+    for (const [key, g] of [['speed', showSpeed && speed], ['battery', showBattery && battery]] as const) {
+      if (!g) continue;
+      add(key, true, g.w, g.h, x, rowCy - (g.h * u * rowScale) / 2, rowScale);
+      x += g.w * u * rowScale + gap;
+    }
     return out;
   }
 
@@ -517,8 +591,8 @@ export class OverlayRenderer {
       const r = size / 2 - dot - 3 * u;
       const at = (a: ReturnType<typeof stickAxes>) => [g.left + size / 2 + a[g.ax] * r, top + size / 2 - a[g.ay] * r] as const;
       const [kx, ky] = at(now);
-      if (o.stickTrails) this.drawTrail(ctx, t, at, g.left, top, size, dot, u, safeColor(o.stickTrailColor, '#9a9a9a'), o.stickTrailIntensity ?? 1);
-      ctx.fillStyle = safeColor(o.stickDotColor, '#ff5a5a');
+      if (o.stickTrails) this.drawTrail(ctx, t, at, g.left, top, size, dot, u, safeColor(o.stickTrailColor, '#86a858'), o.stickTrailIntensity ?? 1);
+      ctx.fillStyle = safeColor(o.stickDotColor, '#e086b0');
       ctx.beginPath(); ctx.arc(kx, ky, dot, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
@@ -758,6 +832,53 @@ function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, si
   ctx.fillStyle = color;
   ctx.fillText(s, x, y);
   ctx.restore();
+}
+
+/** The title: its two parts side by side in their colours with an outer stroke, on the background box when it has one. */
+function drawTitle(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, o: OverlayOptions) {
+  const size = TITLE_SIZE * s, w = (displayWidth(o.titleText + o.titleAccentText, TITLE_SIZE) + 2 * TITLE_PAD_X) * s;
+  ctx.save();
+  if (o.titleBgColor) {
+    ctx.fillStyle = o.titleBgColor;
+    ctx.fillRect(x, y, w, TITLE_H * s);
+  }
+  ctx.font = `${size}px ${DISPLAY_FONT}`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const ty = y + (TITLE_H * s) / 2 + size * 0.04; // caps sit a touch low of the em-box middle
+  const parts = [[o.titleText, o.titleColor], [o.titleAccentText, o.titleAccentColor]].filter(([part]) => part);
+  // Every part's stroke first, then every fill, so the strokes sit outside the letters (Premiere's outer stroke)
+  // and merge into one outline around the word instead of cutting into the neighbouring letter.
+  let tx = x + TITLE_PAD_X * s;
+  for (const [part] of parts) { outerStroke(ctx, part, tx, ty, TITLE_STROKE * s, o.titleStrokeColor); tx += ctx.measureText(part).width; }
+  tx = x + TITLE_PAD_X * s;
+  for (const [part, color] of parts) { ctx.fillStyle = color; ctx.fillText(part, tx, ty); tx += ctx.measureText(part).width; }
+  ctx.restore();
+}
+
+/** The craft name: Impact, a flat fill and a dark outer stroke, as set up in Premiere for a real Short. */
+function drawCraft(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, o: OverlayOptions) {
+  const size = CRAFT_SIZE * s;
+  ctx.save();
+  ctx.font = `${size}px ${DISPLAY_FONT}`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const tx = x + CRAFT_STROKE * s, ty = y + (CRAFT_H * s) / 2 + size * 0.04;
+  outerStroke(ctx, o.craftText, tx, ty, CRAFT_STROKE * s, o.craftStrokeColor);
+  ctx.fillStyle = o.craftColor;
+  ctx.fillText(o.craftText, tx, ty);
+  ctx.restore();
+}
+
+/**
+ * An outline `width` px wide outside the letters (font already set). Canvas strokes straddle the edge, so this
+ * strokes twice as wide and relies on the fill drawn after it to cover the inner half.
+ */
+function outerStroke(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, width: number, color: string) {
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(2, width * 2);
+  ctx.strokeStyle = color;
+  ctx.strokeText(s, x, y);
 }
 
 function measure(ctx: CanvasRenderingContext2D, s: string, size: number, weight: number) {

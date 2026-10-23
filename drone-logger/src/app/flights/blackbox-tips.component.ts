@@ -51,6 +51,7 @@ save</code></pre>
 
       <h3>4. Get the file off the quad</h3>
       <ul>
+        <li><strong>Over USB (Chrome or Edge):</strong> plug the quad in, press "Connect FC over USB", then "Open FC drive". The newest log loads by itself.</li>
         <li><strong>Onboard flash:</strong> in the Blackbox tab, use "Save flash to file", or "Activate Mass Storage Device Mode" and copy the <code>.bbl</code>.</li>
         <li><strong>SD card:</strong> copy the <code>.bbl</code> / <code>.bfl</code> file from the card.</li>
       </ul>

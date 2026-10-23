@@ -7,19 +7,20 @@ import { FlightService } from './flight.service';
 import { Flight, formatDuration } from './flight.models';
 import { TuneService } from '../tunes/tune.service';
 import { TuneSnapshotSummary } from '../tunes/tune.models';
+import { FcUsbComponent } from './fc-usb.component';
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
 @Component({
   selector: 'app-flight-upload',
-  imports: [DatePipe, FormsModule, RouterLink],
+  imports: [DatePipe, FormsModule, RouterLink, FcUsbComponent],
   template: `
     <div class="page narrow">
       <a [routerLink]="['/hangar', id()]">Back to aircraft</a>
       <h1>Upload blackbox log</h1>
       <p class="hint">
-        Pick a <code>.bbl</code> or <code>.bfl</code> file from the flight controller (Blackbox tab, "Activate Mass Storage Device Mode")
-        or the SD card. A file with several armed sessions becomes several flights.
+        Connect the flight controller over USB to grab its newest log, or pick a <code>.bbl</code> / <code>.bfl</code> file from
+        the SD card. A file with several armed sessions becomes several flights.
       </p>
 
       @if (result(); as r) {
@@ -41,8 +42,13 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
         </div>
       } @else {
         <div class="field">
+          <app-fc-usb [disabled]="busy()" (picked)="setFile($event)" />
+        </div>
+
+        <div class="field">
           <label for="file">Log file</label>
           <input id="file" type="file" accept=".bbl,.bfl,.bbs,.txt" (change)="onFile($event)" />
+          @if (file(); as f) { <p class="hint">Uploading {{ f.name }}.</p> }
           @if (fileError()) { <p class="error">{{ fileError() }}</p> }
         </div>
 
@@ -105,7 +111,10 @@ export class FlightUploadComponent {
   }
 
   onFile(event: Event) {
-    const file = (event.target as HTMLInputElement).files?.[0] ?? null;
+    this.setFile((event.target as HTMLInputElement).files?.[0] ?? null);
+  }
+
+  setFile(file: File | null) {
     this.error.set('');
     if (file && file.size > MAX_FILE_BYTES) {
       this.fileError.set('That file is over 64 MB.');

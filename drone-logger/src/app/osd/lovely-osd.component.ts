@@ -8,6 +8,7 @@ import { OverlayData } from '../flights/overlay-renderer';
 import { FlightViewComponent } from '../flights/flight-view.component';
 import { OverlayExportComponent } from '../flights/overlay-export.component';
 import { BlackboxTipsComponent } from '../flights/blackbox-tips.component';
+import { FcUsbComponent } from '../flights/fc-usb.component';
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
@@ -17,7 +18,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
  */
 @Component({
   selector: 'app-lovely-osd',
-  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent],
+  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent],
   template: `
     <div class="page">
       <h1>LovelyOSD Overlay</h1>
@@ -27,11 +28,29 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
       </p>
 
         <div class="panel pick">
+          <app-fc-usb [disabled]="busy() || exporting()" (picked)="load($event)" />
           <div class="field">
             <label for="osd-file">Log file</label>
             <input id="osd-file" type="file" accept=".bbl,.bfl,.bbs,.txt" (change)="onFile($event)" [disabled]="busy() || exporting()" />
           </div>
           @if (busy()) { <p class="hint" role="status">Reading {{ fileName() }}...</p> }
+          <div class="field footage">
+            <label for="osd-video">Flight footage (optional)</label>
+            <input id="osd-video" type="file" accept="video/*" (change)="onVideo($event)" [disabled]="exporting()" />
+            <p class="hint">
+              @if (video(); as v) { {{ v.name }} plays behind the overlay preview. }
+              @else { Plays behind the overlay preview so you can line it up. }
+              It stays on this computer.
+            </p>
+          </div>
+          <div class="field footage">
+            <label for="osd-sound">Sound track (optional)</label>
+            <input id="osd-sound" type="file" accept="audio/*,video/*" (change)="onSound($event)" [disabled]="exporting()" />
+            <p class="hint">
+              @if (sound(); as s) { {{ s.name }} plays with the preview, lined up on the arming it hears. }
+              @else { A phone recording or stick cam video of the flight (only its sound is used). It's lined up on the motors arming, or on a clap. }
+            </p>
+          </div>
           @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
 
           @if (result(); as r) {
@@ -57,13 +76,16 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
             @else { Session {{ s.flight.logIndex + 1 }} of {{ s.flight.originalFileName }} }
           </h2>
 
-          <app-flight-view [flight]="s.flight" [track]="s.track" [sticks]="s.sticks?.points ?? null" [battery]="s.battery?.points ?? null"
-                           [telemetry]="s.telemetry?.points ?? null" />
-
           <section aria-labelledby="osd-export-heading">
             <h2 id="osd-export-heading">Video overlay</h2>
             <p class="hint">It starts at arming. Play it over your own video to check the layout and line it up with your takeoff.</p>
-            <app-overlay-export [data]="overlayData()!" [seconds]="s.flight.durationMs / 1000" [fileStem]="fileStem()" />
+            <app-overlay-export [data]="overlayData()!" [seconds]="s.flight.durationMs / 1000" [fileStem]="fileStem()" [(video)]="video" [(sound)]="sound" />
+          </section>
+
+          <section aria-labelledby="osd-stats-heading">
+            <h2 id="osd-stats-heading">Flight stats</h2>
+            <app-flight-view [flight]="s.flight" [track]="s.track" [sticks]="s.sticks?.points ?? null" [battery]="s.battery?.points ?? null"
+                             [telemetry]="s.telemetry?.points ?? null" />
           </section>
         }
     </div>
@@ -71,9 +93,12 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
   styles: [`
     .pick { margin: 1rem 0; display: grid; gap: .25rem; }
     .pick .field { margin: 0; }
+    .pick app-fc-usb { display: block; margin-bottom: .5rem; }
+    .pick .footage { margin-top: .75rem; }
     .pick p { margin: 0; }
     .session-title { margin: 1.5rem 0 .75rem; }
     section h2 { margin: 1.5rem 0 .25rem; }
+    #osd-stats-heading { margin-top: 2.5rem; margin-bottom: .75rem; }
     section .hint { margin: 0; }
   `],
 })
@@ -86,6 +111,9 @@ export class LovelyOsdComponent {
   error = signal('');
   result = signal<OsdAnalysis | null>(null);
   index = signal(0);
+  /** Footage for the preview, shared with the exporter so picking it in either place works. */
+  video = signal<File | null>(null);
+  sound = signal<File | null>(null);
 
   session = computed(() => this.result()?.sessions[this.index()] ?? null);
   /** Switching sessions or files mid-export would pull the data out from under it. */
@@ -108,11 +136,15 @@ export class LovelyOsdComponent {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
+    if (!this.load(file)) input.value = '';
+  }
+
+  /** Reads a log from the file input or the flight controller; false if it's too big to try. */
+  load(file: File) {
     this.error.set('');
     if (file.size > MAX_FILE_BYTES) {
       this.error.set('That file is over 64 MB.');
-      input.value = '';
-      return;
+      return false;
     }
     this.fileName.set(file.name);
     this.busy.set(true);
@@ -130,6 +162,17 @@ export class LovelyOsdComponent {
           : 'Could not read this log. Check that the API is running and try again.');
       },
     });
+    return true;
+  }
+
+  onVideo(event: Event) {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (file) this.video.set(file);
+  }
+
+  onSound(event: Event) {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (file) this.sound.set(file);
   }
 
   sessionLabel(s: OsdSession, i: number) {
