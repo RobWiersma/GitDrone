@@ -8,8 +8,9 @@ import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
-import { RenderCancelled, RenderPlan, RenderTarget, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
+import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
+import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
 import { TimelineMark, TimelineTrack, TrackId, TrackTimelineComponent } from './track-timeline.component';
 import { IconComponent, IconName } from '../icon.component';
 
@@ -28,17 +29,36 @@ const VERTICAL_RESOLUTIONS = [
 const FORMAT_KEY = 'gitdrone-overlay-format';
 
 const FADE_KEY = 'gitdrone-render-fade';
+const QUALITY_KEY = 'gitdrone-render-quality';
 
-/**
- * The loudest sample of `p` between `from` and `to` seconds, at `gainDb`, in dB from full scale (0 or more clips),
- * and `fit`: the gain (no lower than `minGain`, no higher than +12) that puts it at −1 dB. Null for silence.
- */
+/** The finished video's quality choices, as constant-quality quantizers (lower keeps more; every 6 doubles the size). */
+const RENDER_QUALITIES = [
+  { id: 'max', qp: 14, label: 'Max', what: 'near lossless, the biggest files' },
+  { id: 'high', qp: 18, label: 'High', what: 'very hard to tell from Max, about 70% of its size' },
+  { id: 'small', qp: 22, label: 'Smaller', what: 'still well above what YouTube keeps, about 45% of Max' },
+  { id: 'upload', qp: 26, label: 'Upload', what: 'made for uploading: about 28% of Max, still more detail than YouTube keeps' },
+] as const;
+type RenderQuality = (typeof RENDER_QUALITIES)[number]['id'];
+
+/** The finished video's quality: Upload until changed. */
+function readRenderQuality(): RenderQuality {
+  try {
+    const saved = localStorage.getItem(QUALITY_KEY);
+    if (RENDER_QUALITIES.some(q => q.id === saved)) return saved as RenderQuality;
+  } catch { /* default */ }
+  return 'upload';
+}
+
 /** A fade's level `t` seconds into a `len`-second video (1 outside it): up over `fadeIn`, down over `fadeOut`. */
 function fadeLevel(t: number, len: number, fadeIn: number, fadeOut: number) {
   if (t < 0 || t > len) return 1;
   return Math.max(0, Math.min(1, fadeIn > 0 ? t / fadeIn : 1, fadeOut > 0 ? (len - t) / fadeOut : 1));
 }
 
+/**
+ * The loudest sample of `p` between `from` and `to` seconds, at `gainDb`, in dB from full scale (0 or more clips),
+ * and `fit`: the gain (no lower than `minGain`, no higher than +12) that puts it at −1 dB. Null for silence.
+ */
 function peakOver(p: SoundPeaks, from: number, to: number, gainDb: number, minGain: number) {
   if (!p.duration) return null;
   const n = p.peaks.length;
@@ -63,7 +83,21 @@ type SaveFilePicker = (o: { suggestedName: string; types: { description: string;
   Promise<{ createWritable(): Promise<WritableStream> }>;
 
 /** Where the preview's footage and stick cam sliders start, and what Reset goes back to (percent; pan in % of the box). */
-const FOOTAGE_DEFAULTS = { brightness: 100, contrast: 110, saturation: 135, zoom: 100 };
+const FOOTAGE_DEFAULTS = { zoom: 100 };
+/** The footage's grade to start from: a punchier look for flat FPV footage, the values from your Lumetri Basic Correction. */
+const FOOTAGE_GRADE: Grade = { ...NEUTRAL_GRADE, saturation: 148.5, exposure: 0.2, contrast: 39.1 };
+/** The grade sliders, in Lumetri's order, under its two headings. */
+const GRADE_SLIDERS: { key: keyof Grade; label: string; group: 'Color' | 'Light'; min: number; max: number; step: number }[] = [
+  { key: 'temperature', label: 'Temperature', group: 'Color', min: -100, max: 100, step: 0.5 },
+  { key: 'tint', label: 'Tint', group: 'Color', min: -100, max: 100, step: 0.5 },
+  { key: 'saturation', label: 'Saturation', group: 'Color', min: 0, max: 200, step: 0.5 },
+  { key: 'exposure', label: 'Exposure', group: 'Light', min: -4, max: 4, step: 0.1 },
+  { key: 'contrast', label: 'Contrast', group: 'Light', min: -100, max: 100, step: 0.1 },
+  { key: 'highlights', label: 'Highlights', group: 'Light', min: -100, max: 100, step: 0.5 },
+  { key: 'shadows', label: 'Shadows', group: 'Light', min: -100, max: 100, step: 0.5 },
+  { key: 'whites', label: 'Whites', group: 'Light', min: -100, max: 100, step: 0.5 },
+  { key: 'blacks', label: 'Blacks', group: 'Light', min: -100, max: 100, step: 0.5 },
+];
 const CAM_DEFAULTS = { brightness: 70, contrast: 100, saturation: 100, zoom: 215, panX: 0, panY: 0 };
 
 /** CSS filter for preview-only brightness, contrast and saturation (percent); null when all are as recorded. */
@@ -228,12 +262,15 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               @if (backdrop() === 'video' && videoUrl()) {
                 <!-- The footage's own box: the whole frame in landscape, the top half in vertical. Zoom stays inside it. -->
                 <div class="footage-box" [class.selected]="mediaSelected() === 'footage'">
-                  <video #bgVideo class="bg-video" [class.fit]="footage43() && !vertical()" [style.filter]="footageFilter()"
+                  <video #bgVideo class="bg-video" [class.fit]="footage43() && !vertical()"
                          [style.transform]="footageZoom() === 100 ? null : 'scale(' + footageZoom() / 100 + ')'"
                          [src]="videoUrl()" [muted]="muted() || !!audioUrl()" playsinline preload="auto" aria-hidden="true"
                          (loadedmetadata)="onVideoMeta(); seekVideoToPreview()" (durationchange)="onVideoMeta()"
-                         (timeupdate)="onVideoTime()" (seeked)="onVideoTime(); syncAudio(true)"
+                         (timeupdate)="onVideoTime()" (seeked)="onVideoTime(); syncAudio(true); drawGraded()" (loadeddata)="drawGraded()"
                          (pause)="videoPlaying.set(false); syncAudio()" (play)="videoPlaying.set(true); syncAudio(true)"></video>
+                  <!-- The footage graded on the GPU, over the video and framed like it: what the finished video gets. -->
+                  <canvas #gradeCanvas class="bg-video" [class.fit]="footage43() && !vertical()" [hidden]="!footageGraded()" aria-hidden="true"
+                          [style.transform]="footageZoom() === 100 ? null : 'scale(' + footageZoom() / 100 + ')'"></canvas>
                 </div>
               }
               @if (audioUrl()) {
@@ -579,21 +616,24 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               </div>
             }
                   </fieldset>
-                  <fieldset class="item-sizes">
-                    <legend>Picture</legend>
-                    <!-- Flat D-Log-ish footage is hard to judge the overlay against; the finished video uses these too. -->
-                    <div class="grade">
-                      <label for="brightness">Brightness</label>
-                      <input id="brightness" type="range" min="50" max="200" step="5" [ngModel]="brightness()" (ngModelChange)="brightness.set(+$event)" />
-                      <span class="mono">{{ brightness() }}%</span>
-                      <label for="contrast">Contrast</label>
-                      <input id="contrast" type="range" min="50" max="200" step="5" [ngModel]="contrast()" (ngModelChange)="contrast.set(+$event)" />
-                      <span class="mono">{{ contrast() }}%</span>
-                      <label for="saturation">Saturation</label>
-                      <input id="saturation" type="range" min="0" max="250" step="5" [ngModel]="saturation()" (ngModelChange)="saturation.set(+$event)" />
-                      <span class="mono">{{ saturation() }}%</span>
-                    </div>
-                  </fieldset>
+                  <!-- Lumetri's Basic Correction: flat FPV footage is hard to judge the overlay against, and the finished video
+                       gets exactly this grade. Double-click a slider to put it back. -->
+                  @for (group of gradeGroups; track group) {
+                    <fieldset class="item-sizes">
+                      <legend>{{ group }}</legend>
+                      <div class="grade">
+                        @for (g of gradeSliders; track g.key) {
+                          @if (g.group === group) {
+                            <label [for]="'grade-' + g.key">{{ g.label }}</label>
+                            <input [id]="'grade-' + g.key" type="range" [min]="g.min" [max]="g.max" [step]="g.step" [ngModel]="footageGrade()[g.key]"
+                                   (ngModelChange)="setGrade(g.key, +$event)" (dblclick)="setGrade(g.key, startGrade[g.key])"
+                                   [title]="g.label + ': double-click to put it back to ' + startGrade[g.key]" />
+                            <span class="mono">{{ footageGrade()[g.key] }}</span>
+                          }
+                        }
+                      </div>
+                    </fieldset>
+                  }
                   <fieldset class="item-sizes">
                     <legend>Framing</legend>
                     <div class="grade">
@@ -940,7 +980,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         title="Vertical 9:16, for Shorts, Reels and TikTok: its own layout, with your footage on top, the stick cam below and the OSD over it"
                         [disabled]="busy()" (click)="setVertical(true)"><app-icon name="portrait" /></button>
               </div>
-              <div class="toggles" role="group" aria-label="Resolution">
+              <div class="toggles" role="group" aria-label="Resolution"
+                   [title]="footageSize2() ? 'Your footage is ' + footageSize2() : 'Loading your footage sets this to match it'">
                 @for (r of resolutions(); track r.label; let i = $index) {
                   <button class="btn small step" type="button" [class.btn-primary]="resIndex() === i" [attr.aria-pressed]="resIndex() === i"
                           [title]="'Resolution: ' + r.label" [disabled]="busy()" (click)="resIndex.set(i)">{{ r.label.split(' ')[0] }}</button>
@@ -954,12 +995,25 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 }
                 <span class="hint">fps</span>
               </div>
+              @if (footageRes() !== null && resIndex() !== footageRes()) {
+                <button class="link" type="button" (click)="resIndex.set(footageRes()!)" [title]="'Your footage is ' + footageSize2()">
+                  Match your footage ({{ resolutions()[footageRes()!].label.split(' ')[0] }})</button>
+              }
               @if (footageFps(); as src) {
                 @if (fps() !== outputFrameRate(src)) {
                   <button class="link" type="button" (click)="fps.set(outputFrameRate(src))" [title]="'Your footage is ' + fpsLabel(src) + ' fps'">
                     Match your footage ({{ fpsLabel(outputFrameRate(src)) }} fps)</button>
                 }
               }
+              <!-- The finished video's quality; each button's hover gives its size for this render. -->
+              <div class="toggles" role="group" aria-label="Video quality">
+                @for (q of renderQualities; track q.id) {
+                  <button class="btn small step" type="button" [class.btn-primary]="renderQuality() === q.id" [attr.aria-pressed]="renderQuality() === q.id"
+                          [title]="q.label + ' quality: ' + q.what + '. About ' + sizeAt(q.qp) + ' for this video.'" [disabled]="rendering()"
+                          (click)="setRenderQuality(q.id)">{{ q.label }}</button>
+                }
+                <span class="hint">quality</span>
+              </div>
             </div>
             <!-- Rendering, full width under the three boxes: the transparent overlay for an editor and the finished video side
                  by side with the video's fade, then one progress bar for whichever is running. Their ranges are set under the
@@ -1270,24 +1324,56 @@ export class OverlayExportComponent {
   videoClock = computed(() => preciseClock(this.videoTime()));
   /** Width over height of the footage, once it has loaded. */
   videoAspect = signal(16 / 9);
+  /** The footage's picture size, once it's known: "3840×2160". */
+  footageSize2 = signal('');
+  /**
+   * The Output resolution that keeps the footage's detail: the biggest whose short side the footage's short side
+   * reaches (4K footage renders 4K, the O4's 1440×1080 renders 1080p). Null until the footage's size is known.
+   */
+  footageRes = signal<number | null>(null);
+  /** A newly loaded file sets Output's resolution to match it, once its size is known. */
+  private matchResolution = false;
   /** 4:3 footage (O4 at 4:3, older cams) is shown whole in the middle of the 16:9 preview, with black bars at the sides. */
   footage43 = computed(() => this.videoAspect() < 1.5);
-  /** Preview-only colour for the footage, in percent (100 = as recorded); starts a little punchier than recorded. */
-  brightness = signal(FOOTAGE_DEFAULTS.brightness);
-  contrast = signal(FOOTAGE_DEFAULTS.contrast);
-  saturation = signal(FOOTAGE_DEFAULTS.saturation);
-  /** Preview-only zoom of the footage inside its box, in percent. */
+  /** The footage's colour (Lumetri's Basic Correction), in the preview and the finished video alike. */
+  footageGrade = signal<Grade>({ ...FOOTAGE_GRADE });
+  readonly startGrade = FOOTAGE_GRADE;
+  readonly gradeSliders = GRADE_SLIDERS;
+  readonly gradeGroups = ['Color', 'Light'] as const;
+  footageGraded = computed(() => !isNeutral(this.footageGrade()) && !this.gradeUnavailable());
+  /** No WebGL 2 in this browser: the footage plays and renders as recorded. */
+  private gradeUnavailable = signal(false);
+  setGrade(key: keyof Grade, v: number) {
+    if (Number.isFinite(v)) this.footageGrade.update(g => ({ ...g, [key]: v }));
+  }
+  /** Zoom of the footage inside its box, in percent. */
   footageZoom = signal(FOOTAGE_DEFAULTS.zoom);
-  footageFilter = computed(() => gradeFilter(this.brightness(), this.contrast(), this.saturation()));
   footageAdjusted = computed(() =>
-    this.brightness() !== FOOTAGE_DEFAULTS.brightness || this.contrast() !== FOOTAGE_DEFAULTS.contrast
-    || this.saturation() !== FOOTAGE_DEFAULTS.saturation || this.footageZoom() !== FOOTAGE_DEFAULTS.zoom);
+    JSON.stringify(this.footageGrade()) !== JSON.stringify(FOOTAGE_GRADE) || this.footageZoom() !== FOOTAGE_DEFAULTS.zoom);
 
   resetFootage() {
-    this.brightness.set(FOOTAGE_DEFAULTS.brightness);
-    this.contrast.set(FOOTAGE_DEFAULTS.contrast);
-    this.saturation.set(FOOTAGE_DEFAULTS.saturation);
+    this.footageGrade.set({ ...FOOTAGE_GRADE });
     this.footageZoom.set(FOOTAGE_DEFAULTS.zoom);
+  }
+
+  // ---- the graded preview: the footage's current frame through the grade shader, on the canvas over the video ----
+  private gradeCanvas = viewChild<ElementRef<HTMLCanvasElement>>('gradeCanvas');
+  private grader: GradeRenderer | null = null;
+  private redrawOnGrade = effect(() => {
+    this.footageGrade();
+    this.gradeCanvas();
+    untracked(() => this.drawGraded());
+  });
+
+  /** Grades the video's current frame onto the canvas over it (on every frame while it plays, and on each seek). */
+  drawGraded() {
+    const v = this.bgVideo()?.nativeElement, c = this.gradeCanvas()?.nativeElement;
+    if (!v || !c || v.readyState < 2 || isNeutral(this.footageGrade())) return;
+    if (this.grader?.canvas !== c) {
+      this.grader = new GradeRenderer(c);
+      if (!this.grader.ready) this.gradeUnavailable.set(true);
+    }
+    this.grader.draw(v, v.videoWidth, v.videoHeight, this.footageGrade());
   }
 
   /** The same for a stick cam's picture, plus panning; it starts zoomed in on the hands and a little darker. */
@@ -2072,6 +2158,10 @@ export class OverlayExportComponent {
     this.footageFile = file;
     this.video.set(file);
     this.videoAspect.set(16 / 9); // until the new file says otherwise
+    // Exports follow the footage's resolution too, so 4K footage isn't scaled down; set once its size is known.
+    this.footageSize2.set('');
+    this.footageRes.set(null);
+    this.matchResolution = true;
     this.footageSize.set(file.size);
     this.motorMatch.set(null);
     this.backdropError.set('');
@@ -2225,7 +2315,17 @@ export class OverlayExportComponent {
     // Some recordings don't say how long they are up front; the seekable range does.
     const d = Number.isFinite(v.duration) ? v.duration : v.seekable.length ? v.seekable.end(v.seekable.length - 1) : 0;
     this.videoDuration.set(d);
-    if (v.videoWidth && v.videoHeight) this.videoAspect.set(v.videoWidth / v.videoHeight);
+    if (v.videoWidth && v.videoHeight) {
+      this.videoAspect.set(v.videoWidth / v.videoHeight);
+      this.footageSize2.set(`${v.videoWidth}×${v.videoHeight}`);
+      const short = Math.min(v.videoWidth, v.videoHeight);
+      const fit = RESOLUTIONS.reduce((best, r, i) => (short >= r.h ? i : best), 0);
+      this.footageRes.set(fit);
+      if (this.matchResolution) {
+        this.matchResolution = false;
+        this.resIndex.set(fit);
+      }
+    }
   }
 
   onVideoTime() {
@@ -2382,6 +2482,7 @@ export class OverlayExportComponent {
     this.beforeLog.set(t < 0);
     this.previewTime.set(Math.min(this.previewMax(), Math.max(0, t)));
     this.videoTime.set(v.currentTime);
+    this.drawGraded();
     this.syncAudio();
     const next = () => this.followVideo();
     if ('requestVideoFrameCallback' in v) {
@@ -2457,7 +2558,22 @@ export class OverlayExportComponent {
     + `${this.audioUrl() ? `${this.audioName()}'s sound` : 'its sound'}${this.musicUrl() ? `, ${this.musicName()} as music` : ''} and the OSD in one file, as in the preview. `
     + `${this.clipText()[0].toUpperCase()}${this.clipText().slice(1)} at ${this.resolutions()[this.resIndex()].label}, ${fpsLabel(this.fps())} fps`
     + `${this.renderStats().hold > 0 ? `, then the last frame holds ${this.renderStats().hold.toFixed(1)} s under the flight stats` : ''}`
-    + `${this.fadeOut() > 0 ? `, fading out over ${this.fadeOut()} s` : ''}. Set its range with the Render slider under the preview.`);
+    + `${this.fadeOut() > 0 ? `, fading out over ${this.fadeOut()} s` : ''}, at ${RENDER_QUALITIES.find(q => q.id === this.renderQuality())!.label} quality: about ${this.finishedSize()}. Set its range with the Render slider under the preview.`);
+
+  readonly renderQualities = RENDER_QUALITIES;
+  renderQuality = signal<RenderQuality>(readRenderQuality());
+  private renderQp = computed(() => RENDER_QUALITIES.find(q => q.id === this.renderQuality())!.qp);
+  setRenderQuality(q: RenderQuality) {
+    this.renderQuality.set(q);
+    try { localStorage.setItem(QUALITY_KEY, q); } catch { /* not remembered */ }
+  }
+  /** About how big this render comes out at quantizer `qp`, on busy footage. */
+  sizeAt(qp: number) {
+    const { w, h } = this.resolutions()[this.resIndex()];
+    const mb = (this.renderLength() * (expectedBitrate(w, h, this.fps(), qp) + AUDIO_BITRATE)) / 8e6;
+    return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
+  }
+  finishedSize = computed(() => this.sizeAt(this.renderQp()));
 
   /** What the overlay export makes, as hover text on its button. */
   overlayHover = computed(() =>
@@ -2532,7 +2648,9 @@ export class OverlayExportComponent {
       width: w, height: h, fps, vertical: this.vertical(),
       footage: {
         file: footage, start: this.renderStart(), end: this.renderEnd(), fit: this.footage43(),
-        picture: { brightness: this.brightness(), contrast: this.contrast(), saturation: this.saturation(), zoom: this.footageZoom() },
+        // The grade does the colour; the picture only frames it.
+        picture: { brightness: 100, contrast: 100, saturation: 100, zoom: this.footageZoom() },
+        grade: this.gradeUnavailable() ? { ...NEUTRAL_GRADE } : this.footageGrade(),
       },
       cam: sound && this.hasCam() ? {
         ...sound,
@@ -2547,6 +2665,7 @@ export class OverlayExportComponent {
       hold: stats.hold,
       overlay: { renderer: this.renderer(), opts: { ...this.opts(), statsAfter: stats.after }, logOffset: this.videoOffset(), logEnd: stats.end },
       fadeOut: this.fadeOut(),
+      quantizer: this.renderQp(),
     };
 
     this.stopVideo();

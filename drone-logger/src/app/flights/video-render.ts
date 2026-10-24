@@ -1,8 +1,9 @@
 import {
   ALL_FORMATS, AudioBufferSink, AudioBufferSource, BlobSource, BufferTarget, CanvasSink, CanvasSource, Input, Mp4OutputFormat,
-  Output, QUALITY_HIGH, StreamTarget, getFirstEncodableAudioCodec, getFirstEncodableVideoCodec,
+  Output, Quality, StreamTarget, getFirstEncodableAudioCodec, getFirstEncodableVideoCodec,
 } from 'mediabunny';
-import type { StreamTargetChunk, Target, WrappedCanvas } from 'mediabunny';
+import { Grade, GradeRenderer, isNeutral } from './grade';
+import type { AudioCodec, StreamTargetChunk, Target, VideoCodec, WrappedCanvas } from 'mediabunny';
 import { OverlayOptions, OverlayRenderer } from './overlay-renderer';
 
 /**
@@ -20,7 +21,8 @@ export interface RenderPlan {
   fps: number;
   vertical: boolean;
   /** The footage and the part of it (seconds, footage time) to render. */
-  footage: { file: File; start: number; end: number; picture: Picture; /** Landscape 4:3: show it whole (pillarboxed). */ fit: boolean };
+  footage: { file: File; start: number; end: number; picture: Picture; /** Landscape 4:3: show it whole (pillarboxed). */ fit: boolean;
+             /** Its Lumetri-style colour, graded on the GPU. */ grade: Grade };
   /** Seconds after `footage.end` that the last footage frame stays up, so the post-flight stats can finish over it. */
   hold: number;
   /** A stick cam whose picture fills the bottom of a vertical frame; `offset` is where it starts in footage time. */
@@ -34,6 +36,8 @@ export interface RenderPlan {
   overlay: { renderer: OverlayRenderer; opts: OverlayOptions; /** Footage time where the log starts. */ logOffset: number; /** Log time after which nothing is drawn. */ logEnd: number };
   /** Seconds at the end over which the picture fades to black and the sound to silence; 0 for none. */
   fadeOut: number;
+  /** The constant quality to encode at, as an H.264 quantizer (lower keeps more): 14 near lossless, 18 high, 22 smaller. */
+  quantizer: number;
 }
 
 export interface RenderTarget { kind: 'disk'; writable: WritableStream<StreamTargetChunk> }
@@ -71,6 +75,44 @@ export function outputFrameRate(rate: number): number {
   return near[0] ?? Math.round(rate * 100) / 100;
 }
 
+/**
+ * The finished video's bitrate where the encoder can't do constant quality, for quantizer `qp`: at 14, 0.35 bits per
+ * pixel per frame, about 44 Mbps at 1080p60 and 175 Mbps at 4K60, halving for every 6 the quantizer goes up, as it does
+ * for constant quality. FPV footage is the hardest kind to compress (the whole frame moving, dense foliage, fine grass);
+ * at the 6 Mbps a "high quality" preset gives 1080p, the encoder runs out of bits and smears blocks along the motion.
+ * Capped at 240 Mbps, H.264's ceiling at the highest level.
+ */
+export const videoBitrate = (width: number, height: number, fps: number, qp = 14) =>
+  Math.round(Math.min(240_000_000, width * height * fps * 0.35 * 2 ** (-(qp - 14) / 6)));
+
+/**
+ * About what constant quality `qp` comes to on busy FPV footage: measured at 337 Mbps for 4K60 at 14 on an RTX
+ * 3060 Ti's encoder, about 1.9 times the bitrate above; calm footage comes out smaller.
+ */
+export const expectedBitrate = (width: number, height: number, fps: number, qp: number) =>
+  1.9 * width * height * fps * 0.35 * 2 ** (-(qp - 14) / 6);
+
+/** An H.264 quantizer in another codec's terms (VP9 runs to 63, AV1 to 255); undefined where it has none. */
+const quantizerFor = (codec: VideoCodec, qp: number): number | undefined =>
+  codec === 'avc' || codec === 'hevc' ? qp : codec === 'vp9' ? Math.round(qp * 1.25) : codec === 'av1' ? qp * 5 : undefined;
+
+/** The sound's top bitrate, for size estimates: AAC at 320 kbps where the browser's encoder takes it. */
+export const AUDIO_BITRATE = 320_000;
+
+/**
+ * The best sound encoder this browser has, stereo at 48 kHz: AAC (which plays everywhere) at the highest bitrate it
+ * takes, trying 320 kbps down, since encoders differ (Chrome on Windows stops at 192); else Opus. Null for none.
+ */
+async function bestAudioEncoder(): Promise<{ codec: AudioCodec; bitrate: number } | null> {
+  for (const codec of ['aac', 'opus'] as const) {
+    for (const bitrate of [AUDIO_BITRATE, 256_000, 192_000, 160_000, 128_000]) {
+      const options = { numberOfChannels: 2, sampleRate: 48000, quality: new Quality({ bitrate }) };
+      if (await getFirstEncodableAudioCodec([codec], options)) return { codec, bitrate };
+    }
+  }
+  return null;
+}
+
 /** "29.97", "23.976", "60": a frame rate as people write it. */
 export const fpsLabel = (fps: number) => String(Number(fps.toFixed(3)));
 
@@ -88,7 +130,7 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
   stage('Checking what this browser can encode...');
   const videoCodec = await getFirstEncodableVideoCodec(['avc', 'hevc', 'vp9', 'av1'], { width: W, height: H });
   if (!videoCodec) throw new Error(`This browser can't encode ${W}×${H} video. Try a lower resolution, or Chrome or Edge.`);
-  const audioCodec = await getFirstEncodableAudioCodec(['aac', 'opus'], { numberOfChannels: 2, sampleRate: 48000 });
+  const audioEncoder = await bestAudioEncoder();
 
   const inputs: Input[] = [];
   const open = (file: File) => { const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS }); inputs.push(input); return input; };
@@ -111,9 +153,14 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
     hud.height = H;
     const hudCtx = hud.getContext('2d')!;
 
-    const video = new CanvasSource(canvas, { codec: videoCodec, quality: QUALITY_HIGH });
-    output.addVideoTrack(video, { frameRate: fps });
-    const audio = audioCodec ? new AudioBufferSource({ codec: audioCodec, quality: QUALITY_HIGH }) : null;
+    // Constant quality where the encoder offers it (the GPU's does): every frame keeps the same detail, and fast motion
+    // gets the bits it needs. Encoders without it (Chrome's software H.264) get the high bitrate instead.
+    const quality = new Quality({ quantizer: quantizerFor(videoCodec, plan.quantizer), bitrate: videoBitrate(W, H, fps, plan.quantizer) });
+    const video = new CanvasSource(canvas, { codec: videoCodec, quality, keyFrameInterval: 2 });
+    // No frame rate on the track: Chrome checks it against the GPU encoder's limits and turns the GPU down above 30 fps
+    // at 1440p and 4K, leaving a weaker software encoder. Every frame gets its own exact timestamp anyway.
+    output.addVideoTrack(video);
+    const audio = audioEncoder ? new AudioBufferSource({ codec: audioEncoder.codec, quality: new Quality({ bitrate: audioEncoder.bitrate }) }) : null;
     if (audio) output.addAudioTrack(audio);
     await output.start();
 
@@ -135,6 +182,8 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       ? new CanvasSink(camTrack!, { width: Math.min(camTrack!.displayWidth, W) }).canvasesAtTimestamps(times.map(t => Math.max(0, t - plan.cam!.offset)))
       : null;
 
+    const grader = isNeutral(plan.footage.grade) ? null : new GradeRenderer();
+    if (grader && !grader.ready) console.warn('[render] no WebGL 2 here, so the footage goes ungraded');
     let foot: WrappedCanvas | null = null;
     for (let i = 0; i < total; i++) {
       if (control.cancelled) throw new RenderCancelled();
@@ -152,7 +201,7 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
 
       // Back to front: the stick cam (vertical only), the footage over it, then the HUD.
       if (plan.cam) drawCam(ctx, cam, plan, W, H);
-      drawFootage(ctx, foot, plan, W, H);
+      drawFootage(ctx, foot, plan, W, H, grader);
       if (showHud) ctx.drawImage(hud, 0, 0);
       // Fade to black over the last few seconds: everything, OSD included, ending on a fully black frame.
       const fade = fadeLevel(i / fps, (total - 1) / fps, plan.fadeOut);
@@ -184,11 +233,14 @@ function fadeLevel(t: number, last: number, fade: number) {
 }
 
 /** The footage in its box (the whole frame, or the top part in vertical), cover-fitted or whole, zoomed and graded. */
-function drawFootage(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null, plan: RenderPlan, W: number, H: number) {
+function drawFootage(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null, plan: RenderPlan, W: number, H: number,
+                     grader: GradeRenderer | null) {
   if (!frame) return;
   const box = plan.vertical ? { x: 0, y: 0, w: W, h: SPLIT * H } : { x: 0, y: 0, w: W, h: H };
   const p = plan.footage.picture;
-  draw(ctx, frame.canvas, box, !plan.vertical && plan.footage.fit ? 'contain' : 'cover', p, 0, 0);
+  // Graded on the GPU first, exactly as the preview shows it.
+  const graded = grader?.draw(frame.canvas, frame.canvas.width, frame.canvas.height, plan.footage.grade);
+  draw(ctx, graded ? grader!.canvas : frame.canvas, box, !plan.vertical && plan.footage.fit ? 'contain' : 'cover', p, 0, 0);
 }
 
 /** The stick cam: the bottom part of the vertical split screen, shown whole. */

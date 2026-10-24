@@ -46,10 +46,11 @@ they clip. Free, no account, and nothing is uploaded: the video is rendered in y
 ### 📱 Finished videos and Shorts
 
 Skip the editor: GitDrone renders the finished `.mp4` itself, with your footage, a stick cam, the sound and the OSD baked
-in, in seconds thanks to your GPU's video encoder. Make it **landscape 16:9** for YouTube or **vertical 9:16** for Shorts,
+in, fast and near lossless on your GPU's video encoder, at the resolution your footage was shot in (4K stays 4K). Make it **landscape 16:9** for YouTube or **vertical 9:16** for Shorts,
 Reels and TikTok, a split screen with your FPV footage on top, the stick cam below, big sticks and the battery over it,
 and the bottom kept clear of the Shorts buttons. Add a **title** in two colours and your **craft name** in Impact with an
-outline, grade and zoom both videos, add a **music** track, set each sound's gain and fades, pick the part to render, and
+outline, colour your footage like Lumetri's Basic Correction (temperature, tint, saturation, exposure, contrast,
+highlights, shadows, whites, blacks), zoom both videos, add a **music** track, set each sound's gain and fades, pick the part to render, and
 fade out at the end, with Betaflight's post-flight stats as the last frame holds. The frame rate follows your footage
 (100 or 120 fps footage comes out at 60).
 
@@ -64,7 +65,7 @@ the same as the Configurator's button, then opens its drive and loads the newest
 (Chrome or Edge).
 
 <p align="center">
-  <img src="docs/screenshots/overlay.png" alt="The overlay editor in 16:9: the Sticks settings and the A1 Sound track's settings (gain, peak, sync, claps, fades) on the left; a preview of real FPV footage with speed, battery, sticks and the mini map in a Betaflight OSD font; under it the Premiere-style timeline with the OSD, footage, sound and music tracks, the sound's waveform with its arming and clap markers, and the Render range; and Options along the bottom in three boxes, Sources, Show and Output, with the Export row and its Overlay .mov and Video .mp4 buttons" width="860">
+  <img src="docs/screenshots/overlay.png" alt="The overlay editor in 16:9: the Sticks settings and the V1 Flight footage's settings (sync, the Lumetri-style Color and Light sliders, zoom) on the left; a preview of real FPV footage with speed, battery, sticks and the mini map in a Betaflight OSD font; under it the Premiere-style timeline with the OSD, footage, sound and music tracks, the sound's waveform with its arming and clap markers, and the Render range; and Options along the bottom in three boxes, Sources, Show and Output (with the Max, High, Smaller and Upload quality buttons), then the Export row and its Overlay .mov and Video .mp4 buttons" width="860">
 </p>
 
 <table>
@@ -280,7 +281,7 @@ trimmed to what plays. Sound tracks show their waveform at their gain, red where
 (in the preview and the finished video) and the gain in the header. Drag along the ruler to move the playhead; the
 **Render** range sits over the clips. The sound track's clip also marks the arming and launch it heard, its claps and
 where the sound is; hover one (or Tab to it) for what it is. Click a track (or a video in the preview) and
-the **Track** panel shows its settings: sync, picture and framing for the footage, picture and framing for the stick
+the **Track** panel shows its settings: sync, colour and framing for the footage, picture and framing for the stick
 cam, gain and sync for the sound, and gain, start and fades for the music. Options holds
 the rest in three boxes, **Sources** (the backdrop, footage, sound track, music and OSD font), **Show** (one icon toggle per HUD
 element, the title and craft name, the stats length and the panel background) and **Output** (format, resolution and
@@ -289,8 +290,9 @@ Small buttons are icons; hover any of them for what it does. Positions are store
 looks the same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.
 
 **Preview over your own video.** Load your flight footage under **Sources** to play it behind the overlay, synced live
-(the file plays from your computer; nothing is uploaded). Its brightness, contrast, saturation and zoom are in its
-Track panel (they apply to the finished video too); 4:3 footage shows whole in the 16:9 frame. To line them up, move the
+(the file plays from your computer; nothing is uploaded). Its colour is graded like Lumetri's Basic Correction
+(Temperature, Tint, Saturation, Exposure, Contrast, Highlights, Shadows, Whites and Blacks, on the GPU with WebGL, so the
+preview shows exactly what renders; `flights/grade.ts`), and its zoom is in its Track panel too; 4:3 footage shows whole in the 16:9 frame. To line them up, move the
 playhead (the arrow buttons step single frames), or the **Flight footage** slider in the footage's Track panel, to the
 moment you leave the ground and press **Takeoff is here** there:
 GitDrone finds takeoff in the log as the first throttle punch over 20%, or the first GPS movement without stick data.
@@ -380,6 +382,11 @@ in the format, resolution and frame rate set under Output (`flights/video-render
   so minutes of sound mix in seconds.
 - **Post-flight stats.** The Betaflight stats screen comes up where the flight ends, or at the end of the range if that's
   sooner. If they run past the footage, the last frame holds under them until they're done.
+- **Quality.** Constant quality on the GPU encoder (NVENC and the like), chosen under Output: **Max** (near lossless,
+  roughly 2.5 GB a minute at 4K60), **High** (about 70% of that), **Smaller** (about 45%) or **Upload** (the default,
+  about 28%, and still more detail than YouTube keeps); each button's hover gives the size for the render. Resolution
+  follows the footage, so 4K stays 4K. Browsers without constant quality get a high fixed bitrate instead. The frame
+  rate isn't declared to the encoder, since Chrome turns the GPU down above 30 fps at 1440p and 4K when it is.
 - **Frame rate.** Loading the footage sets Output's frame rate to match it, snapped to the nearest standard rate
   (a phone's 29.86 becomes 29.97). High-speed footage, 100 fps and up like the O4's, comes out at 60, as high as YouTube
   goes. The overlay `.mov` uses the same rate.

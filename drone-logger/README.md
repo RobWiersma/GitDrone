@@ -37,6 +37,7 @@ src/app/
 │   ├── overlay-renderer            Draws one HUD frame on a canvas (panels, sticks, map, stats, title, craft name)
 │   ├── mov-writer                  The transparent overlay: PNG frames in a QuickTime .mov
 │   ├── video-render                The finished .mp4: decode, composite and encode with Mediabunny (WebCodecs)
+│   ├── grade                       The footage's Lumetri-style colour, a WebGL shader for the preview and the render
 │   ├── range-window.component      The two-handle slider for the render range, on the timeline
 │   ├── clap                        Sound analysis: arming, launch, claps, motor-sound sync and sample peaks
 │   └── glyph-font, stick-math      Betaflight OSD fonts and stick modes
@@ -53,6 +54,7 @@ src/app/
 | Canvas 2D | Drawing every overlay frame | Everywhere |
 | [WebCodecs](https://developer.mozilla.org/docs/Web/API/WebCodecs_API) (via [Mediabunny](https://mediabunny.dev/)) | Rendering the finished `.mp4` | Chrome, Edge, recent Safari and Firefox |
 | [File System Access](https://developer.mozilla.org/docs/Web/API/File_System_API) | Writing big exports straight to disk; opening the flight controller's drive | Chrome and Edge; others download from memory |
+| [WebGL 2](https://developer.mozilla.org/docs/Web/API/WebGL2RenderingContext) | Grading the footage on the GPU, in the preview and every rendered frame | Everywhere; without it the footage goes ungraded |
 | [Web Audio](https://developer.mozilla.org/docs/Web/API/Web_Audio_API) | Gain past 100%, mutes and fades in the preview; mixing the finished video's sound | Everywhere |
 | [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API) | Rebooting the flight controller into mass storage | Chrome and Edge |
 
