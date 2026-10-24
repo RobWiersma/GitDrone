@@ -58,8 +58,6 @@ export interface OverlayOptions {
   showSpeed: boolean;
   showBattery: boolean;
   showMap: boolean;
-  /** Flight time in the battery panel. */
-  showTimer: boolean;
   /** The panel under the mini map: satellites and RSSI, then distance from home and height. */
   showRssi: boolean;
   /** Where the speed panel's altitude comes from. Barometer falls back to GPS when the log has none. */
@@ -452,7 +450,7 @@ export class OverlayRenderer {
         const top: Row['items'] = [
           { key: 'battery.cell', parts: [icon, { s: '4.20', size: BIG, weight: 800 }, { s: glyphs ? U.volt : 'V/cell', size: unitSize(), weight: 600 }] },
         ];
-        if (o.showTimer) top.push({ key: 'battery.time', parts: [{ s: U.fly + '88:88', size: SMALL, weight: 700 }] });
+        top.push({ key: 'battery.time', parts: [{ s: U.fly + '88:88', size: SMALL, weight: 700 }] });
         const bottom: Row['items'] = [{ key: 'battery.volts', parts: [{ s: `88.8${glyphs ? U.volt : ' V'}`, size: SMALL, weight: 600 }] }];
         if (this.hasCurrent) bottom.push({ key: 'battery.mah', parts: [{ s: `8888${U.mah}`, size: SMALL, weight: 700 }] });
         return fit(400, TWO_ROW_H, 26, k, [{ baseline: ROW1, items: top }, { baseline: ROW2, items: bottom }]);
@@ -555,7 +553,7 @@ export class OverlayRenderer {
     text(ctx, perCell, vx, line1, BIG * kc * u, 'left', 800, 1, warn);
     text(ctx, glyphs ? U.volt : 'V/cell', vx + measure(ctx, perCell, BIG * kc * u, 800) + 8 * kc * u, line1,
          unitSize() * kc * u, 'left', 600, 0.85, warn);
-    if (o.showTimer) text(ctx, U.fly + clock(t), x + w - 26 * u, line1, SMALL * g.k('battery.time') * u, 'right', 700);
+    text(ctx, U.fly + clock(t), x + w - 26 * u, line1, SMALL * g.k('battery.time') * u, 'right', 700);
 
     const line2 = y + g.baselines[1] * u;
     text(ctx, `${v.toFixed(1)}${glyphs ? U.volt : ' V'}`, x + 26 * u, line2, SMALL * g.k('battery.volts') * u, 'left', 600, 0.9, warn);

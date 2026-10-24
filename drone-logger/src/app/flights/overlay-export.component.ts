@@ -8,8 +8,9 @@ import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundProfile, findArming, findClaps, matchMotorSound, soundProfile } from './clap';
-import { RenderCancelled, RenderPlan, RenderTarget, renderVideo } from './video-render';
+import { RenderCancelled, RenderPlan, RenderTarget, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
+import { IconComponent, IconName } from '../icon.component';
 
 const RESOLUTIONS = [
   { label: '1080p (1920×1080)', w: 1920, h: 1080 },
@@ -183,7 +184,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     '(document:fullscreenchange)': 'onFullscreenChange()',
     '(document:keydown)': 'onFullscreenKey($event)',
   },
-  imports: [FormsModule, RangeWindowComponent],
+  imports: [FormsModule, RangeWindowComponent, IconComponent],
   template: `
         <div class="layout">
           <section class="panel preview-panel" aria-labelledby="preview-heading">
@@ -237,20 +238,20 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               <!-- Moves only the video, to find the takeoff frame; the overlay stays put until "Takeoff is here". -->
               <div class="video-scrub">
                 <label for="videoTime" class="scrub-label">Flight footage</label>
-                <button class="btn small step" type="button" (click)="stepVideo(-1)" aria-label="Back one frame">◀</button>
+                <button class="btn small step" type="button" (click)="stepVideo(-1)" aria-label="Back one frame" title="Back one frame"><app-icon name="prev" /></button>
                 <input id="videoTime" type="range" min="0" [max]="videoDuration()" step="0.01" [ngModel]="videoTime()"
                        (ngModelChange)="scrubVideo(+$event)" [disabled]="!videoDuration()" />
-                <button class="btn small step" type="button" (click)="stepVideo(1)" aria-label="Forward one frame">▶</button>
+                <button class="btn small step" type="button" (click)="stepVideo(1)" aria-label="Forward one frame" title="Forward one frame"><app-icon name="next" /></button>
                 <span class="mono">{{ videoClock() }}</span>
               </div>
               <!-- The part of the footage the finished video covers, on its own two-handle slider lined up with the one above.
                    Dragging a handle shows that frame in the preview. -->
               <div class="video-scrub">
                 <span class="scrub-label" id="render-range-label">Render</span>
-                <span class="btn small step" style="visibility: hidden" aria-hidden="true">◀</span>
+                <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
                 <app-range-window label="Render" [max]="videoDuration()" [step]="0.1" [valueText]="clockText" [disabled]="rendering() || !videoDuration()"
                                   [(start)]="renderStart" [(end)]="renderEnd" (startChange)="scrubVideo($event)" (endChange)="scrubVideo($event)" />
-                <span class="btn small step" style="visibility: hidden" aria-hidden="true">▶</span>
+                <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="next" /></span>
                 <span class="mono">{{ clock(renderEnd() - renderStart()) }}</span>
               </div>
               <div class="export-window">
@@ -262,7 +263,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             }
             <div class="scrub">
               <label for="previewTime" class="scrub-label">OSD overlay</label>
-              <button class="btn small step" type="button" (click)="stepOverlay(-1)" aria-label="Overlay back one frame">◀</button>
+              <button class="btn small step" type="button" (click)="stepOverlay(-1)" aria-label="Overlay back one frame" title="Overlay back one frame"><app-icon name="prev" /></button>
               <!-- The bar under the slider marks the part that gets exported. -->
               <div class="scrub-track">
                 <input id="previewTime" type="range" min="0" [max]="previewMax()" step="0.01" [ngModel]="previewTime()"
@@ -271,14 +272,14 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   <span class="window-bar" aria-hidden="true" [style.left.%]="windowLeft()" [style.width.%]="windowWidth()"></span>
                 }
               </div>
-              <button class="btn small step" type="button" (click)="stepOverlay(1)" aria-label="Overlay forward one frame">▶</button>
+              <button class="btn small step" type="button" (click)="stepOverlay(1)" aria-label="Overlay forward one frame" title="Overlay forward one frame"><app-icon name="next" /></button>
               <span class="mono">{{ previewClock() }}</span>
             </div>
             <!-- Export only part of the flight: scrub to a moment and mark it. -->
             <div class="export-window">
               <span class="scrub-label">Export</span>
-              <button class="btn small" type="button" (click)="startHere()" [disabled]="busy() || previewTime() >= end()">Start here</button>
-              <button class="btn small" type="button" (click)="endHere()" [disabled]="busy() || previewTime() <= start()">End here</button>
+              <button class="btn small step" type="button" (click)="startHere()" [disabled]="busy() || previewTime() >= end()" aria-label="Start the export here" title="Start the export here (mark in)"><app-icon name="mark-in" /></button>
+              <button class="btn small step" type="button" (click)="endHere()" [disabled]="busy() || previewTime() <= start()" aria-label="End the export here" title="End the export here (mark out)"><app-icon name="mark-out" /></button>
               <span class="mono" aria-live="polite">{{ windowText() }}</span>
               @if (!wholeFlight()) {
                 <button class="link" type="button" (click)="useWholeFlight()" [disabled]="busy()">Whole flight</button>
@@ -290,18 +291,18 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <!-- Sync buttons on top, kept together on one line. -->
                 <div class="sync-buttons">
                   @if (takeoffTime() !== null) {
-                    <button class="btn btn-primary small" type="button" (click)="takeoffHere()">Takeoff is here</button>
+                    <button class="btn btn-primary small" type="button" (click)="takeoffHere()" title="Pause the footage where you leave the ground, then press this to line the log up">Takeoff is here</button>
                   }
-                  <button class="btn small" type="button" (click)="logStartsHere()">Arming is here</button>
+                  <button class="btn small" type="button" (click)="logStartsHere()" title="Pause the footage where you arm, then press this to line the log up">Arming is here</button>
                   @if (canMatchMotors()) {
-                    <button class="btn small" type="button" (click)="syncFromMotors()" [disabled]="!!motorStatus()">Sync from motor sound</button>
+                    <button class="btn small" type="button" (click)="syncFromMotors()" [disabled]="!!motorStatus()" title="Find where the log starts in the footage by listening for the motors">Sync from motor sound</button>
                   }
                 </div>
                 @if (motorStatus()) { <span class="hint" role="status">{{ motorStatus() }}</span> }
                 <!-- Playback and the start time underneath. -->
                 <div class="playback-row">
-                  <button class="btn small" type="button" (click)="toggleVideo()">{{ videoPlaying() ? 'Pause' : 'Play' }}</button>
-                  <button class="btn small" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()">{{ muted() ? 'Sound off' : 'Sound on' }}</button>
+                  <button class="btn small step" type="button" (click)="toggleVideo()" [attr.aria-label]="videoPlaying() ? 'Pause' : 'Play'" [title]="videoPlaying() ? 'Pause' : 'Play'"><app-icon [name]="videoPlaying() ? 'pause' : 'play'" /></button>
+                  <button class="btn small step" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()" aria-label="Sound" [title]="muted() ? 'Sound is off: click to hear it' : 'Sound is on: click to mute'"><app-icon [name]="muted() ? 'mute' : 'volume'" /></button>
                   <div class="offset">
                     <label for="video-offset">Log starts at</label>
                     <input id="video-offset" type="number" step="0.1" [ngModel]="videoOffset()" (ngModelChange)="setOffset(+$event)" />
@@ -349,27 +350,27 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <!-- Moves only the sound, to find arming or takeoff in it; nothing else moves until a button below. -->
                 <div class="video-scrub">
                   <label for="soundTime" class="scrub-label">Sound track</label>
-                  <button class="btn small step" type="button" (click)="stepSound(-1)" aria-label="Sound track back one frame">◀</button>
+                  <button class="btn small step" type="button" (click)="stepSound(-1)" aria-label="Sound track back one frame" title="Sound track back one frame"><app-icon name="prev" /></button>
                   <input id="soundTime" type="range" min="0" [max]="audioProfile()?.duration ?? 0" step="0.01" [ngModel]="soundCursor()"
                          (ngModelChange)="scrubSound(+$event)" [disabled]="!audioProfile()" />
-                  <button class="btn small step" type="button" (click)="stepSound(1)" aria-label="Sound track forward one frame">▶</button>
+                  <button class="btn small step" type="button" (click)="stepSound(1)" aria-label="Sound track forward one frame" title="Sound track forward one frame"><app-icon name="next" /></button>
                   <span class="mono">{{ clockOf(soundCursor()) }}</span>
                 </div>
                 <div class="sync-buttons">
                   @if (takeoffTime() !== null) {
-                    <button class="btn btn-primary small" type="button" (click)="soundTakeoffHere()" aria-label="Takeoff is here in the sound track">Takeoff is here</button>
+                    <button class="btn btn-primary small" type="button" (click)="soundTakeoffHere()" aria-label="Takeoff is here in the sound track" title="Move the sound track slider to the takeoff you hear, then press this">Takeoff is here</button>
                   }
-                  <button class="btn small" type="button" (click)="soundArmingHere()" aria-label="Arming is here in the sound track">Arming is here</button>
+                  <button class="btn small" type="button" (click)="soundArmingHere()" aria-label="Arming is here in the sound track" title="Move the sound track slider to the arming you hear, then press this">Arming is here</button>
                   @if (audioArming(); as arm) {
                     @if (audioLogStart() !== arm.logStart) {
-                      <button class="btn small" type="button" (click)="useHeardArming()">Use the arming it heard</button>
+                      <button class="btn small" type="button" (click)="useHeardArming()" title="Line the sound track up on the arming GitDrone heard in it">Use the arming it heard</button>
                     }
                   }
                 </div>
                 <div class="playback-row">
                   @if (audioOnly()) {
-                    <button class="btn small" type="button" (click)="toggleAudioPreview()">{{ audioPlaying() ? 'Pause' : 'Play' }}</button>
-                    <button class="btn small" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()">{{ muted() ? 'Sound off' : 'Sound on' }}</button>
+                    <button class="btn small step" type="button" (click)="toggleAudioPreview()" [attr.aria-label]="audioPlaying() ? 'Pause' : 'Play'" [title]="audioPlaying() ? 'Pause' : 'Play'"><app-icon [name]="audioPlaying() ? 'pause' : 'play'" /></button>
+                    <button class="btn small step" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()" aria-label="Sound" [title]="muted() ? 'Sound is off: click to hear it' : 'Sound is on: click to mute'"><app-icon [name]="muted() ? 'mute' : 'volume'" /></button>
                   }
                   <div class="offset">
                     <label for="audio-log-start">Log starts at</label>
@@ -392,8 +393,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                       <span class="clap-label">Clap in the footage</span>
                       <span class="mono">{{ footageClap() === null ? 'not set' : clockOf(footageClap()!) }}</span>
                       @if (footageClapAuto() && footageClap() !== null) { <span class="hint">(found)</span> }
-                      <button class="btn small" type="button" (click)="footageClapHere()">Clap is here</button>
-                      <button class="btn small" type="button" (click)="syncOnClap()">Sync on the clap</button>
+                      <button class="btn small" type="button" (click)="footageClapHere()" title="Mark the clap at the footage's current frame">Clap is here</button>
+                      <button class="btn small" type="button" (click)="syncOnClap()" title="Line the sound track up with the footage on the clap heard in both">Sync on the clap</button>
                     </div>
                   </div>
                 }
@@ -405,7 +406,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 @if (videoOffset() < 0) { <p>A negative start means you armed before the video started.</p> }
                 <p>
                   @if (takeoffTime() !== null) {
-                    To line them up: use the <strong>Flight footage</strong> slider (and ◀ ▶ for single frames) to find the moment you leave
+                    To line them up: use the <strong>Flight footage</strong> slider (and its arrow buttons for single frames) to find the moment you leave
                     the ground, then press <strong>Takeoff is here</strong>
                     (the log has takeoff at {{ takeoffClock() }}, the first throttle punch{{ takeoffFromGps() ? ' or move on GPS' : '' }}).
                     Or pause on arming and press <strong>Arming is here</strong>.
@@ -449,169 +450,64 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               <p>The backdrop is only for the preview: the exported video stays transparent.</p>
             </div>
 
-            <fieldset class="layout-edit" [disabled]="busy()">
-              <legend>Layout</legend>
-              <p class="hint">Drag an element on the preview to move it, or pick one here. Positions are the element's centre.</p>
-              @if (current(); as c) {
-                <div class="layout-grid">
-                  <div class="field">
-                    <label for="el">Element</label>
-                    <select id="el" [ngModel]="c.key" (ngModelChange)="pickElement($event)">
-                      @for (p of placed(); track p.key) { <option [value]="p.key">{{ labels[p.key] }}</option> }
-                    </select>
-                  </div>
-                  <div class="field">
-                    <label for="el-size">Size: {{ (c.scale * 100).toFixed(0) }}%</label>
-                    <input id="el-size" type="range" [min]="scaleMin" [max]="scaleMax" step="0.05" [ngModel]="c.scale"
-                           (ngModelChange)="updatePlacement('scale', +$event)" />
-                  </div>
-                  <div class="field">
-                    <label for="el-x">Across: {{ (c.x * 100).toFixed(0) }}%</label>
-                    <input id="el-x" type="range" min="0" max="1" step="0.005" [ngModel]="c.x" (ngModelChange)="updatePlacement('x', +$event)" />
-                  </div>
-                  <div class="field">
-                    <label for="el-y">Down: {{ (c.y * 100).toFixed(0) }}%</label>
-                    <input id="el-y" type="range" min="0" max="1" step="0.005" [ngModel]="c.y" (ngModelChange)="updatePlacement('y', +$event)" />
-                  </div>
-                </div>
-                @if (items[c.key]; as list) {
-                  <fieldset class="item-sizes">
-                    <legend>Text sizes in the {{ labels[c.key].toLowerCase() }}</legend>
-                    <div class="layout-grid">
-                      @for (it of list; track it.key) {
-                        <div class="field">
-                          <label [for]="'item-' + it.key">{{ it.label }}: {{ (itemScale(it.key) * 100).toFixed(0) }}%</label>
-                          <input [id]="'item-' + it.key" type="range" [min]="itemMin" [max]="itemMax" step="0.05"
-                                 [ngModel]="itemScale(it.key)" (ngModelChange)="setItemScale(it.key, +$event)" />
-                        </div>
-                      }
-                    </div>
-                  </fieldset>
-                }
-                @if (c.key === 'sticks') {
-                  <fieldset class="item-sizes">
-                    <legend>Stick settings</legend>
-                    <div class="layout-grid">
-                      <div class="field">
-                        <label for="mode">Stick mode</label>
-                        <select id="mode" [ngModel]="opts().stickMode" (ngModelChange)="setStickMode(+$event)">
-                          @for (m of [1, 2, 3, 4]; track m) { <option [value]="m">Mode {{ m }}</option> }
-                        </select>
-                      </div>
-                      <div class="field">
-                        <label class="check"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" /> Stick trails (motion blur)</label>
-                        <label for="trail-intensity">Trail intensity: {{ (opts().stickTrailIntensity * 100).toFixed(0) }}%</label>
-                        <input id="trail-intensity" type="range" min="0.25" max="2" step="0.05" [ngModel]="opts().stickTrailIntensity"
-                               (ngModelChange)="setTrailIntensity(+$event)" [disabled]="!opts().stickTrails" />
-                      </div>
-                    </div>
-                  </fieldset>
-                  <fieldset class="item-sizes">
-                    <legend>Stick colours</legend>
-                    <div class="colors">
-                      <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)" /> Dot</label>
-                      <label class="color"><input type="color" [ngModel]="opts().stickTrailColor" (ngModelChange)="setColor('stickTrailColor', $event)"
-                             [disabled]="!opts().stickTrails" /> Trail</label>
-                      <label class="color"><input type="color" [ngModel]="opts().stickBoxColor" (ngModelChange)="setColor('stickBoxColor', $event)" /> Background</label>
-                      <label class="color"><input type="color" [ngModel]="opts().stickCrossColor" (ngModelChange)="setColor('stickCrossColor', $event)" /> Crosshair</label>
-                      <button class="link" type="button" (click)="resetColors(stickColors)">Reset colours</button>
-                    </div>
-                  </fieldset>
-                }
-                @if (c.key === 'rssi' && hasBaro() && data().track) {
-                  <fieldset class="item-sizes">
-                    <legend>RSSI panel settings</legend>
-                    <div class="layout-grid">
-                      <div class="field">
-                        <label for="alt-source">Height from</label>
-                        <select id="alt-source" [ngModel]="opts().altSource" (ngModelChange)="set('altSource', $event)">
-                          <option value="gps">GPS (matches the flight stats)</option>
-                          <option value="baro">Barometer (smoother)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </fieldset>
-                }
-                @if (c.key === 'map') {
-                  <fieldset class="item-sizes">
-                    <legend>Mini map colours</legend>
-                    <div class="colors">
-                      <label class="color"><input type="color" [ngModel]="opts().pathRecentColor" (ngModelChange)="setColor('pathRecentColor', $event)" /> Recent path</label>
-                      <label class="color"><input type="color" [ngModel]="opts().pathOldColor" (ngModelChange)="setColor('pathOldColor', $event)" /> Older path</label>
-                      <button class="link" type="button" (click)="resetColors(pathColors)">Reset colours</button>
-                    </div>
-                  </fieldset>
-                }
-                <div class="layout-actions">
-                  <button class="link" type="button" (click)="resetElement(c.key)" [disabled]="!isCustom(c.key)">Reset {{ labels[c.key] }}</button>
-                  <button class="link" type="button" (click)="resetLayout()" [disabled]="!hasCustomLayout()">Reset whole layout</button>
-                </div>
-              } @else {
-                <p class="hint">Turn on an element under Show to place it.</p>
-              }
-            </fieldset>
           </section>
 
-          <section class="panel options" aria-labelledby="options-heading">
-            <h2 id="options-heading">Options</h2>
-            <!-- What plays behind and with the preview; none of it goes into the export. -->
-            <div class="field">
-              <label for="backdrop">Preview backdrop</label>
-              <select id="backdrop" [ngModel]="backdrop()" (ngModelChange)="setBackdrop($event)">
-                <option value="checker">Checkerboard (shows transparency)</option>
-                <option value="sky">Sky</option>
-                <option value="video" [disabled]="!videoUrl()">Your video (plays with the overlay)</option>
-              </select>
+          <!-- The picked component's settings in one place, like Premiere's Effect Controls: click something in the
+               preview (or pick it here) and everything about it shows. Left of the preview in vertical, under it in landscape. -->
+          <section class="panel inspector" aria-labelledby="inspector-heading">
+            <div class="inspector-head">
+              <h2 id="inspector-heading">{{ inspectedLabel() }}</h2>
+              @if (inspected()) { <button class="btn small step" type="button" (click)="selectMedia(null)" aria-label="Done" title="Done: close these settings"><app-icon name="close" /></button> }
             </div>
-            <div class="field">
-              <span class="field-label" id="footage-label">Flight footage</span>
-              @if (videoUrl()) { <p class="source-row"><span class="mono">{{ videoName() }}</span></p> }
-              <label class="btn small">
-                {{ videoUrl() ? 'Change video' : 'Play it over your video' }}
-                <input class="sr-only" type="file" accept="video/*" aria-labelledby="footage-label" (change)="onVideoFile($event)" />
-              </label>
-              @if (hasVideo() && mediaSelected() !== 'footage') {
-                <p class="source-row"><button class="link" type="button" (click)="selectMedia('footage')">Adjust picture</button>
-                  <span class="hint">or click it in the preview</span></p>
-              }
-              @if (hasVideo() && mediaSelected() === 'footage') {
-                <!-- Flat D-Log-ish footage is hard to judge the overlay against; this only changes the preview. -->
-                <div class="grade">
-                  <label for="brightness">Brightness</label>
-                  <input id="brightness" type="range" min="50" max="200" step="5" [ngModel]="brightness()" (ngModelChange)="brightness.set(+$event)" />
-                  <span class="mono">{{ brightness() }}%</span>
-                  <label for="contrast">Contrast</label>
-                  <input id="contrast" type="range" min="50" max="200" step="5" [ngModel]="contrast()" (ngModelChange)="contrast.set(+$event)" />
-                  <span class="mono">{{ contrast() }}%</span>
-                  <label for="saturation">Saturation</label>
-                  <input id="saturation" type="range" min="0" max="250" step="5" [ngModel]="saturation()" (ngModelChange)="saturation.set(+$event)" />
-                  <span class="mono">{{ saturation() }}%</span>
-                  <label for="zoom">Zoom</label>
-                  <input id="zoom" type="range" min="50" max="300" step="5" [ngModel]="footageZoom()" (ngModelChange)="footageZoom.set(+$event)" />
-                  <span class="mono">{{ footageZoom() }}%</span>
-                </div>
-                <p class="source-row">
-                  <span class="hint">Only for the preview.</span>
-                  @if (footageAdjusted()) {
-                    <button class="link" type="button" (click)="resetFootage()">Reset</button>
-                  }
-                  <button class="link" type="button" (click)="selectMedia(null)">Done</button>
-                </p>
-              }
-            </div>
-            <div class="field">
-              <span class="field-label" id="sound-label">Sound track</span>
-              @if (audioUrl()) {
-                <p class="source-row"><span class="mono">{{ audioName() }}</span>
-                  <button class="link" type="button" (click)="removeAudio()">Remove</button></p>
-                @if (audioIsVideo()) {
-                  <label class="check"><input type="checkbox" [ngModel]="showPip()" (ngModelChange)="showPip.set($event)" />
-                    Show its picture {{ vertical() ? 'in the bottom half' : 'in the corner' }}</label>
-                  @if (showPip() && mediaSelected() !== 'cam') {
-                    <p class="source-row"><button class="link" type="button" (click)="selectMedia('cam')">Adjust picture</button>
-                      <span class="hint">or click it in the preview</span></p>
-                  }
-                  @if (showPip() && mediaSelected() === 'cam') {
+            <fieldset class="inspector-body" [disabled]="busy()">
+              <legend class="sr-only">{{ inspectedLabel() }} settings</legend>
+              @switch (inspected()) {
+                @case (null) {
+                  <p class="hint">Click something in the preview to edit it, or pick it here.</p>
+                  <div class="colors">
+                    @for (it of inspectables(); track it.key) {
+                      <button class="btn small" type="button" (click)="inspect(it.key)">{{ it.label }}</button>
+                    }
+                  </div>
+                  <div class="layout-actions">
+                    <button class="link" type="button" (click)="resetLayout()" [disabled]="!hasCustomLayout()" title="Put every element back where it starts">Reset whole layout</button>
+                  </div>
+                }
+
+                @case ('footage') {
+                  <p class="mono">{{ videoName() }}</p>
+                  <fieldset class="item-sizes">
+                    <legend>Picture</legend>
+                    <!-- Flat D-Log-ish footage is hard to judge the overlay against; the finished video uses these too. -->
+                    <div class="grade">
+                      <label for="brightness">Brightness</label>
+                      <input id="brightness" type="range" min="50" max="200" step="5" [ngModel]="brightness()" (ngModelChange)="brightness.set(+$event)" />
+                      <span class="mono">{{ brightness() }}%</span>
+                      <label for="contrast">Contrast</label>
+                      <input id="contrast" type="range" min="50" max="200" step="5" [ngModel]="contrast()" (ngModelChange)="contrast.set(+$event)" />
+                      <span class="mono">{{ contrast() }}%</span>
+                      <label for="saturation">Saturation</label>
+                      <input id="saturation" type="range" min="0" max="250" step="5" [ngModel]="saturation()" (ngModelChange)="saturation.set(+$event)" />
+                      <span class="mono">{{ saturation() }}%</span>
+                    </div>
+                  </fieldset>
+                  <fieldset class="item-sizes">
+                    <legend>Framing</legend>
+                    <div class="grade">
+                      <label for="zoom">Zoom</label>
+                      <input id="zoom" type="range" min="50" max="300" step="5" [ngModel]="footageZoom()" (ngModelChange)="footageZoom.set(+$event)" />
+                      <span class="mono">{{ footageZoom() }}%</span>
+                    </div>
+                  </fieldset>
+                  <div class="layout-actions">
+                    <button class="btn small step" type="button" (click)="resetFootage()" [disabled]="!footageAdjusted()" aria-label="Reset the flight footage's picture and framing" title="Reset the flight footage's picture and framing"><app-icon name="reset" /></button>
+                  </div>
+                }
+
+                @case ('cam') {
+                  <p class="mono">{{ audioName() }}</p>
+                  <fieldset class="item-sizes">
+                    <legend>Picture</legend>
                     <div class="grade">
                       <label for="cam-brightness">Brightness</label>
                       <input id="cam-brightness" type="range" min="50" max="200" step="5" [ngModel]="camBrightness()" (ngModelChange)="camBrightness.set(+$event)" />
@@ -622,6 +518,11 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                       <label for="cam-saturation">Saturation</label>
                       <input id="cam-saturation" type="range" min="0" max="250" step="5" [ngModel]="camSaturation()" (ngModelChange)="camSaturation.set(+$event)" />
                       <span class="mono">{{ camSaturation() }}%</span>
+                    </div>
+                  </fieldset>
+                  <fieldset class="item-sizes">
+                    <legend>Framing</legend>
+                    <div class="grade">
                       <label for="cam-zoom">Zoom</label>
                       <input id="cam-zoom" type="range" min="50" max="300" step="5" [ngModel]="camZoom()" (ngModelChange)="camZoom.set(+$event)" />
                       <span class="mono">{{ camZoom() }}%</span>
@@ -632,206 +533,331 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                       <input id="cam-pan-y" type="range" min="-50" max="50" step="1" [ngModel]="camPanY()" (ngModelChange)="camPanY.set(+$event)" />
                       <span class="mono">{{ camPanY() }}%</span>
                     </div>
-                    <p class="source-row">
-                      @if (camAdjusted()) { <button class="link" type="button" (click)="resetCam()">Reset</button> }
-                      <button class="link" type="button" (click)="selectMedia(null)">Done</button>
-                    </p>
+                  </fieldset>
+                  <div class="layout-actions">
+                    <button class="btn small step" type="button" (click)="resetCam()" [disabled]="!camAdjusted()" aria-label="Reset the stick cam's picture and framing" title="Reset the stick cam's picture and framing"><app-icon name="reset" /></button>
+                  </div>
+                }
+
+                @default {
+                  @if (inspected() === 'title') {
+                    <fieldset class="item-sizes labels">
+                      <legend>Text</legend>
+                      <div class="label-row">
+                        <label for="title-text" class="sr-only">Title</label>
+                        <input id="title-text" type="text" maxlength="60" placeholder="Title, e.g. BRIDGE" [ngModel]="opts().titleText"
+                               (ngModelChange)="setLabel('titleText', $event)" />
+                        <input type="color" aria-label="Title colour" [ngModel]="opts().titleColor" (ngModelChange)="setLabel('titleColor', $event)" />
+                      </div>
+                      <div class="label-row">
+                        <label for="title-accent" class="sr-only">Second part of the title</label>
+                        <input id="title-accent" type="text" maxlength="60" placeholder="Second part, e.g. BOI" [ngModel]="opts().titleAccentText"
+                               (ngModelChange)="setLabel('titleAccentText', $event)" />
+                        <input type="color" aria-label="Second part colour" [ngModel]="opts().titleAccentColor" (ngModelChange)="setLabel('titleAccentColor', $event)" />
+                      </div>
+                      <div class="label-row">
+                        <span>Outline</span>
+                        <input type="color" aria-label="Title outline colour" [ngModel]="opts().titleStrokeColor" (ngModelChange)="setLabel('titleStrokeColor', $event)" />
+                        <label class="check"><input type="checkbox" [ngModel]="!!opts().titleBgColor"
+                               (ngModelChange)="setLabel('titleBgColor', $event ? '#000000' : '')" /> Box behind it</label>
+                        @if (opts().titleBgColor) {
+                          <input type="color" aria-label="Title box colour" [ngModel]="opts().titleBgColor" (ngModelChange)="setLabel('titleBgColor', $event)" />
+                        }
+                      </div>
+                    </fieldset>
+                  }
+                  @if (inspected() === 'craft') {
+                    <fieldset class="item-sizes labels">
+                      <legend>Text</legend>
+                      <div class="label-row">
+                        <label for="craft-text" class="sr-only">Craft name</label>
+                        <input id="craft-text" type="text" maxlength="60" placeholder="Craft name, e.g. FLYFISH VOLADOR VX 3.5" [ngModel]="opts().craftText"
+                               (ngModelChange)="setLabel('craftText', $event)" />
+                        <input type="color" aria-label="Craft name colour" [ngModel]="opts().craftColor" (ngModelChange)="setLabel('craftColor', $event)" />
+                      </div>
+                      <div class="label-row">
+                        <span>Outline</span>
+                        <input type="color" aria-label="Craft name outline colour" [ngModel]="opts().craftStrokeColor"
+                               (ngModelChange)="setLabel('craftStrokeColor', $event)" />
+                      </div>
+                    </fieldset>
+                  }
+
+                  @if (current(); as c) {
+                    @if (c.key === inspected()) {
+                      <fieldset class="item-sizes">
+                        <legend>Position and size</legend>
+                        <p class="hint">Or drag it on the preview. Positions are its centre.</p>
+                        <div class="grade">
+                          <label for="el-size">Size</label>
+                          <input id="el-size" type="range" [min]="scaleMin" [max]="scaleMax" step="0.05" [ngModel]="c.scale"
+                                 (ngModelChange)="updatePlacement('scale', +$event)" />
+                          <span class="mono">{{ (c.scale * 100).toFixed(0) }}%</span>
+                          <label for="el-x">Across</label>
+                          <input id="el-x" type="range" min="0" max="1" step="0.005" [ngModel]="c.x" (ngModelChange)="updatePlacement('x', +$event)" />
+                          <span class="mono">{{ (c.x * 100).toFixed(0) }}%</span>
+                          <label for="el-y">Down</label>
+                          <input id="el-y" type="range" min="0" max="1" step="0.005" [ngModel]="c.y" (ngModelChange)="updatePlacement('y', +$event)" />
+                          <span class="mono">{{ (c.y * 100).toFixed(0) }}%</span>
+                        </div>
+                      </fieldset>
+                      @if (items[c.key]; as list) {
+                        <fieldset class="item-sizes">
+                          <legend>Text sizes</legend>
+                          <div class="grade">
+                            @for (it of list; track it.key) {
+                              <label [for]="'item-' + it.key">{{ it.label }}</label>
+                              <input [id]="'item-' + it.key" type="range" [min]="itemMin" [max]="itemMax" step="0.05"
+                                     [ngModel]="itemScale(it.key)" (ngModelChange)="setItemScale(it.key, +$event)" />
+                              <span class="mono">{{ (itemScale(it.key) * 100).toFixed(0) }}%</span>
+                            }
+                          </div>
+                        </fieldset>
+                      }
+                      @if (c.key === 'sticks') {
+                        <fieldset class="item-sizes">
+                          <legend>Sticks</legend>
+                          <div class="label-row">
+                            <label for="mode">Stick mode</label>
+                            <select id="mode" [ngModel]="opts().stickMode" (ngModelChange)="setStickMode(+$event)">
+                              @for (m of [1, 2, 3, 4]; track m) { <option [value]="m">Mode {{ m }}</option> }
+                            </select>
+                          </div>
+                          <label class="check"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" /> Trails (motion blur)</label>
+                          <div class="grade">
+                            <label for="trail-intensity">Trail strength</label>
+                            <input id="trail-intensity" type="range" min="0.25" max="2" step="0.05" [ngModel]="opts().stickTrailIntensity"
+                                   (ngModelChange)="setTrailIntensity(+$event)" [disabled]="!opts().stickTrails" />
+                            <span class="mono">{{ (opts().stickTrailIntensity * 100).toFixed(0) }}%</span>
+                          </div>
+                        </fieldset>
+                        <fieldset class="item-sizes">
+                          <legend>Colours</legend>
+                          <div class="colors">
+                            <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)" /> Dot</label>
+                            <label class="color"><input type="color" [ngModel]="opts().stickTrailColor" (ngModelChange)="setColor('stickTrailColor', $event)"
+                                   [disabled]="!opts().stickTrails" /> Trail</label>
+                            <label class="color"><input type="color" [ngModel]="opts().stickBoxColor" (ngModelChange)="setColor('stickBoxColor', $event)" /> Background</label>
+                            <label class="color"><input type="color" [ngModel]="opts().stickCrossColor" (ngModelChange)="setColor('stickCrossColor', $event)" /> Crosshair</label>
+                            <button class="btn small step" type="button" (click)="resetColors(stickColors)" aria-label="Reset the stick colours" title="Reset the stick colours"><app-icon name="reset" /></button>
+                          </div>
+                        </fieldset>
+                      }
+                      @if (c.key === 'rssi' && hasBaro() && data().track) {
+                        <fieldset class="item-sizes">
+                          <legend>Height</legend>
+                          <div class="field">
+                            <label for="alt-source">Height from</label>
+                            <select id="alt-source" [ngModel]="opts().altSource" (ngModelChange)="set('altSource', $event)">
+                              <option value="gps">GPS (matches the flight stats)</option>
+                              <option value="baro">Barometer (smoother)</option>
+                            </select>
+                          </div>
+                        </fieldset>
+                      }
+                      @if (c.key === 'map') {
+                        <fieldset class="item-sizes">
+                          <legend>Colours</legend>
+                          <div class="colors">
+                            <label class="color"><input type="color" [ngModel]="opts().pathRecentColor" (ngModelChange)="setColor('pathRecentColor', $event)" /> Recent path</label>
+                            <label class="color"><input type="color" [ngModel]="opts().pathOldColor" (ngModelChange)="setColor('pathOldColor', $event)" /> Older path</label>
+                            <button class="btn small step" type="button" (click)="resetColors(pathColors)" aria-label="Reset the map colours" title="Reset the map colours"><app-icon name="reset" /></button>
+                          </div>
+                        </fieldset>
+                      }
+                      <div class="layout-actions">
+                        <button class="btn small step" type="button" (click)="resetElement(c.key)" [disabled]="!isCustom(c.key)" [attr.aria-label]="'Reset the ' + labels[c.key].toLowerCase() + ': position, size and text sizes'" [title]="'Reset the ' + labels[c.key].toLowerCase() + ': position, size and text sizes'"><app-icon name="reset" /></button>
+                      </div>
+                    }
+                  }
+                  @if ((inspected() === 'title' && !hasTitle()) || (inspected() === 'craft' && !hasCraft())) {
+                    <p class="hint">Type some text to place it; then it can be moved and resized here.</p>
                   }
                 }
-              } @else {
-                <p class="hint">A phone recording or stick cam video, for its sound.</p>
               }
-              <label class="btn small">
-                {{ audioUrl() ? 'Change sound track' : 'Add a sound track' }}
-                <input class="sr-only" type="file" accept="audio/*,video/*" aria-labelledby="sound-label" (change)="onAudioFile($event)" />
-              </label>
-            </div>
-            <div class="field">
-              <span class="field-label" id="font-label">OSD font</span>
-              @if (font(); as fnt) {
-                <p class="font-row"><span class="mono">{{ fnt.name }}</span> <span class="hint">{{ fnt.glyphW }}×{{ fnt.glyphH }} glyphs</span>
-                  <button class="link" type="button" (click)="clearFont()" [disabled]="busy()">Remove</button></p>
-              } @else {
-                <p class="hint">Built-in font. Load your goggles' Betaflight font (<code>font_bf.bin</code> is sharpest) for the real OSD look.</p>
-              }
-              <label class="btn small">
-                {{ font() ? 'Change font' : 'Load font file' }}
-                <input class="sr-only" type="file" accept=".bin" aria-labelledby="font-label" (change)="onFont($event)" [disabled]="busy()" />
-              </label>
+            </fieldset>
+          </section>
+
+          <section class="panel options" aria-labelledby="options-heading">
+            <h2 id="options-heading">Options</h2>
+            <!-- What the preview plays and draws with: the backdrop and the three files. None of the files is uploaded, and only
+                 the font goes into the overlay; footage and sound only reach the finished video. One row per source: its icon
+                 (hover for what it is), the file, then its actions. -->
+            <div class="panel field sources" role="group" aria-labelledby="sources-label">
+              <span class="field-label" id="sources-label">Sources</span>
+              <div class="toggles" role="group" aria-label="Preview backdrop">
+                @for (b of backdrops; track b.value) {
+                  <button class="btn small step" type="button" [class.btn-primary]="backdrop() === b.value" [attr.aria-pressed]="backdrop() === b.value"
+                          [attr.aria-label]="b.label" [title]="'Preview backdrop: ' + b.label + (b.value === 'video' && !videoUrl() ? ' (load your footage first)' : '')"
+                          [disabled]="b.value === 'video' && !videoUrl()" (click)="setBackdrop(b.value)"><app-icon [name]="b.icon" /></button>
+                }
+              </div>
+
+              <div class="source-row">
+                <span title="Flight footage: your FPV video, played behind the preview and used for the finished video"><app-icon name="film" /></span>
+                <span class="sr-only">Flight footage:</span>
+                <span class="mono" [title]="videoName() || 'No footage loaded'">{{ videoName() || 'No footage' }}</span>
+                <label class="btn small step" [title]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'">
+                  <app-icon name="folder" />
+                  <input class="sr-only" type="file" accept="video/*" [attr.aria-label]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'"
+                         (change)="onVideoFile($event)" />
+                </label>
+                @if (hasVideo()) {
+                  <button class="btn small step" type="button" (click)="selectMedia('footage')" aria-label="Adjust the footage's picture" title="Adjust the footage's picture"><app-icon name="sliders" /></button>
+                }
+              </div>
+
+              <div class="source-row">
+                <span title="Sound track: a phone recording or stick cam video, for its sound (and a stick cam's picture)"><app-icon name="volume" /></span>
+                <span class="sr-only">Sound track:</span>
+                <span class="mono" [title]="audioName() || 'No sound track loaded'">{{ audioUrl() ? audioName() : 'No sound track' }}</span>
+                <label class="btn small step" [title]="audioUrl() ? 'Change the sound track' : 'Load a sound track'">
+                  <app-icon name="folder" />
+                  <input class="sr-only" type="file" accept="audio/*,video/*" [attr.aria-label]="audioUrl() ? 'Change the sound track' : 'Load a sound track'"
+                         (change)="onAudioFile($event)" />
+                </label>
+                @if (audioUrl()) {
+                  @if (audioIsVideo() && showPip()) {
+                    <button class="btn small step" type="button" (click)="selectMedia('cam')" aria-label="Adjust the stick cam's picture" title="Adjust the stick cam's picture"><app-icon name="sliders" /></button>
+                  }
+                  <button class="btn small step" type="button" (click)="removeAudio()" aria-label="Remove the sound track" title="Remove the sound track"><app-icon name="trash" /></button>
+                }
+              </div>
+
+              <div class="source-row">
+                <span title="OSD font: your goggles' Betaflight font (font_bf.bin is sharpest) for the real OSD look; the built-in font otherwise"><app-icon name="font" /></span>
+                <span class="sr-only">OSD font:</span>
+                @if (font(); as fnt) {
+                  <span class="mono" [title]="fnt.name + ', ' + fnt.glyphW + '×' + fnt.glyphH + ' glyphs'">{{ fnt.name }}</span>
+                } @else {
+                  <span class="mono" title="The built-in font. Load your goggles' Betaflight font (font_bf.bin) for the real OSD look.">Built-in font</span>
+                }
+                <label class="btn small step" [title]="font() ? 'Change the OSD font' : 'Load the Betaflight font from your goggles (.bin)'">
+                  <app-icon name="folder" />
+                  <input class="sr-only" type="file" accept=".bin" [attr.aria-label]="font() ? 'Change the OSD font' : 'Load an OSD font'" (change)="onFont($event)" [disabled]="busy()" />
+                </label>
+                @if (font()) {
+                  <button class="btn small step" type="button" (click)="clearFont()" [disabled]="busy()" aria-label="Remove the font" title="Remove the font: back to the built-in one"><app-icon name="trash" /></button>
+                }
+              </div>
               @if (fontError()) { <p class="error">{{ fontError() }}</p> }
             </div>
-            <div class="field">
-              <label for="format">Format</label>
-              <select id="format" [ngModel]="vertical()" (ngModelChange)="setVertical($event)" [disabled]="busy()">
-                <option [ngValue]="false">Landscape 16:9 (YouTube)</option>
-                <option [ngValue]="true">Vertical 9:16 (Shorts, Reels, TikTok)</option>
-              </select>
-              @if (vertical()) {
-                <p class="hint">Its own layout, kept clear of the Shorts buttons at the bottom. In the preview your footage fills the top half (use Zoom to frame it) and the OSD sits below.</p>
-              }
-            </div>
-            <div class="field">
-              <label for="res">Resolution</label>
-              <select id="res" [ngModel]="resIndex()" (ngModelChange)="resIndex.set(+$event)" [disabled]="busy()">
-                @for (r of resolutions(); track r.label; let i = $index) { <option [value]="i">{{ r.label }}</option> }
-              </select>
-            </div>
-            <div class="field">
-              <label for="fps">Frame rate</label>
-              <select id="fps" [ngModel]="fps()" (ngModelChange)="fps.set(+$event)" [disabled]="busy()">
-                @for (r of fpsOptions; track r) { <option [value]="r">{{ r }} fps</option> }
-              </select>
-              <p class="hint">Match your footage.</p>
-            </div>
-            <fieldset class="field" [disabled]="busy()">
-              <legend>Show</legend>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showSpeed" (ngModelChange)="set('showSpeed', $event)" [disabled]="!data().track" /> Speed, height, distance</label>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showBattery" (ngModelChange)="set('showBattery', $event)" [disabled]="!data().battery" /> Battery</label>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showSticks" (ngModelChange)="set('showSticks', $event)" [disabled]="!data().sticks" /> Sticks</label>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showMap" (ngModelChange)="set('showMap', $event)" [disabled]="!data().track" /> Mini map</label>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showTimer" (ngModelChange)="set('showTimer', $event)" [disabled]="!data().battery" /> Flight time (in the battery panel)</label>
-              <label class="check"><input type="checkbox" [ngModel]="opts().showStats" (ngModelChange)="set('showStats', $event)" /> End-of-flight stats</label>
-              <div class="stats-time">
-                <label for="stats-seconds">Show stats for</label>
-                <input id="stats-seconds" type="number" min="0.5" max="30" step="0.5" [ngModel]="statsSeconds()"
-                       (ngModelChange)="setStatsSeconds(+$event)" [disabled]="!opts().showStats" />
-                <span>s</span>
-              </div>
-              @if (opts().showStats) {
-                <p class="callout stats-hint">After the log ends: a {{ gapMs }} ms blank, then the stats. Drag the preview past the end to see them.</p>
-              }
-              <label class="check"><input type="checkbox" [ngModel]="opts().showRssi" (ngModelChange)="set('showRssi', $event)" [disabled]="!hasRssi() && !data().track" /> RSSI panel (satellites, RSSI, distance, height)</label>
-            </fieldset>
-            <!-- Part of the overlay (exported), like the HUD; each shows while it has text. Its settings show only while
-                 it's picked (on the preview, under Layout, or with its Edit/Add button here). -->
-            <fieldset class="field labels" [disabled]="busy()">
-              <legend>{{ titleOpen() ? 'Title' : craftOpen() ? 'Craft name' : 'Title and craft name' }}</legend>
-              @if (titleOpen()) {
-              <div class="label-row">
-                <label for="title-text" class="sr-only">Title</label>
-                <input id="title-text" type="text" maxlength="60" placeholder="Title, e.g. BRIDGE" [ngModel]="opts().titleText"
-                       (ngModelChange)="setLabel('titleText', $event)" />
-                <input type="color" aria-label="Title colour" [ngModel]="opts().titleColor" (ngModelChange)="setLabel('titleColor', $event)" />
-              </div>
-              <div class="label-row">
-                <label for="title-accent" class="sr-only">Second part of the title</label>
-                <input id="title-accent" type="text" maxlength="60" placeholder="Second part, e.g. BOI" [ngModel]="opts().titleAccentText"
-                       (ngModelChange)="setLabel('titleAccentText', $event)" />
-                <input type="color" aria-label="Second part colour" [ngModel]="opts().titleAccentColor" (ngModelChange)="setLabel('titleAccentColor', $event)" />
-              </div>
-              @if (current()?.key === 'title') {
-                <div class="label-row">
-                  <label for="title-size">Size</label>
-                  <input id="title-size" type="range" [min]="scaleMin" [max]="scaleMax" step="0.05" [ngModel]="current()!.scale"
-                         (ngModelChange)="updatePlacement('scale', +$event)" />
-                  <span class="mono">{{ (current()!.scale * 100).toFixed(0) }}%</span>
-                </div>
-              }
-              <div class="label-row">
-                <span>Outline</span>
-                <input type="color" aria-label="Title outline colour" [ngModel]="opts().titleStrokeColor" (ngModelChange)="setLabel('titleStrokeColor', $event)" />
-                <label class="check"><input type="checkbox" [ngModel]="!!opts().titleBgColor"
-                       (ngModelChange)="setLabel('titleBgColor', $event ? '#000000' : '')" /> Box behind the title</label>
-                @if (opts().titleBgColor) {
-                  <input type="color" aria-label="Title box colour" [ngModel]="opts().titleBgColor" (ngModelChange)="setLabel('titleBgColor', $event)" />
+            <!-- What's drawn: one icon toggle per part of the HUD, lit when on. Flight time is always in the battery panel. -->
+            <div class="panel field" role="group" aria-labelledby="show-label">
+              <span class="field-label" id="show-label">Show</span>
+              <div class="toggles">
+                @for (t of showToggles(); track t.key) {
+                  <button class="btn small step" type="button" [class.btn-primary]="opts()[t.key]" [attr.aria-pressed]="opts()[t.key]"
+                          [attr.aria-label]="t.label" [title]="t.label + (t.available ? '' : ' (not in this log)')" [disabled]="busy() || !t.available"
+                          (click)="set(t.key, !opts()[t.key])"><app-icon [name]="t.icon" /></button>
+                }
+                <!-- A video sound track (a stick cam) can show its picture too; preview and finished video only, not the overlay. -->
+                @if (audioUrl() && audioIsVideo()) {
+                  <button class="btn small step" type="button" [class.btn-primary]="showPip()" [attr.aria-pressed]="showPip()" aria-label="Stick cam picture"
+                          [title]="'Stick cam picture ' + (vertical() ? 'in the bottom half' : 'in the corner') + ', from your sound track video'"
+                          (click)="showPip.set(!showPip())"><app-icon name="pip" /></button>
+                }
+                @if (opts().showStats) {
+                  <span class="stats-time" title="After the log ends: a {{ gapMs }} ms blank, then the stats for this long. Drag the preview past the end to see them.">
+                    <label for="stats-seconds">Stats</label>
+                    <input id="stats-seconds" type="number" min="0.5" max="30" step="0.5" [ngModel]="statsSeconds()"
+                           (ngModelChange)="setStatsSeconds(+$event)" [disabled]="busy()" />
+                    <span>s</span>
+                  </span>
                 }
               </div>
-              } @else if (craftOpen()) {
-              <div class="label-row">
-                <label for="craft-text" class="sr-only">Craft name</label>
-                <input id="craft-text" type="text" maxlength="60" placeholder="Craft name, e.g. FLYFISH VOLADOR VX 3.5" [ngModel]="opts().craftText"
-                       (ngModelChange)="setLabel('craftText', $event)" />
-                <input type="color" aria-label="Craft name colour" [ngModel]="opts().craftColor" (ngModelChange)="setLabel('craftColor', $event)" />
-                <input type="color" aria-label="Craft name outline colour" title="Outline" [ngModel]="opts().craftStrokeColor"
-                       (ngModelChange)="setLabel('craftStrokeColor', $event)" />
+              <div class="grade" title="The dark box behind the speed, battery and RSSI panels and the stats screen; 0% for none">
+                <label for="opacity">Panels</label>
+                <input id="opacity" type="range" min="0" max="0.8" step="0.05" [ngModel]="opts().panelOpacity"
+                       (ngModelChange)="set('panelOpacity', +$event)" [disabled]="busy()" />
+                <span class="mono">{{ (opts().panelOpacity * 100).toFixed(0) }}%</span>
               </div>
-              } @else {
-                <p class="source-row">
-                  <button class="btn small" type="button" (click)="pickElement('title')">{{ hasTitle() ? 'Edit title' : 'Add title' }}</button>
-                  <button class="btn small" type="button" (click)="pickElement('craft')">{{ hasCraft() ? 'Edit craft name' : 'Add craft name' }}</button>
-                </p>
-              }
-              @if (titleOpen() || craftOpen()) {
-                <p class="source-row"><span class="hint">Drag it on the preview to move it.</span>
-                  <button class="link" type="button" (click)="selected.set(null)">Done</button></p>
-              } @else {
-                <p class="hint">Or click one on the preview.</p>
-              }
-            </fieldset>
-            <div class="field">
-              <label for="opacity">Panel background: {{ (opts().panelOpacity * 100).toFixed(0) }}%</label>
-              <input id="opacity" type="range" min="0" max="0.8" step="0.05" [ngModel]="opts().panelOpacity"
-                     (ngModelChange)="set('panelOpacity', +$event)" [disabled]="busy()" />
-            </div>
-            <div class="range">
-              <div class="field">
-                <label for="start">Start (s)</label>
-                <input id="start" type="number" min="0" [max]="end()" step="0.1" [ngModel]="start()" (ngModelChange)="start.set(clampTime(+$event))" [disabled]="busy()" />
-              </div>
-              <div class="field">
-                <label for="end">End (s)</label>
-                <input id="end" type="number" [min]="start()" [max]="seconds()" step="0.1" [ngModel]="end()" (ngModelChange)="end.set(clampTime(+$event))" [disabled]="busy()" />
+              <!-- The title and craft name are part of the overlay too; their settings open in the component panel. -->
+              <div class="toggles">
+                <button class="btn small" type="button" (click)="pickElement('title')" title="Text, colours, outline and size of the title">{{ hasTitle() ? 'Edit title' : 'Add title' }}</button>
+                <button class="btn small" type="button" (click)="pickElement('craft')" title="Text, colours, outline and size of the craft name">{{ hasCraft() ? 'Edit craft name' : 'Add craft name' }}</button>
               </div>
             </div>
-            <p class="hint">{{ frameCount() }} frames, {{ clock(exportSeconds()) }} long{{ opts().showStats ? ' with the stats' : '' }}, roughly {{ sizeEstimate() }} on disk.</p>
-            @if (!toDisk && estimatedBytes() > 2e9) {
-              <p class="error">That's a lot to hold in memory in this browser. Trim it, lower the resolution, or use Chrome or Edge.</p>
-            }
-
-            @if (busy()) {
-              <div class="progress" role="status" aria-live="polite">
-                <progress [value]="done()" [max]="frameCount()"></progress>
-                <span class="mono">{{ done() }} / {{ frameCount() }}{{ eta() ? ', about ' + eta() + ' left' : '' }}</span>
+            <!-- What gets made and making it: shape (icons), size and frame rate (chips, since numbers say it better than any
+                 icon), then the two exports, the transparent overlay for an editor and the finished video. Their ranges are
+                 set under the preview (the Export marks and the Render slider); hover any button for the details. -->
+            <div class="panel field" role="group" aria-labelledby="output-label">
+              <span class="field-label" id="output-label">Output</span>
+              <div class="toggles" role="group" aria-label="Format">
+                <button class="btn small step" type="button" [class.btn-primary]="!vertical()" [attr.aria-pressed]="!vertical()" aria-label="Landscape 16:9"
+                        title="Landscape 16:9, for YouTube" [disabled]="busy()" (click)="setVertical(false)"><app-icon name="landscape" /></button>
+                <button class="btn small step" type="button" [class.btn-primary]="vertical()" [attr.aria-pressed]="vertical()" aria-label="Vertical 9:16"
+                        title="Vertical 9:16, for Shorts, Reels and TikTok: its own layout, with your footage on top, the stick cam below and the OSD over it"
+                        [disabled]="busy()" (click)="setVertical(true)"><app-icon name="portrait" /></button>
               </div>
-              <button class="btn" type="button" (click)="cancel()">Cancel</button>
-            } @else {
-              <button class="btn btn-primary" type="button" (click)="exportVideo()" [disabled]="frameCount() === 0">
-                Export .mov
-              </button>
-              @if (!toDisk) {
-                <p class="hint">This browser builds the file in memory before downloading. Chrome or Edge writes straight to disk, which is better for long or 4K exports.</p>
+              <div class="toggles" role="group" aria-label="Resolution">
+                @for (r of resolutions(); track r.label; let i = $index) {
+                  <button class="btn small step" type="button" [class.btn-primary]="resIndex() === i" [attr.aria-pressed]="resIndex() === i"
+                          [title]="'Resolution: ' + r.label" [disabled]="busy()" (click)="resIndex.set(i)">{{ r.label.split(' ')[0] }}</button>
+                }
+              </div>
+              <div class="toggles" role="group" aria-label="Frame rate"
+                   [title]="footageFps() ? 'Your footage is ' + fpsLabel(footageFps()!) + ' fps' + (footageFps()! >= 100 ? ', so 60, as high as YouTube goes' : '') : 'Loading your footage sets this to match it'">
+                @for (r of fpsOptions(); track r) {
+                  <button class="btn small step" type="button" [class.btn-primary]="fps() === r" [attr.aria-pressed]="fps() === r"
+                          [attr.aria-label]="fpsLabel(r) + ' fps'" [disabled]="busy()" (click)="fps.set(r)">{{ fpsLabel(r) }}</button>
+                }
+                <span class="hint">fps</span>
+              </div>
+              @if (footageFps(); as src) {
+                @if (fps() !== outputFrameRate(src)) {
+                  <button class="link" type="button" (click)="fps.set(outputFrameRate(src))" [title]="'Your footage is ' + fpsLabel(src) + ' fps'">
+                    Match your footage ({{ fpsLabel(outputFrameRate(src)) }} fps)</button>
+                }
               }
-            }
-            @if (message()) { <p class="note" role="status">{{ message() }}</p> }
-            @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
-
-            @if (hasVideo()) {
-              <!-- Everything baked into one video, ready to upload: no editor needed. -->
-              <hr />
-              <div class="field">
-                <p class="field-label" id="finished-heading">Finished video</p>
-                <p class="hint">
-                  Your footage{{ audioIsVideo() && showPip() ? ', stick cam' : '' }}, {{ audioUrl() ? audioName() + "'s sound" : 'its sound' }}
-                  and the OSD in one .mp4, as in the preview: {{ clipText() }} at {{ resolutions()[resIndex()].label }}, {{ fps() }} fps.
-                  Set the range under the Flight footage slider.
-                </p>
-                <div class="label-row">
-                  <label class="check"><input type="checkbox" [ngModel]="fadeOut() > 0" (ngModelChange)="setFadeOut($event ? 1.5 : 0)"
-                         [disabled]="rendering()" /> Fade out at the end</label>
+              <div class="toggles" role="group" aria-label="Export">
+                <button class="btn btn-primary small" type="button" (click)="exportVideo()" [disabled]="busy() || rendering() || frameCount() === 0"
+                        [title]="overlayHover()"><app-icon name="layers" /> Overlay .mov</button>
+                @if (hasVideo()) {
+                  <button class="btn btn-primary small" type="button" (click)="renderFinished()"
+                          [disabled]="busy() || rendering() || renderEnd() <= renderStart()" [title]="finishedHover()"><app-icon name="film" /> Video .mp4</button>
+                }
+              </div>
+              @if (hasVideo()) {
+                <!-- The finished video's fade, on its own row under the render buttons. -->
+                <div class="toggles">
+                  <button class="btn small step" type="button" [class.btn-primary]="fadeOut() > 0" [attr.aria-pressed]="fadeOut() > 0" aria-label="Fade out"
+                          title="Fade out: the video's picture fades to black and its sound to silence at the end" [disabled]="rendering()"
+                          (click)="setFadeOut(fadeOut() > 0 ? 0 : 1.5)"><app-icon name="fade" /></button>
                   @if (fadeOut() > 0) {
-                    <label class="sr-only" for="fade-seconds">Fade length in seconds</label>
-                    <input id="fade-seconds" type="number" min="0.5" max="10" step="0.5" [ngModel]="fadeOut()" (ngModelChange)="setFadeOut(+$event)"
-                           [disabled]="rendering()" style="width: 4.5rem" />
-                    <span>s, picture to black and sound to silence</span>
+                    <span class="stats-time" title="How long the fade out takes">
+                      <label class="sr-only" for="fade-seconds">Fade length in seconds</label>
+                      <input id="fade-seconds" type="number" min="0.5" max="10" step="0.5" [ngModel]="fadeOut()" (ngModelChange)="setFadeOut(+$event)"
+                             [disabled]="rendering()" />
+                      <span>s</span>
+                    </span>
                   }
                 </div>
-                @if (renderStage()) { <p class="hint" role="status" aria-live="polite">{{ renderStage() }}</p> }
-                @if (rendering()) {
-                  <div class="progress">
-                    <!-- No value until the first frame: an indeterminate bar while the sound and first frames load. -->
+              }
+              @if (busy() || rendering()) {
+                <!-- One progress bar for whichever is running. The video's has no value until its first frame (sound and the
+                     first frames load first), so it shows as busy rather than stuck at zero. -->
+                <div class="progress" role="status" aria-live="polite">
+                  @if (busy()) {
+                    <progress [value]="done()" [max]="frameCount()"></progress>
+                    <span class="mono">Overlay: {{ done() }} / {{ frameCount() }}{{ eta() ? ', about ' + eta() + ' left' : '' }}</span>
+                  } @else {
                     <progress [attr.value]="renderTotal() ? renderDone() : null" [max]="renderTotal() || 1"></progress>
-                    @if (renderTotal()) {
-                      <span class="mono">{{ renderDone() }} / {{ renderTotal() }}{{ renderEta() ? ', about ' + renderEta() + ' left' : '' }}</span>
-                    }
-                  </div>
-                  <button class="btn" type="button" (click)="cancelRender()">Cancel</button>
-                } @else {
-                  <button class="btn btn-primary" type="button" (click)="renderFinished()" [disabled]="busy() || renderEnd() <= renderStart()">Render .mp4</button>
-                }
-                @if (renderMessage()) { <p class="note" role="status">{{ renderMessage() }}</p> }
-                @if (renderError()) { <p class="error" role="alert">{{ renderError() }}</p> }
-              </div>
-            }
+                    <span class="mono">{{ renderStage() }}{{ renderEta() ? ' About ' + renderEta() + ' left.' : '' }}</span>
+                  }
+                </div>
+                <button class="btn small" type="button" (click)="busy() ? cancel() : cancelRender()">Cancel</button>
+              } @else if (renderStage()) {
+                <p class="hint" role="status">{{ renderStage() }}</p>
+              }
+              @if (!toDisk && estimatedBytes() > 2e9) {
+                <p class="error">The overlay is a lot to hold in memory in this browser. Trim it, lower the resolution, or use Chrome or Edge.</p>
+              }
+              @if (message()) { <p class="note" role="status">{{ message() }}</p> }
+              @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+              @if (renderMessage()) { <p class="note" role="status">{{ renderMessage() }}</p> }
+              @if (renderError()) { <p class="error" role="alert">{{ renderError() }}</p> }
+            </div>
           </section>
         </div>
 
@@ -856,16 +882,26 @@ function saveColors(o: typeof DEFAULT_COLORS) {
   styles: [`
     /* Wider than the site's usual page so the preview can be big; never narrower than its container. */
     :host { display: block; width: max(100%, min(96rem, calc(100vw - 4rem))); margin-inline: calc((100% - max(100%, min(96rem, calc(100vw - 4rem)))) / 2); }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 20rem; gap: 1rem; align-items: start; margin: 1rem 0; }
-    @media (max-width: 60rem) { .layout { grid-template-columns: 1fr; } }
+    /* Premiere-style, in both formats: the component panel left of the preview and Options along the bottom; a narrow
+       window stacks everything. */
+    .layout { display: grid; grid-template: "inspector preview" auto "options options" auto / 19rem minmax(0, 1fr); gap: 1rem; align-items: start; margin: 1rem 0; }
+    .preview-panel { grid-area: preview; } .inspector { grid-area: inspector; } .options { grid-area: options; }
+    @media (max-width: 60rem) { .layout { grid-template: "preview" "inspector" "options" / 1fr; } }
+    /* Options: its sub-panels side by side, three across (one under the other on narrow windows), each the full height
+       of the row with its contents from the top. */
+    .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .options > h2 { grid-column: 1 / -1; margin: 0; }
+    .options > .panel { margin: 0; align-content: start; }
+    @media (max-width: 60rem) { .options { grid-template-columns: 1fr; } }
+    .inspector-head { display: flex; justify-content: space-between; align-items: baseline; }
+    .inspector-body { min-width: 0; }
     .panel h2 { margin-bottom: .75rem; }
     /* Checkerboard shows which parts are transparent. */
-    .stage { border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
+    .stage { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
              background: repeating-conic-gradient(#c9d1d9 0 25%, #eef2f6 0 50%) 0 0 / 24px 24px; }
     .stage.dark { background: linear-gradient(180deg, #4b6a88, #2b3a2b); }
     .preview-help { margin: .75rem 0 0; font-size: .88rem; line-height: 1.5; display: grid; gap: .5rem; }
     .preview-help p { margin: 0; }
-    .stage { position: relative; }
     /* Video and overlay share one 16:9 frame, so they stay lined up at any size, full screen included. */
     .frame { position: relative; aspect-ratio: 16 / 9; }
     .frame canvas { position: relative; z-index: 1; }
@@ -918,7 +954,6 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .clap-field select { width: auto; }
     .sound-profile { margin: 0; display: grid; gap: .25rem; }
     .sound-profile figcaption { display: flex; justify-content: space-between; gap: .75rem; font-size: .82rem; color: var(--muted); }
-    .sound-profile figcaption span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sound-profile svg { display: block; width: 100%; height: 64px; background: var(--raised); border: 1px solid var(--line);
                          border-radius: 6px; cursor: pointer; }
     .sound-profile .level { fill: var(--chart-area); stroke: var(--chart-line); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
@@ -932,59 +967,50 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .key { display: inline-block; width: 0; height: .9rem; border-left: 2px solid; }
     .key.clap { border-left-style: dashed; }
     .sync-buttons { display: flex; flex-wrap: nowrap; gap: .5rem; white-space: nowrap; }
-    canvas { display: block; width: 100%; height: auto; }
+    canvas { display: block; width: 100%; height: auto; touch-action: none; } /* dragging an element shouldn't scroll the page on touch screens */
     /* The footage and overlay sliders share one look so they read as a pair. */
     .scrub, .video-scrub { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; font-size: .92rem; }
-    .scrub input[type=range], .video-scrub input[type=range] { flex: 1 1 10rem; min-width: 0; accent-color: var(--accent); }
+    .scrub input[type=range], .video-scrub input[type=range] { flex: 1 1 10rem; min-width: 0; }
     .scrub .step, .video-scrub .step { padding: .2rem .55rem; line-height: 1; }
     .scrub .mono, .video-scrub .mono { min-width: 4.6rem; text-align: right; }
     .scrub-track { position: relative; flex: 1 1 10rem; min-width: 0; display: flex; }
     .scrub-track input[type=range] { width: 100%; }
     .window-bar { position: absolute; bottom: -3px; height: 4px; border-radius: 2px; background: var(--accent); opacity: .85; pointer-events: none; }
     .export-window { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; margin-top: .5rem; font-size: .92rem; }
-    canvas { touch-action: none; } /* dragging an element shouldn't scroll the page on touch screens */
-    .layout-edit { margin: 1rem 0 0; }
-    .layout-edit .hint { margin: 0 0 .5rem; }
-    .layout-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem 1rem; }
-    .layout-grid .field { margin: 0; }
-    .layout-grid label { font-weight: normal; font-size: .92rem; }
-    .layout-grid input[type=range] { accent-color: var(--accent); }
+    input[type=range] { accent-color: var(--accent); }
     .item-sizes { margin: .6rem 0 0; padding: .5rem 0 0; border: 0; border-top: 1px solid var(--line); }
     .item-sizes legend { font-weight: 600; font-size: .92rem; padding: 0; }
-    .stats-time { display: flex; align-items: center; gap: .5rem; margin: .1rem 0 .3rem 1.6rem; font-size: .92rem; }
-    .stats-time label { font-weight: normal; }
-    .stats-time input { width: 4.5rem; }
-    .stats-hint { margin: .1rem 0 .5rem 1.6rem; font-size: .85rem; line-height: 1.45; padding: .5rem .7rem; }
+    .toggles { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+    .stats-time { display: inline-flex; align-items: center; gap: .3rem; font-size: .88rem; }
+    .stats-time input { width: 3.8rem; }
     .layout-actions { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: .4rem; font-size: .92rem; }
     .check { display: flex; align-items: center; justify-content: flex-start; gap: .45rem; font-weight: normal; margin: .2rem 0; }
     /* The site-wide .field input rule makes inputs full width; checkboxes shouldn't be. */
     .check input { width: auto; margin: 0; }
     .colors { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: .2rem 0 .3rem; font-size: .92rem; }
-    .color { display: inline-flex; align-items: center; gap: .4rem; font-weight: normal; }
+    .color { display: inline-flex; align-items: center; gap: .4rem; }
     /* Colour wells: override the site-wide full-width input rule. */
     .color input, .label-row input[type=color] { width: 2.2rem; height: 1.6rem; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
     .color input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     fieldset { border: 0; padding: 0; margin: 0 0 1rem; }
     legend { font-weight: 600; margin-bottom: .2rem; }
-    .range { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
     .progress { display: grid; gap: .3rem; margin: .5rem 0; }
     progress { width: 100%; accent-color: var(--accent); }
     .note { color: var(--ok); margin: .6rem 0 0; }
     .field-label { font-weight: 600; }
-    .font-row, .source-row { margin: 0; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+    .source-row { margin: 0; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
     .labels { display: grid; gap: .4rem; }
     .label-row { display: flex; align-items: center; gap: .5rem; }
-    .label-row input[type=text], .label-row input[type=range] { flex: 1; min-width: 0; }
-    .labels .hint { margin: 0; }
+    .label-row input[type=text] { flex: 1; min-width: 0; }
     .footage-box.selected, .pip.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
     .grade { display: grid; grid-template-columns: auto 1fr 3.2rem; align-items: center; gap: .35rem .6rem; margin: .4rem 0 .1rem; font-size: .92rem; }
-    .grade input[type=range] { width: 100%; min-width: 0; accent-color: var(--accent); }
+    .grade input[type=range] { width: 100%; min-width: 0; }
     .grade .mono { text-align: right; font-size: .82rem; }
+    .sources .source-row { flex-wrap: nowrap; align-items: center; }
     .source-row .mono { font-size: .82rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .small { padding: .3rem .75rem; font-size: .88rem; justify-self: start; }
     .link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
     .howto ol { margin: 0; padding-left: 1.25rem; display: grid; gap: .35rem; }
-    .howto .hint { margin-top: .6rem; }
   `],
 })
 /**
@@ -1004,7 +1030,12 @@ export class OverlayExportComponent {
 
   private canvas = viewChild<ElementRef<HTMLCanvasElement>>('preview');
 
-  readonly fpsOptions = FPS;
+  /** The usual rates, plus whatever the footage or a pick added (29.97, 23.976...). */
+  fpsOptions = computed(() => [...new Set([...FPS, this.fps()])].sort((a, b) => a - b));
+  /** The loaded footage's measured frame rate; null until known. */
+  footageFps = signal<number | null>(null);
+  readonly fpsLabel = fpsLabel;
+  readonly outputFrameRate = outputFrameRate;
   readonly toDisk = canSaveToDisk();
   readonly clock = clock;
 
@@ -1027,7 +1058,7 @@ export class OverlayExportComponent {
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    showSticks: true, stickTrails: true, showSpeed: !this.vertical(), showBattery: true, showMap: !this.vertical(), showTimer: true, showRssi: !this.vertical(), altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
+    showSticks: true, stickTrails: true, showSpeed: !this.vertical(), showBattery: true, showMap: !this.vertical(), showRssi: !this.vertical(), altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
     ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), panelOpacity: this.vertical() ? 0 : 0.35, font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
   });
@@ -1342,11 +1373,44 @@ export class OverlayExportComponent {
     this.mediaSelected.set(null);
   }
 
+  /** The Show toggles: what each switches, its icon and hover text, and whether this log has the data for it. */
+  showToggles = computed(() => {
+    const d = this.data();
+    const list: { key: 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats'; icon: IconName; label: string; available: boolean }[] = [
+      { key: 'showSpeed', icon: 'gauge', label: 'Speed panel: speed, height and distance', available: !!d.track },
+      { key: 'showBattery', icon: 'battery', label: 'Battery panel, with the flight time', available: !!d.battery },
+      { key: 'showSticks', icon: 'sticks', label: 'Sticks', available: !!d.sticks },
+      { key: 'showMap', icon: 'map', label: 'Mini map', available: !!d.track },
+      { key: 'showRssi', icon: 'signal', label: 'RSSI panel: satellites, RSSI, distance and height', available: this.hasRssi() || !!d.track },
+      { key: 'showStats', icon: 'stats', label: 'End-of-flight stats screen', available: true },
+    ];
+    return list;
+  });
+
   hasTitle = computed(() => !!(this.opts().titleText + this.opts().titleAccentText).trim());
   hasCraft = computed(() => !!this.opts().craftText.trim());
-  /** Their settings show only while they're picked (on the preview, under Layout, or with their Edit/Add button). */
-  titleOpen = computed(() => this.selected() === 'title');
-  craftOpen = computed(() => this.selected() === 'craft');
+
+  // ---- the component panel: the picked video or OSD element, and everything about it ----
+  inspected = computed<ElementKey | 'footage' | 'cam' | null>(() => this.mediaSelected() ?? this.selected());
+  inspectedLabel = computed(() => {
+    const k = this.inspected();
+    return k === null ? 'Components' : k === 'footage' ? 'Flight footage' : k === 'cam' ? 'Stick cam' : this.labels[k];
+  });
+  /** What can be picked: the videos on screen, every OSD element drawn, and the title and craft name even while empty. */
+  inspectables = computed(() => {
+    const list: { key: ElementKey | 'footage' | 'cam'; label: string }[] = [];
+    if (this.hasFootage()) list.push({ key: 'footage', label: 'Flight footage' });
+    if (this.hasCam()) list.push({ key: 'cam', label: 'Stick cam' });
+    for (const p of this.placed()) if (p.key !== 'title' && p.key !== 'craft') list.push({ key: p.key, label: this.labels[p.key] });
+    list.push({ key: 'title', label: this.hasTitle() ? 'Title' : 'Add title' });
+    list.push({ key: 'craft', label: this.hasCraft() ? 'Craft name' : 'Add craft name' });
+    return list;
+  });
+
+  inspect(key: ElementKey | 'footage' | 'cam') {
+    if (key === 'footage' || key === 'cam') this.selectMedia(key);
+    else this.pickElement(key);
+  }
 
   setTrailIntensity(value: number) {
     this.set('stickTrailIntensity', value);
@@ -1477,6 +1541,13 @@ export class OverlayExportComponent {
     if (Number.isFinite(v)) this.statsSeconds.set(Math.min(30, Math.max(0.5, v)));
   }
 
+  /** The preview backdrop toggles, with their icons and names. */
+  readonly backdrops: { value: Backdrop; icon: IconName; label: string }[] = [
+    { value: 'checker', icon: 'checker', label: 'Checkerboard (shows transparency)' },
+    { value: 'sky', icon: 'sky', label: 'Sky' },
+    { value: 'video', icon: 'film', label: 'Your video (plays with the overlay)' },
+  ];
+
   setBackdrop(v: Backdrop) {
     this.stopVideo(); // the sound plays with whichever is driving the preview, so start again from paused
     this.backdrop.set(v);
@@ -1521,6 +1592,13 @@ export class OverlayExportComponent {
     this.backdropError.set('');
     this.setBackdrop('video');
     this.footageClap.set(null);
+    // Exports follow the footage's frame rate (60 for high-speed footage), so frames line up one to one.
+    this.footageFps.set(null);
+    footageFrameRate(file).then(rate => {
+      if (rate === null || this.footageFile !== file) return;
+      this.footageFps.set(rate);
+      this.fps.set(outputFrameRate(rate));
+    });
   }
 
   /** A sound track from a second recording: draws it, places it on the log from the arming it hears, and finds its claps. */
@@ -1818,8 +1896,8 @@ export class OverlayExportComponent {
   // ---- picking a video in the preview ----
   /** The video whose picture settings show in Options; only one thing (a video or an OSD element) is picked at a time. */
   mediaSelected = signal<'footage' | 'cam' | null>(null);
-  private hasFootage = computed(() => this.hasVideo());
-  private hasCam = computed(() => !!this.audioUrl() && this.audioIsVideo() && this.showPip());
+  hasFootage = computed(() => this.hasVideo());
+  hasCam = computed(() => !!this.audioUrl() && this.audioIsVideo() && this.showPip());
 
   /** Which video is under a point on the preview canvas, matching where the CSS puts them. */
   private mediaAt(x: number, y: number): 'footage' | 'cam' | null {
@@ -1857,6 +1935,19 @@ export class OverlayExportComponent {
     this.renderEnd.set(this.videoDuration());
   }
 
+  /** What the finished video holds, as hover text on its heading. */
+  finishedHover = computed(() =>
+    `Finished video (.mp4): your footage${this.audioIsVideo() && this.showPip() ? ', stick cam' : ''}, `
+    + `${this.audioUrl() ? `${this.audioName()}'s sound` : 'its sound'} and the OSD in one file, as in the preview. `
+    + `${this.clipText()[0].toUpperCase()}${this.clipText().slice(1)} at ${this.resolutions()[this.resIndex()].label}, ${fpsLabel(this.fps())} fps`
+    + `${this.fadeOut() > 0 ? `, fading out over ${this.fadeOut()} s` : ''}. Set its range with the Render slider under the preview.`);
+
+  /** What the overlay export makes, as hover text on its button. */
+  overlayHover = computed(() =>
+    `Transparent OSD overlay (.mov) for Premiere or After Effects: ${this.frameCount()} frames, ${clock(this.exportSeconds())} long`
+    + `${this.opts().showStats ? ' with the stats' : ''}, about ${this.sizeEstimate()}. Set its range with the Export marks under the preview.`
+    + (this.toDisk ? '' : ' This browser builds the file in memory first; Chrome or Edge writes straight to disk.'));
+
   /** Seconds the finished video fades to black and silence at its end; 0 for no fade. Remembered in this browser. */
   fadeOut = signal(readFadeOut());
 
@@ -1887,7 +1978,7 @@ export class OverlayExportComponent {
     }
     const { w, h } = this.resolutions()[this.resIndex()];
     const fps = this.fps();
-    const name = `${this.fileStem()}-video-${w}x${h}-${fps}fps.mp4`;
+    const name = `${this.fileStem()}-video-${w}x${h}-${fpsLabel(fps)}fps.mp4`;
 
     let target: RenderTarget | null = null;
     let fallbackNote = '';
@@ -2035,7 +2126,7 @@ export class OverlayExportComponent {
 
     const { w, h } = this.resolutions()[this.resIndex()];
     const fps = this.fps();
-    const name = `${this.fileStem()}-${w}x${h}-${fps}fps.mov`;
+    const name = `${this.fileStem()}-${w}x${h}-${fpsLabel(fps)}fps.mov`;
     let writer: MovWriter;
     try {
       writer = this.toDisk ? await diskMovWriter(name, { width: w, height: h, fps }) : memoryMovWriter(name, { width: w, height: h, fps });

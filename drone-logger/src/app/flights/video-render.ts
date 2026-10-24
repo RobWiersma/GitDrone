@@ -37,6 +37,37 @@ const SPLIT = 0.537;
 
 export class RenderCancelled extends Error {}
 
+/** The footage's frame rate, from its first couple of seconds of frames; null when it can't be read. */
+export async function footageFrameRate(file: File): Promise<number | null> {
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    const rate = track ? (await track.computePacketStats(120)).averagePacketRate : 0;
+    return Number.isFinite(rate) && rate > 0 ? rate : null;
+  } catch {
+    return null;
+  } finally {
+    input.dispose();
+  }
+}
+
+/** Standard rates a measured one snaps to, NTSC's 1000/1001 ones included. */
+const STANDARD_RATES = [24000 / 1001, 24, 25, 30000 / 1001, 30, 48, 50, 60000 / 1001, 60];
+
+/**
+ * The output rate for footage at `rate`: the same rate, snapped to the closest standard one within 2% (phones record
+ * a slightly variable ~29.86 that means 29.97), except that high-speed footage (100 fps and up, like the O4's 100 or
+ * 120) comes out at 60, which is as high as YouTube and most players go.
+ */
+export function outputFrameRate(rate: number): number {
+  if (rate >= 100) return 60;
+  const near = STANDARD_RATES.filter(r => Math.abs(r - rate) / r < 0.02).sort((a, b) => Math.abs(a - rate) - Math.abs(b - rate));
+  return near[0] ?? Math.round(rate * 100) / 100;
+}
+
+/** "29.97", "23.976", "60": a frame rate as people write it. */
+export const fpsLabel = (fps: number) => String(Number(fps.toFixed(3)));
+
 /**
  * Renders `plan`, writing to `target` (or into memory, returned as a Blob, when there is none). Calls `progress`
  * after each frame; set `control.cancelled` to stop early.

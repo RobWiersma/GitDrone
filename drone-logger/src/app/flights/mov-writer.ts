@@ -27,6 +27,12 @@ export const canSaveToDisk = () => typeof (window as SaveWindow).showSaveFilePic
 
 interface Track { width: number; height: number; fps: number }
 
+/**
+ * Ticks per frame. 1001 keeps whole rates exact (30 fps = 30030 ticks a second) and the NTSC ones too
+ * (29.97 = 30000/1001 fps = 30000 ticks), where a timescale of fps x 100 would not be a whole number.
+ */
+const FRAME_TICKS = 1001;
+
 /** Asks where to save, then streams frames to that file. Throws if the user cancels the picker. */
 export async function diskMovWriter(fileName: string, track: Track): Promise<MovWriter> {
   const handle = await (window as SaveWindow).showSaveFilePicker!({
@@ -88,7 +94,7 @@ class Index {
   private readonly mdatStart: number;
 
   constructor(private track: Track) {
-    this.timescale = track.fps * 100;
+    this.timescale = Math.round(track.fps * FRAME_TICKS);
     const ftyp = 20;                 // size + 'ftyp' + major + minor + one compatible brand
     this.mdatStart = ftyp;
     this.mdatSizeOffset = ftyp + 8;  // after the 32-bit size (=1) and 'mdat'
@@ -116,7 +122,7 @@ class Index {
   moov(): Uint8Array<ArrayBuffer> {
     const { width, height } = this.track;
     const n = this.sizes.length;
-    const duration = n * 100;
+    const duration = n * FRAME_TICKS;
     const matrix = concat(u32(0x10000), u32(0), u32(0), u32(0), u32(0x10000), u32(0), u32(0), u32(0), u32(0x40000000));
 
     const mvhd = atom('mvhd', u32(0), u32(0), u32(0), u32(this.timescale), u32(duration),
@@ -141,7 +147,7 @@ class Index {
       u16(32),                        // depth 32 = has alpha
       u16(0xffff));                   // no colour table
     const stsd = atom('stsd', u32(0), u32(1), pngEntry);
-    const stts = atom('stts', u32(0), u32(1), u32(n), u32(100));
+    const stts = atom('stts', u32(0), u32(1), u32(n), u32(FRAME_TICKS));
     const stsc = atom('stsc', u32(0), u32(1), u32(1), u32(1), u32(1)); // one frame per chunk
     const stszBody = new Uint8Array(12 + n * 4);
     const sz = new DataView(stszBody.buffer);
