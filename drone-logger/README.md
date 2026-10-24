@@ -1,69 +1,58 @@
-# DroneLogger
+# GitDrone frontend (`drone-logger`)
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.2.1.
+The Angular 22 app behind GitDrone: the hangar, flight pages, tune history and the LovelyOSD overlay editor. The
+[main README](../README.md) covers what GitDrone does; this one is about working on the frontend.
 
-## Development server
+## Running it
 
-To start a local development server, run:
-
-```bash
-ng serve
-```
-
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+You need [Node.js](https://nodejs.org/) 24, and the API running for anything that reads a log or the database
+(see the main README's [Getting started](../README.md#getting-started)).
 
 ```bash
-ng generate component component-name
+npm install
+npx ng serve
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+Open http://localhost:4200. The dev server reloads on every change and proxies `/api` and `/uploads` to the API on
+https://localhost:5001 (`proxy.conf.json`).
 
 ```bash
-ng generate --help
+npx ng build   # production build into dist/ (CI copies it into the API's wwwroot)
+npx ng test    # unit tests with Vitest
 ```
 
-## Building
+The build keeps each component's styles under a budget (`angular.json`: a warning at 8 kB, an error at 10 kB). The
+overlay editor sits close to it, so new styles there should reuse the existing classes where they can.
 
-To build the project run:
+## Where things are
 
-```bash
-ng build
+```text
+src/app/
+├── aircraft/      Hangar: list, detail, form, photo
+├── flights/       Flight pages and everything video:
+│   ├── flight-detail, flight-view, flight-map, flight-profile, flight-playback   Stats, map, charts, stick replay
+│   ├── flight-upload, fc-usb, fc-usb.component     Uploading logs, and getting them off the quad over USB
+│   ├── overlay-export.component    The overlay editor (preview, component panel, Options, both exports)
+│   ├── overlay-renderer            Draws one HUD frame on a canvas (panels, sticks, map, stats, title, craft name)
+│   ├── mov-writer                  The transparent overlay: PNG frames in a QuickTime .mov
+│   ├── video-render                The finished .mp4: decode, composite and encode with Mediabunny (WebCodecs)
+│   ├── range-window.component      The two-handle slider for the render range
+│   ├── clap                        Sound analysis: arming, launch, claps and motor-sound sync
+│   └── glyph-font, stick-math      Betaflight OSD fonts and stick modes
+├── osd/           LovelyOSD: the no-account overlay tool (/osd)
+├── tunes/         Import, timeline, compare
+├── home/ · stats/ Front page and visitor stats
+└── icon.component.ts   The small outline icons used across the editor (hover text lives on the buttons)
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+## Browser features it relies on
 
-## Running unit tests
+| Feature | Used for | Where it works |
+|---|---|---|
+| Canvas 2D | Drawing every overlay frame | Everywhere |
+| [WebCodecs](https://developer.mozilla.org/docs/Web/API/WebCodecs_API) (via [Mediabunny](https://mediabunny.dev/)) | Rendering the finished `.mp4` | Chrome, Edge, recent Safari and Firefox |
+| [File System Access](https://developer.mozilla.org/docs/Web/API/File_System_API) | Writing big exports straight to disk; opening the flight controller's drive | Chrome and Edge; others download from memory |
+| [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API) | Rebooting the flight controller into mass storage | Chrome and Edge |
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
-
-## Flights (blackbox logs)
-
-Upload a Betaflight `.bbl`/`.bfl` file on the aircraft page. The API decodes it itself
-(`Services/BlackboxDecoder.cs`, ported from betaflight/blackbox-log-viewer), creates one flight per
-armed session, and links each to the newest tune saved before that flight (or the tune you pick).
-Craft name and device UID from the log header are not stored. The original file is kept in
-`App_Data/logs` so it can be re-parsed later, for example to add GPS tracks once logs include them
-(enable the GPS field in the Configurator's Blackbox tab).
-
+Nothing a visitor loads is uploaded except a log they decode (read in memory by the API and forgotten in LovelyOSD).
+Footage, sound tracks and fonts stay on their computer.

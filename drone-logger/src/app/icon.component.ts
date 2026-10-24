@@ -2,7 +2,7 @@ import { Component, input } from '@angular/core';
 
 export type IconName =
   | 'play' | 'pause' | 'volume' | 'mute' | 'prev' | 'next' | 'close' | 'reset' | 'sliders' | 'folder' | 'trash'
-  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait';
+  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait' | 'title' | 'craft';
 
 /**
  * A small outline icon in the app's style (24x24, current text colour). Decorative: the button around it carries the
@@ -40,6 +40,8 @@ export type IconName =
         @case ('font') { <path d="M5 20l7-16 7 16M8.5 13h7" /> }
         @case ('landscape') { <rect x="2" y="6" width="20" height="12" rx="2" /> }
         @case ('portrait') { <rect x="7" y="2" width="10" height="20" rx="2" /> }
+        @case ('title') { <path d="M5 6h14M12 6v13" /> }
+        @case ('craft') { <path d="M3 12V4h8l10 10-8 8z" /><circle fill="currentColor" stroke="none" cx="7.5" cy="8.5" r="1.5" /> }
         @case ('stats') { <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /> }
       }
     </svg>

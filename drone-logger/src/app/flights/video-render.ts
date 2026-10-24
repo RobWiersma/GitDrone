@@ -21,7 +21,7 @@ export interface RenderPlan {
   vertical: boolean;
   /** The footage and the part of it (seconds, footage time) to render. */
   footage: { file: File; start: number; end: number; picture: Picture; /** Landscape 4:3: show it whole (pillarboxed). */ fit: boolean };
-  /** A stick cam whose picture is shown; `offset` is where it starts in footage time. */
+  /** A stick cam whose picture fills the bottom of a vertical frame; `offset` is where it starts in footage time. */
   cam: { file: File; offset: number; picture: Picture } | null;
   /** Where the sound comes from: the sound track (at its offset in footage time), or else the footage's own. */
   sound: { file: File; offset: number } | null;
@@ -142,15 +142,10 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       const showHud = logT >= 0 && logT <= plan.overlay.logEnd;
       if (showHud) plan.overlay.renderer.draw(hudCtx, logT, plan.overlay.opts);
 
-      if (plan.vertical) {
-        if (plan.cam) drawCam(ctx, cam, plan, W, H);
-        drawFootage(ctx, foot, plan, W, H);
-        if (showHud) ctx.drawImage(hud, 0, 0);
-      } else {
-        drawFootage(ctx, foot, plan, W, H);
-        if (showHud) ctx.drawImage(hud, 0, 0);
-        if (plan.cam) drawCam(ctx, cam, plan, W, H); // the corner picture sits over the HUD, as in the preview
-      }
+      // Back to front: the stick cam (vertical only), the footage over it, then the HUD.
+      if (plan.cam) drawCam(ctx, cam, plan, W, H);
+      drawFootage(ctx, foot, plan, W, H);
+      if (showHud) ctx.drawImage(hud, 0, 0);
       // Fade to black over the last few seconds: everything, OSD included, ending on a fully black frame.
       const fade = fadeLevel(i / fps, (total - 1) / fps, plan.fadeOut);
       if (fade < 1) {
@@ -188,28 +183,10 @@ function drawFootage(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null,
   draw(ctx, frame.canvas, box, !plan.vertical && plan.footage.fit ? 'contain' : 'cover', p, 0, 0);
 }
 
-/** The stick cam: the bottom part in vertical, the bordered corner picture in landscape. Always shown whole. */
+/** The stick cam: the bottom part of the vertical split screen, shown whole. */
 function drawCam(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null, plan: RenderPlan, W: number, H: number) {
   const p = plan.cam!.picture;
-  if (plan.vertical) {
-    if (frame) draw(ctx, frame.canvas, { x: 0, y: SPLIT * H, w: W, h: (1 - SPLIT) * H }, 'contain', p, p.panX ?? 0, p.panY ?? 0);
-    return;
-  }
-  // .pip: right 2%, bottom 3%, 26% wide, 16:9, rounded, clipped, with a light border.
-  const w = 0.26 * W, h = (w * 9) / 16, box = { x: 0.98 * W - w, y: 0.97 * H - h, w, h }, r = 0.0035 * W;
-  ctx.save();
-  ctx.beginPath();
-  ctx.roundRect(box.x, box.y, box.w, box.h, r);
-  ctx.fillStyle = '#000';
-  ctx.fill();
-  ctx.clip();
-  if (frame) draw(ctx, frame.canvas, box, 'contain', p, p.panX ?? 0, p.panY ?? 0);
-  ctx.restore();
-  ctx.lineWidth = Math.max(2, 0.0022 * W);
-  ctx.strokeStyle = 'rgba(255,255,255,.85)';
-  ctx.beginPath();
-  ctx.roundRect(box.x, box.y, box.w, box.h, r);
-  ctx.stroke();
+  if (frame) draw(ctx, frame.canvas, { x: 0, y: SPLIT * H, w: W, h: (1 - SPLIT) * H }, 'contain', p, p.panX ?? 0, p.panY ?? 0);
 }
 
 /**

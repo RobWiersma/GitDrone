@@ -90,6 +90,9 @@ export interface OverlayOptions {
    * A channel-style title in two colours ("BRIDGE" + "BOI") on an optional background box, and the craft's name.
    * Each shows only while it has text. Drawn in a bold display font, not the OSD font.
    */
+  /** Whether the title and craft name are drawn (each also needs its text). */
+  showTitle: boolean;
+  showCraft: boolean;
   titleText: string;
   titleColor: string;
   titleAccentText: string;
@@ -293,8 +296,8 @@ export class OverlayRenderer {
     // Title and craft name. Landscape: stacked in the top-left corner. Vertical, as on a real Short: the title boxed in
     // the top-right corner, and the craft name at the top-left of the stick cam half, just under the split.
     const title = (o.titleText ?? '') + (o.titleAccentText ?? '');
-    const titleW = title.trim() ? displayWidth(title, TITLE_SIZE) + 2 * TITLE_PAD_X : 0;
-    const craftW = o.craftText?.trim() ? displayWidth(o.craftText, CRAFT_SIZE) + 2 * CRAFT_STROKE : 0;
+    const titleW = o.showTitle && title.trim() ? displayWidth(title, TITLE_SIZE) + 2 * TITLE_PAD_X : 0;
+    const craftW = o.showCraft && o.craftText?.trim() ? displayWidth(o.craftText, CRAFT_SIZE) + 2 * CRAFT_STROKE : 0;
     if (vertical) {
       const ts = 1.15; // a touch bigger than the measured Short, set by eye
       add('title', titleW > 0, titleW, TITLE_H, Math.min(W - titleW * u * ts, 0.8 * W - (titleW * u * ts) / 2), 0.039 * H - (TITLE_H * u * ts) / 2, ts);

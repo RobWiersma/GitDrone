@@ -16,14 +16,15 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
           <p class="eyebrow">For FPV pilots</p>
           <h1 id="hero-heading">Your flights, your tunes, and an OSD overlay for every video</h1>
           <p class="lede">
-            GitDrone reads Betaflight blackbox logs and turns them into maps, charts and stick replays, keeps your tune history,
-            and makes a transparent OSD overlay for your footage in your goggles' own font.
+            GitDrone reads Betaflight blackbox logs, straight off the quad over USB, and turns them into maps, charts and stick
+            replays, keeps your tune history, and puts your OSD on your footage in your goggles' own font: as a finished video,
+            YouTube Shorts included, or a transparent overlay for your editor.
           </p>
           <div class="cta">
-            <a class="btn btn-primary" routerLink="/osd">Make an OSD overlay</a>
+            <a class="btn btn-primary" routerLink="/osd">Make a video</a>
             <a class="btn" routerLink="/flights">Browse flights</a>
           </div>
-          <p class="hint">LovelyOSD is free and needs no account.</p>
+          <p class="hint">LovelyOSD is free, needs no account, and renders in your browser.</p>
         </div>
 
         <figure class="reel">
@@ -61,6 +62,14 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
         <h2 id="features-heading" class="sr-only">What you can do</h2>
         <ul class="features">
           <li class="panel">
+            <h3><a routerLink="/osd">Finished videos and Shorts</a></h3>
+            <p>
+              Your footage, a stick cam, the sound and the OSD in one ready-to-upload <strong>.mp4</strong>, rendered in seconds in
+              your browser. Landscape for YouTube, or vertical for Shorts, Reels and TikTok with your FPV view on top and the
+              stick cam below, plus a title and your craft name.
+            </p>
+          </li>
+          <li class="panel">
             <h3><a routerLink="/osd">LovelyOSD overlays</a></h3>
             <p>
               Drop in a blackbox log and export a transparent <strong>.mov</strong> for Premiere or After Effects: speed, battery,
@@ -69,9 +78,16 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
             </p>
           </li>
           <li class="panel">
+            <h3><a routerLink="/osd">Logs straight off the quad</a></h3>
+            <p>
+              Plug the flight controller in over USB and GitDrone puts it in mass storage mode, opens its drive and loads the
+              newest log. No Configurator, no copying files (Chrome or Edge).
+            </p>
+          </li>
+          <li class="panel">
             <h3><a routerLink="/flights">Flight analysis</a></h3>
             <p>
-              Every flight gets a map coloured by speed, height, speed, battery and RSSI charts, a stick replay, and the numbers
+              Every flight gets a map coloured by speed; height, speed, battery and RSSI charts; a stick replay; and the numbers
               that matter: top speed, lowest cell, mAh used, peak power.
             </p>
           </li>
@@ -90,12 +106,15 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
       </section>
 
       <section class="panel steps" aria-labelledby="steps-heading">
-        <h2 id="steps-heading">An overlay in three steps</h2>
+        <h2 id="steps-heading">A video in three steps</h2>
         <ol>
-          <li><strong>Load a log.</strong> Any Betaflight <code>.bbl</code> or <code>.bfl</code> file from your flight controller or SD card.</li>
-          <li><strong>Make it yours.</strong> Load your goggles' <code>font_bf.bin</code>, move things around and pick colours, with your own
-            flight video playing behind it, synced to your takeoff.</li>
-          <li><strong>Export.</strong> A lossless video with transparency. Put it on a track above your footage, at the time the page gives you.</li>
+          <li><strong>Load a log.</strong> Plug your quad in over USB to grab the newest one, or pick any Betaflight <code>.bbl</code>
+            or <code>.bfl</code> file from your flight controller or SD card.</li>
+          <li><strong>Make it yours.</strong> Add your footage and a phone or stick cam recording, synced to your takeoff from the motor
+            sound, the arming beep or a clap. Load your goggles' <code>font_bf.bin</code>, pick 16:9 or a vertical Short, and click
+            anything to move it, resize it or change its colours.</li>
+          <li><strong>Export.</strong> A finished <code>.mp4</code> ready to upload, or a lossless transparent <code>.mov</code> to put
+            above your footage in your editor.</li>
         </ol>
         <a class="btn btn-primary" routerLink="/osd">Try LovelyOSD</a>
       </section>
@@ -104,8 +123,8 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
         <h2 id="promises-heading">Free, private, open source</h2>
         <ul>
           <li><strong>Free, no account.</strong> LovelyOSD works without signing up.</li>
-          <li><strong>Nothing kept.</strong> A log you open in LovelyOSD is read and forgotten, and the video is rendered in your browser.</li>
-          <li><strong>Your font stays yours.</strong> OSD fonts load from your computer and are never uploaded.</li>
+          <li><strong>Nothing kept.</strong> A log you open in LovelyOSD is read and forgotten, and every video is rendered in your browser.</li>
+          <li><strong>Your files stay yours.</strong> Footage, sound and OSD fonts play from your computer and are never uploaded.</li>
           <li><strong>No tracking cookies.</strong> Visits are counted with a hash that changes daily. No IP addresses are stored.</li>
           <li>
             <strong>Open source.</strong> GPL-3.0, built on Betaflight and Blackbox Explorer.
@@ -168,7 +187,7 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
     .dots button.on::after { background: #fff; width: 1rem; border-radius: 999px; }
     .pause:focus-visible, .dots button:focus-visible { outline: 2px solid #9be564; outline-offset: 2px; border-radius: 999px; }
 
-    .features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
+    .features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; }
     .features h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
     .features h3 a { color: inherit; text-decoration: none; }
     .features h3 a:hover { color: var(--accent); }

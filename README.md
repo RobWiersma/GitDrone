@@ -6,8 +6,9 @@
 
 **Your flights, your tunes, and an OSD overlay for every video.**
 
-GitDrone reads Betaflight blackbox logs and turns them into maps, charts and stick replays, keeps your tune
-history, and makes a transparent OSD overlay for your FPV footage in your goggles' own font.
+GitDrone reads Betaflight blackbox logs (straight off the quad over USB) and turns them into maps, charts and stick
+replays, keeps your tune history, makes a transparent OSD overlay for your FPV footage in your goggles' own font, and
+renders the finished video, YouTube Shorts included, right in your browser.
 
 [![Deploy to Azure](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml/badge.svg)](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
@@ -20,6 +21,7 @@ history, and makes a transparent OSD overlay for your FPV footage in your goggle
 [Try LovelyOSD](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/osd) ·
 [Features](#features) ·
 [Getting started](#getting-started) ·
+[Shorts](#vertical-video-shorts-reels-tiktok) ·
 [How it works](#comparing-tunes)
 
 <img src="drone-logger/public/home/osd-hillside.jpg" alt="FPV view over a sunny hillside and bay, with the LovelyOSD overlay showing speed, battery per cell, the mini map and both sticks" width="860">
@@ -40,8 +42,27 @@ draw it all in your goggles' `font_bf.bin`, and preview it full screen, playing 
 synced to your takeoff automatically from the motor sound, the arming beep or a clap.
 Free, no account, and nothing is uploaded: the video is rendered in your browser.
 
+### 📱 Finished videos and Shorts
+
+Skip the editor: GitDrone renders the finished `.mp4` itself, with your footage, a stick cam, the sound and the OSD baked
+in, in seconds thanks to your GPU's video encoder. Make it **landscape 16:9** for YouTube or **vertical 9:16** for Shorts,
+Reels and TikTok, a split screen with your FPV footage on top, the stick cam below, big sticks and the battery over it,
+and the bottom kept clear of the Shorts buttons. Add a **title** in two colours and your **craft name** in Impact with an
+outline, grade and zoom both videos, pick the part to render, and fade out at the end. The frame rate follows your
+footage (100 or 120 fps footage comes out at 60).
+
 <p align="center">
-  <img src="docs/screenshots/overlay.png" alt="The video overlay editor: a preview with speed, battery, stick and mini map panels over a sky backdrop, layout controls below it and export options on the right" width="860">
+  <img src="docs/screenshots/shorts.png" alt="The editor in vertical 9:16: the Title component panel on the left with its text, colours, outline, position and size; a tall preview with the O4 footage on top, the stick cam below, big sticks and the battery over it, and the title and craft name; the sound track lined up on arming underneath; and Options with Sources, Show and Output, then the Export row" width="860">
+</p>
+
+### 🔌 Logs straight off the quad
+
+Plug the flight controller in over USB, press **Connect FC over USB** and GitDrone reboots it into mass storage mode,
+the same as the Configurator's button, then opens its drive and loads the newest log. No Configurator, no copying files
+(Chrome or Edge).
+
+<p align="center">
+  <img src="docs/screenshots/overlay.png" alt="The overlay editor: the Sticks component panel on the left with position, stick and colour settings; a preview of real FPV footage with the title, craft name, speed, battery, sticks and mini map drawn in a Betaflight OSD font; footage, render, overlay and export sliders under it; and Options along the bottom in three boxes, Sources, Show and Output, with the Export row and its Overlay .mov and Video .mp4 buttons under them" width="860">
 </p>
 
 <table>
@@ -82,7 +103,7 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 ### 🏠 And a front page to show it off
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="The GitDrone home page: headline, a footage carousel with the overlay, four feature cards, an overlay-in-three-steps section and the latest flights with map thumbnails" width="860">
+  <img src="docs/screenshots/home.png" alt="The GitDrone home page: headline, a footage carousel with the overlay, six feature cards, a video-in-three-steps section and the latest flights with map thumbnails" width="860">
 </p>
 
 ## Tech stack
@@ -92,7 +113,8 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 | Frontend | [Angular 22](https://angular.dev/) (standalone components, signals), TypeScript, [Leaflet](https://leafletjs.com/) + OpenStreetMap, Canvas 2D for the overlay renderer |
 | Backend | ASP.NET Core minimal APIs on .NET 10, Entity Framework Core with SQLite |
 | Log decoding | `Services/BlackboxDecoder.cs`, a C# port of Betaflight's Blackbox Explorer decoder |
-| Video | PNG frames in a QuickTime `.mov` written in the browser (`flights/mov-writer.ts`), alpha kept |
+| Video | Overlay: PNG frames in a QuickTime `.mov` written in the browser (`flights/mov-writer.ts`), alpha kept. Finished video: H.264/AAC `.mp4` decoded, composited and encoded in the browser with WebCodecs via [Mediabunny](https://mediabunny.dev/) (`flights/video-render.ts`) |
+| USB | Web Serial (MSP) to reboot the flight controller into mass storage, File System Access to read its drive (`flights/fc-usb.ts`) |
 | Hosting | One free Linux Azure App Service (F1), deployed by GitHub Actions on every push to `master` |
 | Auth | App Service Authentication (Microsoft), owner-only writes |
 
@@ -129,7 +151,9 @@ GitDrone/
 │   ├── public/                   Icons and home page footage stills
 │   └── src/app/
 │       ├── aircraft/             Hangar: list, detail, form
-│       ├── flights/              Flight pages, map, charts, playback, overlay renderer and export
+│       ├── flights/              Flight pages, map, charts, playback, overlay editor and export, finished-video
+│       │                         render, logs over USB
+│       ├── icon.component.ts     The small outline icons used across the editor
 │       ├── osd/                  LovelyOSD (no-account overlay tool)
 │       ├── tunes/                Import, timeline, compare
 │       └── home/ · stats/        Front page and visitor stats
@@ -206,7 +230,11 @@ category (PIDs, filters, rates, motors, ...). "Newly set" and "back to default" 
 
 ## Flights (blackbox logs)
 
-Upload a Betaflight `.bbl`/`.bfl` file on the aircraft page. The API decodes it itself
+Upload a Betaflight `.bbl`/`.bfl` file on the aircraft page, or get it straight off the quad: plug the flight controller
+in over USB (no battery needed), press **Connect FC over USB** and then **Open FC drive**. In Chrome and Edge, GitDrone
+sends the flight controller the same MSP reboot-to-mass-storage command as the Configurator's "Activate Mass Storage
+Device Mode" button (`flights/fc-usb.ts`, Web Serial), then lists the logs on the drive it becomes and picks the newest.
+LovelyOSD has the same buttons. Eject the drive and unplug the quad afterwards to put it back to normal. The API decodes it itself
 (`Services/BlackboxDecoder.cs`, ported from betaflight/blackbox-log-viewer), creates one flight per
 armed session, and links each to the newest tune saved before that flight (or the tune you pick).
 Craft name and device UID from the log header are not stored. The original file is kept in
@@ -228,22 +256,32 @@ Each flight page has **Export video overlay** (`/flights/:id/overlay`), and Love
 transparent HUD video to put on a track above your footage in Premiere Pro or After Effects. It shows:
 
 - a **speed panel**: speed, G-force, current and power;
-- a **battery panel**: per-cell and pack voltage, flight time and mAh used;
+- a **battery panel**: per-cell and pack voltage, flight time (always shown) and mAh used;
 - a **mini map** with an **RSSI panel** under it: satellites, RSSI, distance from home and height (GPS or barometer);
 - both **sticks** in Blackbox Explorer style (modes 1–4) with motion trails;
-- a Betaflight-style **stats screen** at the end (a 0.1 s blank, then TOTAL ARM, MAX SPEED, MIN BATTERY, ...).
+- a Betaflight-style **stats screen** at the end (a 0.1 s blank, then TOTAL ARM, MAX SPEED, MIN BATTERY, ...);
+- a **title** in two colours (your channel name, say) and your **craft name**, in Impact with an outer stroke like a
+  Premiere title, or no box at all. They start on in vertical and off in 16:9; their toggles are under **Show**.
 
-It can draw everything with your goggles' Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format),
-including Betaflight's own icons.
+It can draw the HUD with your goggles' Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format),
+including Betaflight's own icons; the title and craft name keep their own display font.
 
-**Layout.** Drag any element on the preview to move it, and set each one's size (50–200%) under Layout; the same
-controls also move elements from the keyboard. The timer, RSSI, speed and battery panels also let you size each reading
-inside them (speed, G-force, satellites, pack voltage, mAh, ...), and the panel grows or shrinks to fit. Positions are stored as fractions of the frame, so a layout looks the
-same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.
+**The editor.** It's laid out like Premiere: a **component panel** on the left of the preview and **Options** along the
+bottom. Click anything in the preview (an OSD element, the title, the footage or the stick cam) and the panel shows
+everything about it, grouped: text and colours, position and size (50–300%), the size of each reading inside a panel
+(speed, G-force, satellites, pack voltage, mAh, ...), stick mode, trails and colours, or a video's picture and framing.
+With nothing picked, the panel lists every component to choose from, so it all works from the keyboard too. Options holds
+the rest in three boxes, **Sources** (the backdrop, footage, sound track and OSD font), **Show** (one icon toggle per HUD
+element, the title and craft name, the stats length and the panel background) and **Output** (format, resolution and
+frame rate), with a full-width **Export** row under them for the two render buttons.
+Small buttons are icons; hover any of them for what it does. Positions are stored as fractions of the frame, so a layout
+looks the same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.
 
-**Preview over your own video.** Pick **Play it over your video** under the preview to play your flight footage
-behind the overlay, synced live (the file plays from your computer; nothing is uploaded). To line them up, move the
-**Flight footage** slider (◀ ▶ step single frames) to the moment you leave the ground and press **Takeoff is here**:
+**Preview over your own video.** Load your flight footage under **Sources** to play it behind the overlay, synced live
+(the file plays from your computer; nothing is uploaded). Its brightness, contrast, saturation and zoom are in the
+component panel when you click it (they apply to the finished video too); 4:3 footage shows whole in the 16:9 frame. To
+line them up, move the **Flight footage** slider (its arrow buttons step single frames) to the moment you leave the
+ground and press **Takeoff is here**:
 GitDrone finds takeoff in the log as the first throttle punch over 20%, or the first GPS movement without stick data.
 **Arming is here** does the same on the arming moment, and **Log starts at** holds the result, so you can type it too.
 The overlay is hidden before the log starts, like in your editor. H.264 MP4s play everywhere; H.265 only in some
@@ -251,8 +289,10 @@ browsers. If the footage has its own sound (an onboard camera hears its motors),
 starts at for you: it slides the footage's loudness (high-passed at 800 Hz, on a log scale) along the throttle trace and
 keeps the best correlation, and only applies it when the match clearly beats every other position.
 
-**A sound track from another recording.** **Add a sound track** plays a second file's sound (a phone on the ground,
-say) instead of the footage's own. It's its own track, placed on the log just like the footage, with its own
+**A sound track from another recording.** A sound track under **Sources** plays a second file's sound (a phone on the
+ground, or a stick cam) instead of the footage's own. In vertical, if it's a video, its picture fills the bottom half of
+the split screen (toggle it under **Show**), with its own brightness, contrast, saturation, zoom and pan; in 16:9 it
+plays just its sound, so the footage keeps the whole frame. It's its own track, placed on the log just like the footage, with its own
 **Log starts at**, so moving the footage never moves the sound. Its loudness is drawn with what was heard in it marked
 (hover to read times), and the **Sound track** slider (or a click on the graph) moves only the sound, to find a moment in
 it. Ways to place it (`flights/clap.ts`):
@@ -284,6 +324,39 @@ live ETA while it works.
 In Premiere: import the `.mov` and put it on a track above the footage. If you synced it to your video in the
 preview, the page tells you where the clip starts in your footage; otherwise slide it until it matches your takeoff.
 If it shows black instead of transparent, set Interpret Footage → Alpha Channel to Straight.
+
+**Part of the flight.** The mark-in and mark-out buttons on the **Export** row under the preview set where the overlay
+starts and ends, at the preview's current moment; a bar under the OSD overlay slider shows the part that gets exported,
+and the stats screen plays right after its end.
+
+## Vertical video (Shorts, Reels, TikTok)
+
+**Output → Format** switches between landscape 16:9 and vertical 9:16 (1080×1920, 1440×2560 or 2160×3840). Vertical is a
+split screen, measured off a real Short: your flight footage fills the top 53.7%, a stick cam the rest, and the OSD
+sits over the stick cam with big sticks (210%) and the battery (200%) under them, the title boxed top right and the
+craft name just under the split. It starts without the speed panel, mini map, RSSI panel and panel backgrounds, which
+don't fit the narrow frame (each can be turned back on), and it keeps its own layout, so moving things in vertical never
+touches your landscape one. The footage is layered over the stick cam, so zooming or panning one into the other's half
+overlaps it with the footage in front.
+
+## Finished video
+
+**Export → Video .mp4** renders the whole thing, ready to upload, with no editor: your footage, the stick cam, the sound
+(the sound track's, or the footage's own) and the OSD, laid out, graded and synced exactly as the preview shows them,
+in the format, resolution and frame rate set under Output (`flights/video-render.ts`).
+
+- **Range.** The **Render** slider under the Flight footage slider has two handles: drag them to the start and end
+  (the preview jumps to that frame while you drag), or leave it on the whole clip.
+- **Fade out.** On by default: the picture fades to black and the sound to silence over the last 1.5 s (set the length,
+  or turn it off).
+- **Frame rate.** Loading the footage sets Output's frame rate to match it, snapped to the nearest standard rate
+  (a phone's 29.86 becomes 29.97). High-speed footage, 100 fps and up like the O4's, comes out at 60, as high as YouTube
+  goes. The overlay `.mov` uses the same rate.
+- **How it renders.** Everything happens in the browser with WebCodecs via [Mediabunny](https://mediabunny.dev/): it
+  reads only the part of each file it needs (a 1.8 GB O4 clip included), decodes the frames, draws each one like the
+  preview, and encodes H.264 video and AAC sound on your GPU, so a Short renders in seconds. In Chrome and Edge the file
+  streams straight to disk; if Chrome won't write where you picked, it lands in your Downloads folder instead. A status
+  line and progress bar show each step, and Cancel stops it cleanly.
 
 ## LovelyOSD Overlay
 
@@ -346,3 +419,5 @@ GitDrone stands on the open-source FPV world:
   loaded from your own computer and never uploaded or bundled here.
 - **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause) and **[OpenStreetMap](https://www.openstreetmap.org/copyright)**
   contributors (ODbL) for the flight maps.
+- **[Mediabunny](https://mediabunny.dev/)** (MPL-2.0): reading, decoding and encoding video in the browser for the
+  finished `.mp4`.

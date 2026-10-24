@@ -38,7 +38,7 @@ function readFadeOut(): number {
   return 1.5;
 }
 
-type SaveFilePicker =(o: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) =>
+type SaveFilePicker = (o: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) =>
   Promise<{ createWritable(): Promise<WritableStream> }>;
 
 /** Where the preview's footage and stick cam sliders start, and what Reset goes back to (percent; pan in % of the box). */
@@ -128,6 +128,8 @@ function saveItemScales(scales: ItemScales) {
 }
 
 type Backdrop = 'checker' | 'sky' | 'video';
+/** The Show toggles' switches. */
+type ShowKey = 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats' | 'showTitle' | 'showCraft';
 const BACKDROP_KEY = 'gitdrone-overlay-backdrop';
 
 function readBackdrop(): Backdrop {
@@ -215,9 +217,9 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               }
               @if (audioUrl()) {
                 @if (audioIsVideo()) {
-                  <!-- A stick cam (or any second video): its sound plays, and its picture sits in the corner (landscape)
-                       or fills the bottom half under the HUD (vertical). -->
-                  <div class="pip" [class.hidden]="!showPip()" [class.selected]="mediaSelected() === 'cam'">
+                  <!-- A stick cam (or any second video): its sound always plays; its picture fills the bottom half under
+                       the HUD in vertical only, so landscape keeps the whole frame for the footage. -->
+                  <div class="pip" [class.hidden]="!hasCam()" [class.selected]="mediaSelected() === 'cam'">
                     <video #extAudio [style.filter]="camFilter()" [style.transform]="camTransform()"
                            [src]="audioUrl()" [muted]="muted()" playsinline preload="auto"
                            aria-hidden="true" (play)="audioPlaying.set(true)" (pause)="audioPlaying.set(false)"></video>
@@ -717,7 +719,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                          (change)="onAudioFile($event)" />
                 </label>
                 @if (audioUrl()) {
-                  @if (audioIsVideo() && showPip()) {
+                  @if (hasCam()) {
                     <button class="btn small step" type="button" (click)="selectMedia('cam')" aria-label="Adjust the stick cam's picture" title="Adjust the stick cam's picture"><app-icon name="sliders" /></button>
                   }
                   <button class="btn small step" type="button" (click)="removeAudio()" aria-label="Remove the sound track" title="Remove the sound track"><app-icon name="trash" /></button>
@@ -749,12 +751,12 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 @for (t of showToggles(); track t.key) {
                   <button class="btn small step" type="button" [class.btn-primary]="opts()[t.key]" [attr.aria-pressed]="opts()[t.key]"
                           [attr.aria-label]="t.label" [title]="t.label + (t.available ? '' : ' (not in this log)')" [disabled]="busy() || !t.available"
-                          (click)="set(t.key, !opts()[t.key])"><app-icon [name]="t.icon" /></button>
+                          (click)="toggleShow(t.key)"><app-icon [name]="t.icon" /></button>
                 }
-                <!-- A video sound track (a stick cam) can show its picture too; preview and finished video only, not the overlay. -->
-                @if (audioUrl() && audioIsVideo()) {
+                <!-- In vertical, a video sound track (a stick cam) can show its picture too; preview and finished video only. -->
+                @if (vertical() && audioUrl() && audioIsVideo()) {
                   <button class="btn small step" type="button" [class.btn-primary]="showPip()" [attr.aria-pressed]="showPip()" aria-label="Stick cam picture"
-                          [title]="'Stick cam picture ' + (vertical() ? 'in the bottom half' : 'in the corner') + ', from your sound track video'"
+                          title="Stick cam picture in the bottom half, from your sound track video"
                           (click)="showPip.set(!showPip())"><app-icon name="pip" /></button>
                 }
                 @if (opts().showStats) {
@@ -772,15 +774,9 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                        (ngModelChange)="set('panelOpacity', +$event)" [disabled]="busy()" />
                 <span class="mono">{{ (opts().panelOpacity * 100).toFixed(0) }}%</span>
               </div>
-              <!-- The title and craft name are part of the overlay too; their settings open in the component panel. -->
-              <div class="toggles">
-                <button class="btn small" type="button" (click)="pickElement('title')" title="Text, colours, outline and size of the title">{{ hasTitle() ? 'Edit title' : 'Add title' }}</button>
-                <button class="btn small" type="button" (click)="pickElement('craft')" title="Text, colours, outline and size of the craft name">{{ hasCraft() ? 'Edit craft name' : 'Add craft name' }}</button>
-              </div>
             </div>
-            <!-- What gets made and making it: shape (icons), size and frame rate (chips, since numbers say it better than any
-                 icon), then the two exports, the transparent overlay for an editor and the finished video. Their ranges are
-                 set under the preview (the Export marks and the Render slider); hover any button for the details. -->
+            <!-- What gets made, for both exports: shape (icons), size and frame rate (chips, since numbers say it better than any
+                 icon). Hover any button for the details. -->
             <div class="panel field" role="group" aria-labelledby="output-label">
               <span class="field-label" id="output-label">Output</span>
               <div class="toggles" role="group" aria-label="Format">
@@ -810,30 +806,37 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     Match your footage ({{ fpsLabel(outputFrameRate(src)) }} fps)</button>
                 }
               }
-              <div class="toggles" role="group" aria-label="Export">
-                <button class="btn btn-primary small" type="button" (click)="exportVideo()" [disabled]="busy() || rendering() || frameCount() === 0"
-                        [title]="overlayHover()"><app-icon name="layers" /> Overlay .mov</button>
-                @if (hasVideo()) {
-                  <button class="btn btn-primary small" type="button" (click)="renderFinished()"
-                          [disabled]="busy() || rendering() || renderEnd() <= renderStart()" [title]="finishedHover()"><app-icon name="film" /> Video .mp4</button>
-                }
-              </div>
-              @if (hasVideo()) {
-                <!-- The finished video's fade, on its own row under the render buttons. -->
-                <div class="toggles">
-                  <button class="btn small step" type="button" [class.btn-primary]="fadeOut() > 0" [attr.aria-pressed]="fadeOut() > 0" aria-label="Fade out"
-                          title="Fade out: the video's picture fades to black and its sound to silence at the end" [disabled]="rendering()"
-                          (click)="setFadeOut(fadeOut() > 0 ? 0 : 1.5)"><app-icon name="fade" /></button>
-                  @if (fadeOut() > 0) {
-                    <span class="stats-time" title="How long the fade out takes">
-                      <label class="sr-only" for="fade-seconds">Fade length in seconds</label>
-                      <input id="fade-seconds" type="number" min="0.5" max="10" step="0.5" [ngModel]="fadeOut()" (ngModelChange)="setFadeOut(+$event)"
-                             [disabled]="rendering()" />
-                      <span>s</span>
-                    </span>
+            </div>
+            <!-- Rendering, full width under the three boxes: the transparent overlay for an editor and the finished video side
+                 by side with the video's fade, then one progress bar for whichever is running. Their ranges are set under the
+                 preview (the Export marks and the Render slider); hover a button for the details. -->
+            <div class="panel field export" role="group" aria-labelledby="export-label">
+              <span class="field-label" id="export-label">Export</span>
+              <div class="toggles">
+                <div class="toggles" role="group" aria-label="Export">
+                  <button class="btn btn-primary small" type="button" (click)="exportVideo()" [disabled]="busy() || rendering() || frameCount() === 0"
+                          [title]="overlayHover()"><app-icon name="layers" /> Overlay .mov</button>
+                  @if (hasVideo()) {
+                    <button class="btn btn-primary small" type="button" (click)="renderFinished()"
+                            [disabled]="busy() || rendering() || renderEnd() <= renderStart()" [title]="finishedHover()"><app-icon name="film" /> Video .mp4</button>
                   }
                 </div>
-              }
+                @if (hasVideo()) {
+                  <div class="toggles">
+                    <button class="btn small step" type="button" [class.btn-primary]="fadeOut() > 0" [attr.aria-pressed]="fadeOut() > 0" aria-label="Fade out"
+                            title="Fade out: the video's picture fades to black and its sound to silence at the end" [disabled]="rendering()"
+                            (click)="setFadeOut(fadeOut() > 0 ? 0 : 1.5)"><app-icon name="fade" /></button>
+                    @if (fadeOut() > 0) {
+                      <span class="stats-time" title="How long the fade out takes">
+                        <label class="sr-only" for="fade-seconds">Fade length in seconds</label>
+                        <input id="fade-seconds" type="number" min="0.5" max="10" step="0.5" [ngModel]="fadeOut()" (ngModelChange)="setFadeOut(+$event)"
+                               [disabled]="rendering()" />
+                        <span>s</span>
+                      </span>
+                    }
+                  </div>
+                }
+              </div>
               @if (busy() || rendering()) {
                 <!-- One progress bar for whichever is running. The video's has no value until its first frame (sound and the
                      first frames load first), so it shows as busy rather than stuck at zero. -->
@@ -892,6 +895,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
     .options > h2 { grid-column: 1 / -1; margin: 0; }
     .options > .panel { margin: 0; align-content: start; }
+    .options > .export { grid-column: 1 / -1; justify-items: center; text-align: center; }
+    .export .toggles { justify-content: center; }
     @media (max-width: 60rem) { .options { grid-template-columns: 1fr; } }
     .inspector-head { display: flex; justify-content: space-between; align-items: baseline; }
     .inspector-body { min-width: 0; }
@@ -922,8 +927,6 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .stage.vertical .footage-box { bottom: 46.3%; overflow: visible; background: none; z-index: 1; }
     .stage.vertical:has(.footage-box) .frame { background: #000; }
     .stage.vertical .frame canvas { z-index: 2; }
-    .stage.vertical .pip { inset: 53.7% 0 0 0; width: auto; aspect-ratio: auto; overflow: visible; z-index: 0;
-                           border: 0; border-radius: 0; box-shadow: none; }
     .fullscreen-btn { position: absolute; top: .5rem; right: .5rem; z-index: 3; width: 2.1rem; height: 2.1rem; display: grid; place-items: center;
                       border: 0; border-radius: 8px; background: rgb(8 12 16 / .6); color: #fff; cursor: pointer; padding: 0; opacity: .75; }
     .fullscreen-btn:hover, .fullscreen-btn:focus-visible { opacity: 1; }
@@ -937,8 +940,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     /* Above the overlay but out of its way: clicks go through to the canvas, so elements under it can still be dragged. */
     /* The whole picture, never cropped to the box; Zoom and Pan frame it from there. */
     .pip video { width: 100%; height: 100%; object-fit: contain; display: block; }
-    .pip { position: absolute; right: 2%; bottom: 3%; width: 26%; aspect-ratio: 16 / 9; overflow: hidden; z-index: 2; pointer-events: none;
-           border: 2px solid rgba(255, 255, 255, .85); border-radius: 6px; background: #000; box-shadow: 0 2px 10px rgba(0, 0, 0, .5); }
+    /* The stick cam (vertical only): the bottom of the split screen, under the footage and the HUD. */
+    .pip { position: absolute; inset: 53.7% 0 0 0; z-index: 0; pointer-events: none; background: #000; }
     .pip.hidden { display: none; }
     /* Both sliders' labels share a width so the two bars line up. */
     .scrub-label { font-weight: 600; font-size: .92rem; flex: 0 0 7.5rem; }
@@ -1058,7 +1061,8 @@ export class OverlayExportComponent {
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    showSticks: true, stickTrails: true, showSpeed: !this.vertical(), showBattery: true, showMap: !this.vertical(), showRssi: !this.vertical(), altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
+    showSticks: true, stickTrails: true, showSpeed: !this.vertical(), showBattery: true, showMap: !this.vertical(), showRssi: !this.vertical(),
+    showTitle: this.vertical(), showCraft: this.vertical(), altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
     ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), panelOpacity: this.vertical() ? 0 : 0.35, font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
   });
@@ -1172,7 +1176,7 @@ export class OverlayExportComponent {
 
   // ---- sound from another recording: its own track, placed on the log ----
   private extAudio = viewChild<ElementRef<HTMLMediaElement>>('extAudio');
-  /** The sound track came from a video, so its picture can show in the corner of the preview. */
+  /** The sound track came from a video, so in vertical its picture can show in the bottom half. */
   audioIsVideo = signal(false);
   showPip = signal(true);
   audioUrl = signal<string | null>(null);
@@ -1364,7 +1368,18 @@ export class OverlayExportComponent {
   setLabel(key: LabelKey, value: string) {
     this.set(key, key.endsWith('Text') ? value.slice(0, 60) : value);
     saveLabels(this.opts());
-    this.pickElement(key.startsWith('craft') ? 'craft' : 'title');
+    const element = key.startsWith('craft') ? 'craft' : 'title';
+    // Typing text means wanting to see it, even in 16:9 where they start hidden.
+    if (key.endsWith('Text') && value.trim()) this.set(element === 'title' ? 'showTitle' : 'showCraft', true);
+    this.pickElement(element);
+  }
+
+  /** A Show toggle. Turning the title or craft name on while it has no text opens its settings to type some. */
+  toggleShow(key: ShowKey) {
+    const on = !this.opts()[key];
+    this.set(key, on);
+    if (on && key === 'showTitle' && !this.hasTitle()) this.pickElement('title');
+    if (on && key === 'showCraft' && !this.hasCraft()) this.pickElement('craft');
   }
 
   /** Picks an OSD element (outlined on the preview, its settings shown) and drops any picked video. */
@@ -1376,13 +1391,15 @@ export class OverlayExportComponent {
   /** The Show toggles: what each switches, its icon and hover text, and whether this log has the data for it. */
   showToggles = computed(() => {
     const d = this.data();
-    const list: { key: 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats'; icon: IconName; label: string; available: boolean }[] = [
+    const list: { key: ShowKey; icon: IconName; label: string; available: boolean }[] = [
       { key: 'showSpeed', icon: 'gauge', label: 'Speed panel: speed, height and distance', available: !!d.track },
       { key: 'showBattery', icon: 'battery', label: 'Battery panel, with the flight time', available: !!d.battery },
       { key: 'showSticks', icon: 'sticks', label: 'Sticks', available: !!d.sticks },
       { key: 'showMap', icon: 'map', label: 'Mini map', available: !!d.track },
       { key: 'showRssi', icon: 'signal', label: 'RSSI panel: satellites, RSSI, distance and height', available: this.hasRssi() || !!d.track },
       { key: 'showStats', icon: 'stats', label: 'End-of-flight stats screen', available: true },
+      { key: 'showTitle', icon: 'title', label: this.hasTitle() ? 'Title' : 'Title (turn on to add one)', available: true },
+      { key: 'showCraft', icon: 'craft', label: this.hasCraft() ? 'Craft name' : 'Craft name (turn on to add one)', available: true },
     ];
     return list;
   });
@@ -1473,13 +1490,14 @@ export class OverlayExportComponent {
   /**
    * Switches between landscape and vertical; each has its own remembered layout, so neither overwrites the other.
    * Vertical starts without the speed panel, mini map and RSSI panel (big sticks and the battery are what fit), and
-   * with no panel backgrounds, so the readouts sit straight on the stick cam like a real Short.
+   * with no panel backgrounds, so the readouts sit straight on the stick cam like a real Short. The title and craft
+   * name start on there and off in landscape.
    */
   setVertical(vertical: boolean) {
     this.vertical.set(vertical);
     try { localStorage.setItem(FORMAT_KEY, vertical ? 'vertical' : 'landscape'); } catch { /* not remembered */ }
     this.selected.set(null);
-    this.opts.update(o => ({ ...o, layout: readLayout(vertical), showSpeed: !vertical, showMap: !vertical, showRssi: !vertical,
+    this.opts.update(o => ({ ...o, layout: readLayout(vertical), showSpeed: !vertical, showMap: !vertical, showRssi: !vertical, showTitle: vertical, showCraft: vertical,
       panelOpacity: vertical ? 0 : 0.35 }));
   }
 
@@ -1507,7 +1525,7 @@ export class OverlayExportComponent {
     const p = this.hit(pt.x, pt.y);
     if (!p) {
       // Not on an OSD element: pick the video under the pointer, so its settings show in Options.
-      this.selectMedia(this.mediaAt(pt.x, pt.y));
+      this.selectMedia(this.mediaAt(pt.y));
       return;
     }
     e.preventDefault();
@@ -1897,18 +1915,13 @@ export class OverlayExportComponent {
   /** The video whose picture settings show in Options; only one thing (a video or an OSD element) is picked at a time. */
   mediaSelected = signal<'footage' | 'cam' | null>(null);
   hasFootage = computed(() => this.hasVideo());
-  hasCam = computed(() => !!this.audioUrl() && this.audioIsVideo() && this.showPip());
+  /** The stick cam's picture is on screen: vertical only (landscape plays just its sound), and switched on. */
+  hasCam = computed(() => this.vertical() && !!this.audioUrl() && this.audioIsVideo() && this.showPip());
 
   /** Which video is under a point on the preview canvas, matching where the CSS puts them. */
-  private mediaAt(x: number, y: number): 'footage' | 'cam' | null {
-    const W = this.previewW(), H = this.previewH();
-    if (this.vertical()) {
-      if (y < 0.537 * H) return this.hasFootage() ? 'footage' : null; // above the split (see .stage.vertical)
-      return this.hasCam() ? 'cam' : this.hasFootage() ? 'footage' : null;
-    }
-    // Landscape: the stick cam is the corner picture (.pip: right 2%, bottom 3%, 26% wide, 16:9) over the footage.
-    const pw = 0.26 * W, ph = (pw * 9) / 16, px = 0.98 * W - pw, py = 0.97 * H - ph;
-    if (this.hasCam() && x >= px && x <= px + pw && y >= py && y <= py + ph) return 'cam';
+  private mediaAt(y: number): 'footage' | 'cam' | null {
+    // Vertical splits at 53.7% (see .stage.vertical): footage above, the stick cam below. Landscape is all footage.
+    if (this.hasCam() && y >= 0.537 * this.previewH()) return 'cam';
     return this.hasFootage() ? 'footage' : null;
   }
 
@@ -1937,7 +1950,7 @@ export class OverlayExportComponent {
 
   /** What the finished video holds, as hover text on its heading. */
   finishedHover = computed(() =>
-    `Finished video (.mp4): your footage${this.audioIsVideo() && this.showPip() ? ', stick cam' : ''}, `
+    `Finished video (.mp4): your footage${this.hasCam() ? ', stick cam' : ''}, `
     + `${this.audioUrl() ? `${this.audioName()}'s sound` : 'its sound'} and the OSD in one file, as in the preview. `
     + `${this.clipText()[0].toUpperCase()}${this.clipText().slice(1)} at ${this.resolutions()[this.resIndex()].label}, ${fpsLabel(this.fps())} fps`
     + `${this.fadeOut() > 0 ? `, fading out over ${this.fadeOut()} s` : ''}. Set its range with the Render slider under the preview.`);
@@ -2015,7 +2028,7 @@ export class OverlayExportComponent {
         file: footage, start: this.renderStart(), end: this.renderEnd(), fit: this.footage43(),
         picture: { brightness: this.brightness(), contrast: this.contrast(), saturation: this.saturation(), zoom: this.footageZoom() },
       },
-      cam: sound && this.audioIsVideo() && this.showPip() ? {
+      cam: sound && this.hasCam() ? {
         ...sound,
         picture: { brightness: this.camBrightness(), contrast: this.camContrast(), saturation: this.camSaturation(), zoom: this.camZoom(),
                    panX: this.camPanX(), panY: this.camPanY() },
