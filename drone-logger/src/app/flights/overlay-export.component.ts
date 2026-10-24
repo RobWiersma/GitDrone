@@ -7,9 +7,10 @@ import { GlyphFont, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font
 import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
-import { ArmingMatch, MotorMatch, SoundProfile, findArming, findClaps, matchMotorSound, soundProfile } from './clap';
+import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
 import { RenderCancelled, RenderPlan, RenderTarget, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
+import { TimelineMark, TimelineTrack, TrackId, TrackTimelineComponent } from './track-timeline.component';
 import { IconComponent, IconName } from '../icon.component';
 
 const RESOLUTIONS = [
@@ -27,6 +28,26 @@ const VERTICAL_RESOLUTIONS = [
 const FORMAT_KEY = 'gitdrone-overlay-format';
 
 const FADE_KEY = 'gitdrone-render-fade';
+
+/**
+ * The loudest sample of `p` between `from` and `to` seconds, at `gainDb`, in dB from full scale (0 or more clips),
+ * and `fit`: the gain (no lower than `minGain`, no higher than +12) that puts it at −1 dB. Null for silence.
+ */
+/** A fade's level `t` seconds into a `len`-second video (1 outside it): up over `fadeIn`, down over `fadeOut`. */
+function fadeLevel(t: number, len: number, fadeIn: number, fadeOut: number) {
+  if (t < 0 || t > len) return 1;
+  return Math.max(0, Math.min(1, fadeIn > 0 ? t / fadeIn : 1, fadeOut > 0 ? (len - t) / fadeOut : 1));
+}
+
+function peakOver(p: SoundPeaks, from: number, to: number, gainDb: number, minGain: number) {
+  if (!p.duration) return null;
+  const n = p.peaks.length;
+  let peak = 0;
+  for (let i = Math.max(0, Math.floor((from / p.duration) * n)); i < Math.min(n, Math.ceil((to / p.duration) * n)); i++) peak = Math.max(peak, p.peaks[i]);
+  if (!peak) return null;
+  const raw = 20 * Math.log10(peak), db = raw + gainDb;
+  return { db, fit: Math.min(12, Math.max(minGain, Math.floor((-1 - raw) * 2) / 2)), text: `${db >= 0 ? '+' : '−'}${Math.abs(db).toFixed(1)} dB` };
+}
 
 /** The finished video's fade-out in seconds: 1.5 until changed, 0 once switched off. */
 function readFadeOut(): number {
@@ -186,7 +207,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     '(document:fullscreenchange)': 'onFullscreenChange()',
     '(document:keydown)': 'onFullscreenKey($event)',
   },
-  imports: [FormsModule, RangeWindowComponent, IconComponent],
+  imports: [FormsModule, IconComponent, TrackTimelineComponent],
   template: `
         <div class="layout">
           <section class="panel preview-panel" aria-labelledby="preview-heading">
@@ -229,6 +250,9 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                          (play)="audioPlaying.set(true)" (pause)="audioPlaying.set(false)"></audio>
                 }
               }
+              @if (musicUrl()) {
+                <audio #musicEl [src]="musicUrl()" [muted]="muted()" preload="auto" (play)="musicPlaying.set(true)" (pause)="musicPlaying.set(false)"></audio>
+              }
               <canvas #preview [class.before-log]="backdrop() === 'video' && beforeLog()" width="1920" height="1080" role="img"
                       [attr.aria-label]="'Overlay preview at ' + previewClock() + '. Drag an element to move it; the layout controls below do the same from the keyboard.'"
                       [style.cursor]="dragging() ? 'grabbing' : hoverKey() ? 'grab' : 'default'"
@@ -237,31 +261,25 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               </div>
             </div>
             @if (backdrop() === 'video' && videoUrl()) {
-              <!-- Moves only the video, to find the takeoff frame; the overlay stays put until "Takeoff is here". -->
-              <div class="video-scrub">
-                <label for="videoTime" class="scrub-label">Flight footage</label>
+              <!-- Playback, then everything as tracks on one timeline, Premiere-style: the playhead moves the footage (and
+                   the overlay and sound when locked), and the Render range sits over the clips. -->
+              <div class="playback-row">
                 <button class="btn small step" type="button" (click)="stepVideo(-1)" aria-label="Back one frame" title="Back one frame"><app-icon name="prev" /></button>
-                <input id="videoTime" type="range" min="0" [max]="videoDuration()" step="0.01" [ngModel]="videoTime()"
-                       (ngModelChange)="scrubVideo(+$event)" [disabled]="!videoDuration()" />
+                <button class="btn small step" type="button" (click)="toggleVideo()" [attr.aria-label]="videoPlaying() ? 'Pause' : 'Play'" [title]="videoPlaying() ? 'Pause' : 'Play'"><app-icon [name]="videoPlaying() ? 'pause' : 'play'" /></button>
+                <button class="btn small step" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()" aria-label="Sound" [title]="muted() ? 'Sound is off: click to hear it' : 'Sound is on: click to mute'"><app-icon [name]="muted() ? 'mute' : 'volume'" /></button>
                 <button class="btn small step" type="button" (click)="stepVideo(1)" aria-label="Forward one frame" title="Forward one frame"><app-icon name="next" /></button>
-                <span class="mono">{{ videoClock() }}</span>
-              </div>
-              <!-- The part of the footage the finished video covers, on its own two-handle slider lined up with the one above.
-                   Dragging a handle shows that frame in the preview. -->
-              <div class="video-scrub">
-                <span class="scrub-label" id="render-range-label">Render</span>
-                <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
-                <app-range-window label="Render" [max]="videoDuration()" [step]="0.1" [valueText]="clockText" [disabled]="rendering() || !videoDuration()"
-                                  [(start)]="renderStart" [(end)]="renderEnd" (startChange)="scrubVideo($event)" (endChange)="scrubVideo($event)" />
-                <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="next" /></span>
-                <span class="mono">{{ clock(renderEnd() - renderStart()) }}</span>
-              </div>
-              <div class="export-window">
+                @if (canLock()) {
+                  <button class="btn small step" type="button" [class.btn-primary]="locked()" [attr.aria-pressed]="locked()" aria-label="Lock the footage, overlay and sound together"
+                          [title]="lockTitle()" (click)="locked.set(!locked())"><app-icon [name]="locked() ? 'lock' : 'unlock'" /></button>
+                }
                 <span class="mono" aria-live="polite">Render {{ clipText() }}</span>
                 @if (!wholeClip()) {
                   <button class="link" type="button" (click)="useWholeClip()" [disabled]="rendering()">Whole clip</button>
                 }
               </div>
+              <app-track-timeline [tracks]="tracks()" [from]="timelineFrom()" [to]="timelineTo()" [footageEnd]="videoDuration()" [playhead]="videoTime()" [marks]="trackMarks()"
+                                  [selected]="mediaSelected()" [(rangeStart)]="renderStart" [(rangeEnd)]="renderEnd" [rangeDisabled]="rendering() || !videoDuration()"
+                                  (seek)="scrubVideo($event)" (select)="selectMedia($event)" (mute)="toggleMute($event)" (toggleShown)="showPip.set(!showPip())" />
             }
             <div class="scrub">
               <label for="previewTime" class="scrub-label">OSD overlay</label>
@@ -288,128 +306,14 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               }
             </div>
             @if (backdropError()) { <p class="error">{{ backdropError() }}</p> }
-            @if (backdrop() === 'video' && videoUrl()) {
-              <div class="video-sync">
-                <!-- Sync buttons on top, kept together on one line. -->
-                <div class="sync-buttons">
-                  @if (takeoffTime() !== null) {
-                    <button class="btn btn-primary small" type="button" (click)="takeoffHere()" title="Pause the footage where you leave the ground, then press this to line the log up">Takeoff is here</button>
-                  }
-                  <button class="btn small" type="button" (click)="logStartsHere()" title="Pause the footage where you arm, then press this to line the log up">Arming is here</button>
-                  @if (canMatchMotors()) {
-                    <button class="btn small" type="button" (click)="syncFromMotors()" [disabled]="!!motorStatus()" title="Find where the log starts in the footage by listening for the motors">Sync from motor sound</button>
-                  }
-                </div>
-                @if (motorStatus()) { <span class="hint" role="status">{{ motorStatus() }}</span> }
-                <!-- Playback and the start time underneath. -->
-                <div class="playback-row">
-                  <button class="btn small step" type="button" (click)="toggleVideo()" [attr.aria-label]="videoPlaying() ? 'Pause' : 'Play'" [title]="videoPlaying() ? 'Pause' : 'Play'"><app-icon [name]="videoPlaying() ? 'pause' : 'play'" /></button>
-                  <button class="btn small step" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()" aria-label="Sound" [title]="muted() ? 'Sound is off: click to hear it' : 'Sound is on: click to mute'"><app-icon [name]="muted() ? 'mute' : 'volume'" /></button>
-                  <div class="offset">
-                    <label for="video-offset">Log starts at</label>
-                    <input id="video-offset" type="number" step="0.1" [ngModel]="videoOffset()" (ngModelChange)="setOffset(+$event)" />
-                    <span>s in the video</span>
-                  </div>
-                </div>
-              </div>
-            }
-            <!-- Sound from another recording (a phone on the ground) is its own track, lined up to the log like the footage.
-                 It's picked in Options; lining it up happens here, under the preview. -->
-            @if (audioUrl()) {
-              <div class="video-sync audio-panel">
-                @if (clapStatus()) { <span class="hint" role="status">{{ clapStatus() }}</span> }
-                @if (audioProfile(); as prof) {
-                  <!-- The recording's loudness with what was heard in it marked; click to move the sound track there. -->
-                  <figure class="sound-profile">
-                    <figcaption>
-                      <span>Sound track: {{ audioName() }}</span>
-                      <span class="mono">{{ profileHover() !== null ? clockOf(profileHover()!) : clockOf(prof.duration) + ' long' }}</span>
-                    </figcaption>
-                    <svg viewBox="0 0 1000 60" preserveAspectRatio="none" role="img" [attr.aria-label]="profileLabel()"
-                         (mousemove)="hoverProfile($event)" (mouseleave)="profileHover.set(null)" (click)="seekProfile($event)">
-                      <path class="level" [attr.d]="profilePath()" />
-                      @for (c of audioClaps(); track c; let i = $index) {
-                        <line class="mark clap" [class.chosen]="hasVideo() && i === audioClapIndex()"
-                              [attr.x1]="profileX(c)" [attr.x2]="profileX(c)" y1="0" y2="60"><title>Clap at {{ clockOf(c) }}</title></line>
-                      }
-                      @if (audioArming(); as arm) {
-                        <line class="mark arm" [class.chosen]="audioLogStart() === arm.logStart" [attr.x1]="profileX(arm.logStart)" [attr.x2]="profileX(arm.logStart)"
-                              y1="0" y2="60"><title>Arming heard at {{ clockOf(arm.logStart) }}</title></line>
-                        @if (launchInAudio() !== null) {
-                          <line class="mark arm" [class.chosen]="audioLogStart() === arm.logStart" [attr.x1]="profileX(launchInAudio()!)" [attr.x2]="profileX(launchInAudio()!)"
-                                y1="0" y2="60"><title>Launch heard at {{ clockOf(launchInAudio()!) }}</title></line>
-                        }
-                      }
-                      <line class="mark now" [attr.x1]="profileX(soundCursor())" [attr.x2]="profileX(soundCursor())" y1="0" y2="60" />
-                    </svg>
-                    <div class="profile-key">
-                      @if (audioArming()) { <span><i class="key arm"></i>Arming and launch heard</span> }
-                      @if (audioClaps().length) { <span><i class="key clap"></i>Claps</span> }
-                      <span><i class="key now"></i>Sound track position</span>
-                    </div>
-                  </figure>
-                }
-                <!-- Moves only the sound, to find arming or takeoff in it; nothing else moves until a button below. -->
-                <div class="video-scrub">
-                  <label for="soundTime" class="scrub-label">Sound track</label>
-                  <button class="btn small step" type="button" (click)="stepSound(-1)" aria-label="Sound track back one frame" title="Sound track back one frame"><app-icon name="prev" /></button>
-                  <input id="soundTime" type="range" min="0" [max]="audioProfile()?.duration ?? 0" step="0.01" [ngModel]="soundCursor()"
-                         (ngModelChange)="scrubSound(+$event)" [disabled]="!audioProfile()" />
-                  <button class="btn small step" type="button" (click)="stepSound(1)" aria-label="Sound track forward one frame" title="Sound track forward one frame"><app-icon name="next" /></button>
-                  <span class="mono">{{ clockOf(soundCursor()) }}</span>
-                </div>
-                <div class="sync-buttons">
-                  @if (takeoffTime() !== null) {
-                    <button class="btn btn-primary small" type="button" (click)="soundTakeoffHere()" aria-label="Takeoff is here in the sound track" title="Move the sound track slider to the takeoff you hear, then press this">Takeoff is here</button>
-                  }
-                  <button class="btn small" type="button" (click)="soundArmingHere()" aria-label="Arming is here in the sound track" title="Move the sound track slider to the arming you hear, then press this">Arming is here</button>
-                  @if (audioArming(); as arm) {
-                    @if (audioLogStart() !== arm.logStart) {
-                      <button class="btn small" type="button" (click)="useHeardArming()" title="Line the sound track up on the arming GitDrone heard in it">Use the arming it heard</button>
-                    }
-                  }
-                </div>
-                <div class="playback-row">
-                  @if (audioOnly()) {
-                    <button class="btn small step" type="button" (click)="toggleAudioPreview()" [attr.aria-label]="audioPlaying() ? 'Pause' : 'Play'" [title]="audioPlaying() ? 'Pause' : 'Play'"><app-icon [name]="audioPlaying() ? 'pause' : 'play'" /></button>
-                    <button class="btn small step" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()" aria-label="Sound" [title]="muted() ? 'Sound is off: click to hear it' : 'Sound is on: click to mute'"><app-icon [name]="muted() ? 'mute' : 'volume'" /></button>
-                  }
-                  <div class="offset">
-                    <label for="audio-log-start">Log starts at</label>
-                    <input id="audio-log-start" type="number" step="0.1" [ngModel]="audioLogStart()" (ngModelChange)="setAudioLogStart(+$event)" />
-                    <span>s in the sound</span>
-                  </div>
-                </div>
-                @if (hasVideo() && audioClaps().length) {
-                  <!-- Or line the sound up with the footage on a clap heard in both. -->
-                  <div class="audio-claps">
-                    <div class="clap-field">
-                      <label for="phone-clap">Clap in the sound</label>
-                      <select id="phone-clap" [ngModel]="audioClapIndex()" (ngModelChange)="audioClapIndex.set(+$event)">
-                        @for (c of audioClaps(); track c; let i = $index) {
-                          <option [value]="i">{{ i === 0 ? 'First' : i === 1 ? 'Second' : 'Third' }} clap at {{ clockOf(c) }}</option>
-                        }
-                      </select>
-                    </div>
-                    <div class="clap-field">
-                      <span class="clap-label">Clap in the footage</span>
-                      <span class="mono">{{ footageClap() === null ? 'not set' : clockOf(footageClap()!) }}</span>
-                      @if (footageClapAuto() && footageClap() !== null) { <span class="hint">(found)</span> }
-                      <button class="btn small" type="button" (click)="footageClapHere()" title="Mark the clap at the footage's current frame">Clap is here</button>
-                      <button class="btn small" type="button" (click)="syncOnClap()" title="Line the sound track up with the footage on the clap heard in both">Sync on the clap</button>
-                    </div>
-                  </div>
-                }
-              </div>
-            }
             <!-- All the how-to text for the preview in one callout, under its controls. -->
             <div class="callout preview-help">
               @if (backdrop() === 'video' && videoUrl()) {
                 @if (videoOffset() < 0) { <p>A negative start means you armed before the video started.</p> }
                 <p>
                   @if (takeoffTime() !== null) {
-                    To line them up: use the <strong>Flight footage</strong> slider (and its arrow buttons for single frames) to find the moment you leave
-                    the ground, then press <strong>Takeoff is here</strong>
+                    To line them up: move the timeline's playhead (the arrow buttons step single frames) to the moment you leave
+                    the ground, or pick the footage's track and use its <strong>Flight footage</strong> slider, then press <strong>Takeoff is here</strong>
                     (the log has takeoff at {{ takeoffClock() }}, the first throttle punch{{ takeoffFromGps() ? ' or move on GPS' : '' }}).
                     Or pause on arming and press <strong>Arming is here</strong>.
                   } @else {
@@ -437,8 +341,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     <strong>Sound track lined up on arming.</strong> The motors arm {{ clockOf(audioLogStart()) }} into {{ audioName() }}
                     and launch {{ takeoffClock() }} later, as in the log.
                   } @else {
-                    The sound is its own track, lined up to the log like the footage: move the <strong>Sound track</strong> slider (or
-                    click the graph) to where the motors arm or you launch, and press <strong>Arming is here</strong> or
+                    The sound is its own track, lined up to the log like the footage: pick its track, move its <strong>Sound track</strong>
+                    slider to where the motors arm or you launch, and press <strong>Arming is here</strong> or
                     <strong>Takeoff is here</strong> under it.
                     @if (hasVideo() && audioClaps().length) { Or line it up with the footage on a clap: <strong>Sync on the clap</strong>. }
                   }
@@ -454,12 +358,13 @@ function saveColors(o: typeof DEFAULT_COLORS) {
 
           </section>
 
+          <div class="side">
           <!-- The picked component's settings in one place, like Premiere's Effect Controls: click something in the
                preview (or pick it here) and everything about it shows. Left of the preview in vertical, under it in landscape. -->
           <section class="panel inspector" aria-labelledby="inspector-heading">
             <div class="inspector-head">
               <h2 id="inspector-heading">{{ inspectedLabel() }}</h2>
-              @if (inspected()) { <button class="btn small step" type="button" (click)="selectMedia(null)" aria-label="Done" title="Done: close these settings"><app-icon name="close" /></button> }
+              @if (inspected()) { <button class="btn small step" type="button" (click)="selected.set(null)" aria-label="Done" title="Done: close these settings"><app-icon name="close" /></button> }
             </div>
             <fieldset class="inspector-body" [disabled]="busy()">
               <legend class="sr-only">{{ inspectedLabel() }} settings</legend>
@@ -473,71 +378,6 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   </div>
                   <div class="layout-actions">
                     <button class="link" type="button" (click)="resetLayout()" [disabled]="!hasCustomLayout()" title="Put every element back where it starts">Reset whole layout</button>
-                  </div>
-                }
-
-                @case ('footage') {
-                  <p class="mono">{{ videoName() }}</p>
-                  <fieldset class="item-sizes">
-                    <legend>Picture</legend>
-                    <!-- Flat D-Log-ish footage is hard to judge the overlay against; the finished video uses these too. -->
-                    <div class="grade">
-                      <label for="brightness">Brightness</label>
-                      <input id="brightness" type="range" min="50" max="200" step="5" [ngModel]="brightness()" (ngModelChange)="brightness.set(+$event)" />
-                      <span class="mono">{{ brightness() }}%</span>
-                      <label for="contrast">Contrast</label>
-                      <input id="contrast" type="range" min="50" max="200" step="5" [ngModel]="contrast()" (ngModelChange)="contrast.set(+$event)" />
-                      <span class="mono">{{ contrast() }}%</span>
-                      <label for="saturation">Saturation</label>
-                      <input id="saturation" type="range" min="0" max="250" step="5" [ngModel]="saturation()" (ngModelChange)="saturation.set(+$event)" />
-                      <span class="mono">{{ saturation() }}%</span>
-                    </div>
-                  </fieldset>
-                  <fieldset class="item-sizes">
-                    <legend>Framing</legend>
-                    <div class="grade">
-                      <label for="zoom">Zoom</label>
-                      <input id="zoom" type="range" min="50" max="300" step="5" [ngModel]="footageZoom()" (ngModelChange)="footageZoom.set(+$event)" />
-                      <span class="mono">{{ footageZoom() }}%</span>
-                    </div>
-                  </fieldset>
-                  <div class="layout-actions">
-                    <button class="btn small step" type="button" (click)="resetFootage()" [disabled]="!footageAdjusted()" aria-label="Reset the flight footage's picture and framing" title="Reset the flight footage's picture and framing"><app-icon name="reset" /></button>
-                  </div>
-                }
-
-                @case ('cam') {
-                  <p class="mono">{{ audioName() }}</p>
-                  <fieldset class="item-sizes">
-                    <legend>Picture</legend>
-                    <div class="grade">
-                      <label for="cam-brightness">Brightness</label>
-                      <input id="cam-brightness" type="range" min="50" max="200" step="5" [ngModel]="camBrightness()" (ngModelChange)="camBrightness.set(+$event)" />
-                      <span class="mono">{{ camBrightness() }}%</span>
-                      <label for="cam-contrast">Contrast</label>
-                      <input id="cam-contrast" type="range" min="50" max="200" step="5" [ngModel]="camContrast()" (ngModelChange)="camContrast.set(+$event)" />
-                      <span class="mono">{{ camContrast() }}%</span>
-                      <label for="cam-saturation">Saturation</label>
-                      <input id="cam-saturation" type="range" min="0" max="250" step="5" [ngModel]="camSaturation()" (ngModelChange)="camSaturation.set(+$event)" />
-                      <span class="mono">{{ camSaturation() }}%</span>
-                    </div>
-                  </fieldset>
-                  <fieldset class="item-sizes">
-                    <legend>Framing</legend>
-                    <div class="grade">
-                      <label for="cam-zoom">Zoom</label>
-                      <input id="cam-zoom" type="range" min="50" max="300" step="5" [ngModel]="camZoom()" (ngModelChange)="camZoom.set(+$event)" />
-                      <span class="mono">{{ camZoom() }}%</span>
-                      <label for="cam-pan-x">Left/right</label>
-                      <input id="cam-pan-x" type="range" min="-50" max="50" step="1" [ngModel]="camPanX()" (ngModelChange)="camPanX.set(+$event)" />
-                      <span class="mono">{{ camPanX() }}%</span>
-                      <label for="cam-pan-y">Up/down</label>
-                      <input id="cam-pan-y" type="range" min="-50" max="50" step="1" [ngModel]="camPanY()" (ngModelChange)="camPanY.set(+$event)" />
-                      <span class="mono">{{ camPanY() }}%</span>
-                    </div>
-                  </fieldset>
-                  <div class="layout-actions">
-                    <button class="btn small step" type="button" (click)="resetCam()" [disabled]="!camAdjusted()" aria-label="Reset the stick cam's picture and framing" title="Reset the stick cam's picture and framing"><app-icon name="reset" /></button>
                   </div>
                 }
 
@@ -680,6 +520,304 @@ function saveColors(o: typeof DEFAULT_COLORS) {
             </fieldset>
           </section>
 
+          <!-- The picked track's settings, like Premiere's Effect Controls for a clip: sync and picture for the footage,
+               gain and sync for the sound, the music's gain, start and fades. Pick a track on the timeline, a video in the
+               preview, or a file's settings button in Sources. -->
+          <section class="panel inspector" aria-labelledby="track-heading">
+            <div class="inspector-head">
+              <h2 id="track-heading">{{ trackLabel() }}</h2>
+              @if (mediaSelected()) { <button class="btn small step" type="button" (click)="selectMedia(null)" aria-label="Done" title="Done: close these settings"><app-icon name="close" /></button> }
+            </div>
+            <fieldset class="inspector-body" [disabled]="busy()">
+              <legend class="sr-only">{{ trackLabel() }} settings</legend>
+              @switch (mediaSelected()) {
+                @case (null) {
+                  <p class="hint">Pick a track on the timeline (or a video in the preview) for its settings: sync, picture, gain and fades.</p>
+                }
+                @case ('osd') {
+                  <p class="hint">The OSD drawn from your log. Its elements are in Components; it starts where the footage's sync puts it.</p>
+                  <button class="btn small" type="button" (click)="selectMedia('footage')">Footage sync</button>
+                }
+                @case ('footage') {
+                  <p class="mono">{{ videoName() }}</p>
+                  <fieldset class="item-sizes">
+                    <legend>Sync</legend>
+            @if (backdrop() === 'video' && videoUrl()) {
+              <div class="video-sync">
+                <!-- Moves the footage to the frame you leave the ground on (only the footage, unless locked), for the buttons
+                     under it; the arrows step single frames. -->
+                <div class="video-scrub">
+                  <label for="videoTime" class="scrub-label">Flight footage</label>
+                  <button class="btn small step" type="button" (click)="stepVideo(-1)" aria-label="Footage back one frame" title="Footage back one frame"><app-icon name="prev" /></button>
+                  <input id="videoTime" type="range" min="0" [max]="videoDuration()" step="0.01" [ngModel]="videoTime()"
+                         (ngModelChange)="scrubVideo(+$event)" [disabled]="!videoDuration()" />
+                  <button class="btn small step" type="button" (click)="stepVideo(1)" aria-label="Footage forward one frame" title="Footage forward one frame"><app-icon name="next" /></button>
+                  <span class="mono">{{ videoClock() }}</span>
+                </div>
+                <!-- Sync buttons on top, kept together on one line. -->
+                <div class="sync-buttons">
+                  @if (takeoffTime() !== null) {
+                    <button class="btn btn-primary small" type="button" (click)="takeoffHere()" title="Pause the footage where you leave the ground, then press this to line the log up">Takeoff is here</button>
+                  }
+                  <button class="btn small" type="button" (click)="logStartsHere()" title="Pause the footage where you arm, then press this to line the log up">Arming is here</button>
+                  @if (canMatchMotors()) {
+                    <button class="btn small" type="button" (click)="syncFromMotors()" [disabled]="!!motorStatus()" title="Find where the log starts in the footage by listening for the motors">Sync from motor sound</button>
+                  }
+                </div>
+                @if (motorStatus()) { <span class="hint" role="status">{{ motorStatus() }}</span> }
+                <div class="playback-row">
+                  @if (canLock()) {
+                    <button class="btn small step" type="button" [class.btn-primary]="locked()" [attr.aria-pressed]="locked()" aria-label="Lock the footage, overlay and sound together"
+                            [title]="lockTitle()" (click)="locked.set(!locked())"><app-icon [name]="locked() ? 'lock' : 'unlock'" /></button>
+                  }
+                  <div class="offset">
+                    <label for="video-offset">Log starts at</label>
+                    <input id="video-offset" type="number" step="0.1" [ngModel]="videoOffset()" (ngModelChange)="setOffset(+$event)" />
+                    <span>s in the video</span>
+                  </div>
+                </div>
+              </div>
+            }
+                  </fieldset>
+                  <fieldset class="item-sizes">
+                    <legend>Picture</legend>
+                    <!-- Flat D-Log-ish footage is hard to judge the overlay against; the finished video uses these too. -->
+                    <div class="grade">
+                      <label for="brightness">Brightness</label>
+                      <input id="brightness" type="range" min="50" max="200" step="5" [ngModel]="brightness()" (ngModelChange)="brightness.set(+$event)" />
+                      <span class="mono">{{ brightness() }}%</span>
+                      <label for="contrast">Contrast</label>
+                      <input id="contrast" type="range" min="50" max="200" step="5" [ngModel]="contrast()" (ngModelChange)="contrast.set(+$event)" />
+                      <span class="mono">{{ contrast() }}%</span>
+                      <label for="saturation">Saturation</label>
+                      <input id="saturation" type="range" min="0" max="250" step="5" [ngModel]="saturation()" (ngModelChange)="saturation.set(+$event)" />
+                      <span class="mono">{{ saturation() }}%</span>
+                    </div>
+                  </fieldset>
+                  <fieldset class="item-sizes">
+                    <legend>Framing</legend>
+                    <div class="grade">
+                      <label for="zoom">Zoom</label>
+                      <input id="zoom" type="range" min="50" max="300" step="5" [ngModel]="footageZoom()" (ngModelChange)="footageZoom.set(+$event)" />
+                      <span class="mono">{{ footageZoom() }}%</span>
+                    </div>
+                  </fieldset>
+                  <div class="layout-actions">
+                    <button class="btn small step" type="button" (click)="resetFootage()" [disabled]="!footageAdjusted()" aria-label="Reset the flight footage's picture and framing" title="Reset the flight footage's picture and framing"><app-icon name="reset" /></button>
+                  </div>
+                }
+
+                @case ('cam') {
+                  <p class="mono">{{ audioName() }}</p>
+                  <fieldset class="item-sizes">
+                    <legend>Picture</legend>
+                    <div class="grade">
+                      <label for="cam-brightness">Brightness</label>
+                      <input id="cam-brightness" type="range" min="50" max="200" step="5" [ngModel]="camBrightness()" (ngModelChange)="camBrightness.set(+$event)" />
+                      <span class="mono">{{ camBrightness() }}%</span>
+                      <label for="cam-contrast">Contrast</label>
+                      <input id="cam-contrast" type="range" min="50" max="200" step="5" [ngModel]="camContrast()" (ngModelChange)="camContrast.set(+$event)" />
+                      <span class="mono">{{ camContrast() }}%</span>
+                      <label for="cam-saturation">Saturation</label>
+                      <input id="cam-saturation" type="range" min="0" max="250" step="5" [ngModel]="camSaturation()" (ngModelChange)="camSaturation.set(+$event)" />
+                      <span class="mono">{{ camSaturation() }}%</span>
+                    </div>
+                  </fieldset>
+                  <fieldset class="item-sizes">
+                    <legend>Framing</legend>
+                    <div class="grade">
+                      <label for="cam-zoom">Zoom</label>
+                      <input id="cam-zoom" type="range" min="50" max="300" step="5" [ngModel]="camZoom()" (ngModelChange)="camZoom.set(+$event)" />
+                      <span class="mono">{{ camZoom() }}%</span>
+                      <label for="cam-pan-x">Left/right</label>
+                      <input id="cam-pan-x" type="range" min="-50" max="50" step="1" [ngModel]="camPanX()" (ngModelChange)="camPanX.set(+$event)" />
+                      <span class="mono">{{ camPanX() }}%</span>
+                      <label for="cam-pan-y">Up/down</label>
+                      <input id="cam-pan-y" type="range" min="-50" max="50" step="1" [ngModel]="camPanY()" (ngModelChange)="camPanY.set(+$event)" />
+                      <span class="mono">{{ camPanY() }}%</span>
+                    </div>
+                  </fieldset>
+                  <div class="layout-actions">
+                    <button class="btn small step" type="button" (click)="resetCam()" [disabled]="!camAdjusted()" aria-label="Reset the stick cam's picture and framing" title="Reset the stick cam's picture and framing"><app-icon name="reset" /></button>
+                  </div>
+                }
+
+                @case ('sound') {
+            <!-- Sound from another recording (a phone on the ground) is its own track, lined up to the log like the footage.
+                 It's picked in Options; lining it up happens here, under the preview. -->
+            @if (audioUrl()) {
+              <div class="video-sync audio-panel">
+                @if (clapStatus()) { <span class="hint" role="status">{{ clapStatus() }}</span> }
+                <!-- The sound track's level: a gain for the preview and the finished video, and the loudest moment in the
+                     render range, which clips past 0 dB. -->
+                <div class="video-scrub">
+                  <label for="sound-gain" class="scrub-label" title="Raise or lower the sound track, in the preview and the finished video">Sound gain</label>
+                  <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                  <input id="sound-gain" type="range" min="-12" max="12" step="0.5" [ngModel]="soundGain()" (ngModelChange)="soundGain.set(+$event)" />
+                  <button class="btn small step" type="button" (click)="soundGain.set(0)" [disabled]="soundGain() === 0" aria-label="Reset the gain" title="Reset the gain to 0 dB"><app-icon name="reset" /></button>
+                  <span class="mono">{{ dbText(soundGain()) }}</span>
+                </div>
+                <div class="playback-row">
+                  @if (soundPeakDb(); as peak) {
+                    <span class="mono" [class.error]="peak.db >= 0" [title]="peak.whole ? 'Loudest moment in the sound track, at this gain' : 'Loudest moment in the render range, at this gain'">
+                      Peak {{ peak.text }}{{ peak.db >= 0 ? ': clips' : '' }}</span>
+                    @if (peak.fit !== soundGain()) {
+                      <button class="btn small" type="button" (click)="soundGain.set(peak.fit)" title="Set the gain so the loudest moment peaks at −1 dB">Peak at −1 dB</button>
+                    }
+                  }
+                </div>
+                <!-- Moves only the sound, to find arming or takeoff in it; nothing else moves until a button below. -->
+                <div class="video-scrub">
+                  <label for="soundTime" class="scrub-label">Sound track</label>
+                  <button class="btn small step" type="button" (click)="stepSound(-1)" aria-label="Sound track back one frame" title="Sound track back one frame"><app-icon name="prev" /></button>
+                  <input id="soundTime" type="range" min="0" [max]="audioProfile()?.duration ?? 0" step="0.01" [ngModel]="soundCursor()"
+                         (ngModelChange)="scrubSound(+$event)" [disabled]="!audioProfile()" />
+                  <button class="btn small step" type="button" (click)="stepSound(1)" aria-label="Sound track forward one frame" title="Sound track forward one frame"><app-icon name="next" /></button>
+                  <span class="mono">{{ clockOf(soundCursor()) }}</span>
+                </div>
+                <div class="sync-buttons">
+                  @if (takeoffTime() !== null) {
+                    <button class="btn btn-primary small" type="button" (click)="soundTakeoffHere()" aria-label="Takeoff is here in the sound track" title="Move the sound track slider to the takeoff you hear, then press this">Takeoff is here</button>
+                  }
+                  <button class="btn small" type="button" (click)="soundArmingHere()" aria-label="Arming is here in the sound track" title="Move the sound track slider to the arming you hear, then press this">Arming is here</button>
+                  @if (audioArming(); as arm) {
+                    @if (audioLogStart() !== arm.logStart) {
+                      <button class="btn small" type="button" (click)="useHeardArming()" title="Line the sound track up on the arming GitDrone heard in it">Use the arming it heard</button>
+                    }
+                  }
+                </div>
+                <div class="playback-row">
+                  @if (audioOnly()) {
+                    <button class="btn small step" type="button" (click)="toggleAudioPreview()" [attr.aria-label]="audioPlaying() ? 'Pause' : 'Play'" [title]="audioPlaying() ? 'Pause' : 'Play'"><app-icon [name]="audioPlaying() ? 'pause' : 'play'" /></button>
+                    <button class="btn small step" type="button" (click)="muted.set(!muted())" [attr.aria-pressed]="!muted()" aria-label="Sound" [title]="muted() ? 'Sound is off: click to hear it' : 'Sound is on: click to mute'"><app-icon [name]="muted() ? 'mute' : 'volume'" /></button>
+                  }
+                  @if (canLock()) {
+                    <button class="btn small step" type="button" [class.btn-primary]="locked()" [attr.aria-pressed]="locked()" aria-label="Lock the footage, overlay and sound together"
+                            [title]="lockTitle()" (click)="locked.set(!locked())"><app-icon [name]="locked() ? 'lock' : 'unlock'" /></button>
+                  }
+                  <div class="offset">
+                    <label for="audio-log-start">Log starts at</label>
+                    <input id="audio-log-start" type="number" step="0.1" [ngModel]="audioLogStart()" (ngModelChange)="setAudioLogStart(+$event)" />
+                    <span>s in the sound</span>
+                  </div>
+                </div>
+                @if (hasVideo() && audioClaps().length) {
+                  <!-- Or line the sound up with the footage on a clap heard in both. -->
+                  <div class="audio-claps">
+                    <div class="clap-field">
+                      <label for="phone-clap">Clap in the sound</label>
+                      <select id="phone-clap" [ngModel]="audioClapIndex()" (ngModelChange)="audioClapIndex.set(+$event)">
+                        @for (c of audioClaps(); track c; let i = $index) {
+                          <option [value]="i">{{ i === 0 ? 'First' : i === 1 ? 'Second' : 'Third' }} clap at {{ clockOf(c) }}</option>
+                        }
+                      </select>
+                    </div>
+                    <div class="clap-field">
+                      <span class="clap-label">Clap in the footage</span>
+                      <span class="mono">{{ footageClap() === null ? 'not set' : clockOf(footageClap()!) }}</span>
+                      @if (footageClapAuto() && footageClap() !== null) { <span class="hint">(found)</span> }
+                      <button class="btn small" type="button" (click)="footageClapHere()" title="Mark the clap at the footage's current frame">Clap is here</button>
+                      <button class="btn small" type="button" (click)="syncOnClap()" title="Line the sound track up with the footage on the clap heard in both">Sync on the clap</button>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+                  @if (!audioUrl()) {
+                    <p class="hint">{{ videoName() }}'s own sound. Add a sound track in Sources to use a phone or stick cam recording instead.</p>
+                <div class="video-scrub">
+                  <label for="sound-gain" class="scrub-label" title="Raise or lower the sound track, in the preview and the finished video">Sound gain</label>
+                  <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                  <input id="sound-gain" type="range" min="-12" max="12" step="0.5" [ngModel]="soundGain()" (ngModelChange)="soundGain.set(+$event)" />
+                  <button class="btn small step" type="button" (click)="soundGain.set(0)" [disabled]="soundGain() === 0" aria-label="Reset the gain" title="Reset the gain to 0 dB"><app-icon name="reset" /></button>
+                  <span class="mono">{{ dbText(soundGain()) }}</span>
+                </div>
+                  }
+                  <!-- Fades at the start and end of the finished video, like the music's. -->
+                  <div class="playback-row">
+                    <span class="field-label">Fades</span>
+                    @for (f of soundFades; track f.id) {
+                      <span class="stats-time">
+                        <button class="btn small step" type="button" [class.btn-primary]="f.value() > 0" [attr.aria-pressed]="f.value() > 0" [attr.aria-label]="f.label"
+                                [title]="f.title" (click)="f.value.set(f.value() > 0 ? 0 : 2)"><app-icon [name]="f.icon" /></button>
+                        @if (f.value() > 0) {
+                          <label class="sr-only" [for]="f.id">{{ f.label }} length in seconds</label>
+                          <input [id]="f.id" type="number" min="0.5" max="20" step="0.5" [ngModel]="f.value()" (ngModelChange)="setFade(f.value, +$event)" />
+                          <span>s</span>
+                        }
+                      </span>
+                    }
+                  </div>
+                }
+                @case ('music') {
+            @if (musicUrl()) {
+              <!-- Music under the whole video: from a point in the song, at its own level, faded in and out if wanted. It
+                   plays in the preview with the footage, from the start of the Render range. -->
+              <div class="video-sync audio-panel">
+                @if (musicPeaks(); as mp) {
+                  <!-- The song's peaks at the music gain, with the fades where they fall; shaded is the part in the video.
+                       Click to start the song there. -->
+                  <figure class="sound-profile">
+                    <figcaption>
+                      <span>Music: {{ musicName() }}</span>
+                      <span class="mono">{{ musicHover() !== null ? clockOf(musicHover()!) : clockOf(mp.duration) + ' long' }}</span>
+                    </figcaption>
+                    <svg viewBox="0 0 1000 60" preserveAspectRatio="none" role="img" [attr.aria-label]="musicLabel()"
+                         (mousemove)="musicHover.set(graphTime($event, mp.duration))" (mouseleave)="musicHover.set(null)"
+                         (click)="setMusicStart(graphTime($event, mp.duration))">
+                      <rect style="fill: var(--accent); opacity: .15" [attr.x]="musicX(musicStart())" [attr.width]="musicX(musicStart() + renderLength()) - musicX(musicStart())" y="0" height="60" />
+                      <path class="level" [attr.d]="musicPath()" />
+                      @if (musicClipPath()) { <path class="mark clips" [attr.d]="musicClipPath()"><title>Clips at this gain</title></path> }
+                      <line class="mark now" [attr.x1]="musicX(musicCursor())" [attr.x2]="musicX(musicCursor())" y1="0" y2="60" />
+                    </svg>
+                    <div class="profile-key">
+                      <span><i class="key arm"></i>In the video (click to start the song there)</span>
+                      <span><i class="key now"></i>Music position</span>
+                      @if (musicClipPath()) { <span><i class="key clips"></i>Clips at this gain</span> }
+                    </div>
+                  </figure>
+                }
+                <div class="video-scrub">
+                  <label for="music-gain" class="scrub-label" title="Raise or lower the music, in the preview and the finished video">Music gain</label>
+                  <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                  <input id="music-gain" type="range" min="-30" max="12" step="0.5" [ngModel]="musicGain()" (ngModelChange)="musicGain.set(+$event)" />
+                  <button class="btn small step" type="button" (click)="musicGain.set(0)" [disabled]="musicGain() === 0" aria-label="Reset the music gain" title="Reset the music gain to 0 dB"><app-icon name="reset" /></button>
+                  <span class="mono">{{ dbText(musicGain()) }}</span>
+                </div>
+                @if (musicPeakDb(); as peak) {
+                  <div class="playback-row">
+                    <span class="mono" [class.error]="peak.db >= 0" title="Loudest moment of the music in the video, at this gain">Peak {{ peak.text }}{{ peak.db >= 0 ? ': clips' : '' }}</span>
+                    @if (peak.fit !== musicGain()) {
+                      <button class="btn small" type="button" (click)="musicGain.set(peak.fit)" title="Set the music gain so its loudest moment peaks at −1 dB">Peak at −1 dB</button>
+                    }
+                  </div>
+                }
+                <div class="playback-row">
+                  <div class="offset" title="Where in the song the video's first moment falls, to skip an intro">
+                    <label for="music-start">Song starts at</label>
+                    <input id="music-start" type="number" min="0" step="0.5" [ngModel]="musicStart()" (ngModelChange)="setMusicStart(+$event)" />
+                    <span>s into the song</span>
+                  </div>
+                  @for (f of musicFades; track f.id) {
+                    <span class="stats-time">
+                      <button class="btn small step" type="button" [class.btn-primary]="f.value() > 0" [attr.aria-pressed]="f.value() > 0" [attr.aria-label]="f.label"
+                              [title]="f.title" (click)="f.value.set(f.value() > 0 ? 0 : 2)"><app-icon [name]="f.icon" /></button>
+                      @if (f.value() > 0) {
+                        <label class="sr-only" [for]="f.id">{{ f.label }} length in seconds</label>
+                        <input [id]="f.id" type="number" min="0.5" max="20" step="0.5" [ngModel]="f.value()" (ngModelChange)="setFade(f.value, +$event)" />
+                        <span>s</span>
+                      }
+                    </span>
+                  }
+                </div>
+              </div>
+            }
+                }
+              }
+            </fieldset>
+          </section>
+          </div>
+
           <section class="panel options" aria-labelledby="options-heading">
             <h2 id="options-heading">Options</h2>
             <!-- What the preview plays and draws with: the backdrop and the three files. None of the files is uploaded, and only
@@ -719,10 +857,26 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                          (change)="onAudioFile($event)" />
                 </label>
                 @if (audioUrl()) {
+                  <button class="btn small step" type="button" (click)="selectMedia('sound')" aria-label="Sound track settings" title="Sound track settings: gain and sync"><app-icon name="volume" /></button>
                   @if (hasCam()) {
                     <button class="btn small step" type="button" (click)="selectMedia('cam')" aria-label="Adjust the stick cam's picture" title="Adjust the stick cam's picture"><app-icon name="sliders" /></button>
                   }
                   <button class="btn small step" type="button" (click)="removeAudio()" aria-label="Remove the sound track" title="Remove the sound track"><app-icon name="trash" /></button>
+                }
+              </div>
+
+              <div class="source-row">
+                <span title="Music: a song under the whole video, with its own gain and optional fades"><app-icon name="music" /></span>
+                <span class="sr-only">Music:</span>
+                <span class="mono" [title]="musicName() || 'No music loaded'">{{ musicUrl() ? musicName() : 'No music' }}</span>
+                <label class="btn small step" [title]="musicUrl() ? 'Change the music' : 'Load music'">
+                  <app-icon name="folder" />
+                  <input class="sr-only" type="file" accept="audio/*" [attr.aria-label]="musicUrl() ? 'Change the music' : 'Load music'"
+                         (change)="onMusicFile($event)" />
+                </label>
+                @if (musicUrl()) {
+                  <button class="btn small step" type="button" (click)="selectMedia('music')" aria-label="Music settings" title="Music settings: gain, start and fades"><app-icon name="sliders" /></button>
+                  <button class="btn small step" type="button" (click)="removeMusic()" aria-label="Remove the music" title="Remove the music"><app-icon name="trash" /></button>
                 }
               </div>
 
@@ -888,13 +1042,15 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     /* Premiere-style, in both formats: the component panel left of the preview and Options along the bottom; a narrow
        window stacks everything. */
     .layout { display: grid; grid-template: "inspector preview" auto "options options" auto / 19rem minmax(0, 1fr); gap: 1rem; align-items: start; margin: 1rem 0; }
-    .preview-panel { grid-area: preview; } .inspector { grid-area: inspector; } .options { grid-area: options; }
+    .preview-panel { grid-area: preview; } .side { grid-area: inspector; display: grid; gap: 1rem; } .options { grid-area: options; }
+    .side .video-scrub { flex-wrap: wrap; } .side .scrub-label { flex-basis: 100%; }
+    .side .video-scrub input[type=range] { flex-basis: 4rem; } .side .video-scrub .mono { min-width: 0; }
     @media (max-width: 60rem) { .layout { grid-template: "preview" "inspector" "options" / 1fr; } }
     /* Options: its sub-panels side by side, three across (one under the other on narrow windows), each the full height
        of the row with its contents from the top. */
     .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
     .options > h2 { grid-column: 1 / -1; margin: 0; }
-    .options > .panel { margin: 0; align-content: start; }
+    .options > .panel { margin: 0; align-content: start; grid-template-columns: minmax(0, 1fr); }
     .options > .export { grid-column: 1 / -1; justify-items: center; text-align: center; }
     .export .toggles { justify-content: center; }
     @media (max-width: 60rem) { .options { grid-template-columns: 1fr; } }
@@ -969,7 +1125,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .profile-key span { display: inline-flex; align-items: center; gap: .35rem; }
     .key { display: inline-block; width: 0; height: .9rem; border-left: 2px solid; }
     .key.clap { border-left-style: dashed; }
-    .sync-buttons { display: flex; flex-wrap: nowrap; gap: .5rem; white-space: nowrap; }
+    .clips { stroke: var(--danger); border-color: var(--danger); }
+    .sync-buttons { display: flex; flex-wrap: wrap; gap: .5rem; }
     canvas { display: block; width: 100%; height: auto; touch-action: none; } /* dragging an element shouldn't scroll the page on touch screens */
     /* The footage and overlay sliders share one look so they read as a pair. */
     .scrub, .video-scrub { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; font-size: .92rem; }
@@ -1010,7 +1167,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .grade input[type=range] { width: 100%; min-width: 0; }
     .grade .mono { text-align: right; font-size: .82rem; }
     .sources .source-row { flex-wrap: nowrap; align-items: center; }
-    .source-row .mono { font-size: .82rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .source-row .mono { font-size: .82rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .small { padding: .3rem .75rem; font-size: .88rem; justify-self: start; }
     .link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
     .howto ol { margin: 0; padding-left: 1.25rem; display: grid; gap: .35rem; }
@@ -1203,25 +1360,338 @@ export class OverlayExportComponent {
   audioOnly = computed(() => !!this.audioUrl() && !this.hasVideo());
   private audioFrame: number | null = null;
   audioProfile = signal<SoundProfile | null>(null);
-  /** Phone-recording time under the pointer on the sound profile. */
-  profileHover = signal<number | null>(null);
-  profilePath = computed(() => {
-    const prof = this.audioProfile();
-    if (!prof) return '';
-    const n = prof.levels.length, pts: string[] = [];
-    for (let i = 0; i < n; i++) pts.push(`${((i + 0.5) / n * 1000).toFixed(1)},${(58 - prof.levels[i] * 54).toFixed(1)}`);
+  // ---- the sound track's level ----
+  /** Gain on the sound track in dB, in the preview and the finished video alike. */
+  soundGain = signal(0);
+  soundPeaks = signal<SoundPeaks | null>(null);
+  private gainFactor = computed(() => 10 ** (this.soundGain() / 20));
+  /** "+3.0 dB", "−6.5 dB", "0.0 dB". */
+  readonly dbText = (db: number) => `${db > 0 ? '+' : db < 0 ? '−' : ''}${Math.abs(db).toFixed(1)} dB`;
+  /** How long the finished video runs, the stats hold included. */
+  renderLength = computed(() => Math.max(0, this.renderEnd() - this.renderStart()) + this.renderStats().hold);
+  /**
+   * The loudest sample at this gain, in dB below full scale (0 or more clips): over the part of the sound track in the
+   * render range, or all of it without footage to place it. `fit` is the gain that puts it at −1 dB.
+   */
+  soundPeakDb = computed(() => {
+    const p = this.soundPeaks(), o = this.audioOffset();
+    if (!p || !p.duration) return null;
+    const whole = o === null, from = whole ? 0 : this.renderStart() - o;
+    const peak = peakOver(p, from, whole ? p.duration : from + this.renderLength(), this.soundGain(), -12);
+    return peak && { ...peak, whole };
+  });
+  /** The sound plays through Web Audio, for a gain past 100% (which a media element's volume can't reach) and mutes. */
+  private audioCtx: AudioContext | null = null;
+  private soundLevel: GainNode | null = null;
+  private musicLevel: GainNode | null = null;
+  private mixBus: GainNode | null = null;
+  private routed = new WeakSet<HTMLMediaElement>();
+  private routeSound = effect(() => {
+    const el = this.extAudio()?.nativeElement;
+    if (el) untracked(() => this.route(el, 'sound'));
+  });
+  private routeMusic = effect(() => {
+    const el = this.musicEl()?.nativeElement;
+    if (el) untracked(() => this.route(el, 'music'));
+  });
+  private routeFootage = effect(() => {
+    const el = this.bgVideo()?.nativeElement;
+    if (el) untracked(() => this.route(el, 'footage'));
+  });
+  /** Anything playing, which needs the audio context running. */
+  private hearing = computed(() => this.audioPlaying() || this.videoPlaying() || this.musicPlaying());
+  private applyGain = effect(() => {
+    const k = this.soundOut();
+    if (this.soundLevel) this.soundLevel.gain.value = k;
+  });
+  private applyMusicGain = effect(() => {
+    const k = this.musicOut();
+    if (this.musicLevel) this.musicLevel.gain.value = k * untracked(() => this.musicFade());
+  });
+  /** Browsers start an audio context suspended until someone plays something. */
+  private resumeWhilePlaying = effect(() => {
+    if (this.hearing()) untracked(() => this.audioCtx?.resume().catch(() => undefined));
+  });
+
+  /** Plays `el` through its gain into the mix bus; once per element, as Web Audio allows. */
+  private route(el: HTMLMediaElement, kind: 'sound' | 'music' | 'footage') {
+    if (this.routed.has(el)) return;
+    try {
+      if (!this.audioCtx) {
+        const ctx = new AudioContext();
+        this.mixBus = ctx.createGain();
+        this.mixBus.connect(ctx.destination);
+        this.soundLevel = ctx.createGain();
+        this.soundLevel.gain.value = this.soundOut();
+        this.soundLevel.connect(this.mixBus);
+        this.musicLevel = ctx.createGain();
+        this.musicLevel.gain.value = this.musicOut();
+        this.musicLevel.connect(this.mixBus);
+        this.audioCtx = ctx;
+      }
+      // The footage's own sound is the sound when there's no sound track, so it takes the sound's gain.
+      const into = kind === 'music' ? this.musicLevel! : this.soundLevel!;
+      this.audioCtx.createMediaElementSource(el).connect(into);
+      this.routed.add(el);
+    } catch (e) {
+      console.warn('[sound] playing without the gain', e); // the element still plays on its own
+    }
+  }
+
+  // ---- music under the whole video ----
+  private musicFile: File | null = null;
+  private musicEl = viewChild<ElementRef<HTMLAudioElement>>('musicEl');
+  musicUrl = signal<string | null>(null);
+  musicName = signal('');
+  musicPlaying = signal(false);
+  musicPeaks = signal<SoundPeaks | null>(null);
+  /** Music gain in dB. */
+  musicGain = signal(0);
+  private musicFactor = computed(() => 10 ** (this.musicGain() / 20));
+  /** Seconds into the song at the finished video's first moment (the Render range's start). */
+  musicStart = signal(0);
+  /** Seconds the music fades in over at the start, and out over at the end; 0 for none. */
+  musicFadeIn = signal(0);
+  musicFadeOut = signal(0);
+  readonly musicFades = [
+    { id: 'music-fade-in', value: this.musicFadeIn, icon: 'fade-in', label: 'Fade the music in',
+      title: 'Fade the music in: it rises from silence over the start of the video' },
+    { id: 'music-fade-out', value: this.musicFadeOut, icon: 'fade', label: 'Fade the music out',
+      title: 'Fade the music out: it falls to silence over the end of the video' },
+  ] as const;
+  /** Seconds the sound (the sound track, or the footage's own) fades in over at the start and out over at the end; 0 for none. */
+  soundFadeIn = signal(0);
+  soundFadeOut = signal(0);
+  readonly soundFades = [
+    { id: 'sound-fade-in', value: this.soundFadeIn, icon: 'fade-in', label: 'Fade the sound in',
+      title: 'Fade the sound in: it rises from silence over the start of the video' },
+    { id: 'sound-fade-out', value: this.soundFadeOut, icon: 'fade', label: 'Fade the sound out',
+      title: 'Fade the sound out: it falls to silence over the end of the video' },
+  ] as const;
+  /** The fades' level at the preview's current moment, 0 to 1. */
+  private musicFade = signal(1);
+  /** Where the music is, in seconds into the song: it follows the footage from the Render range's start. */
+  musicCursor = computed(() => this.videoTime() - this.renderStart() + this.musicStart());
+  /** Song time under the pointer on the music graph. */
+  musicHover = signal<number | null>(null);
+  /** Each step of the song's peaks as it will sound: at the music gain, and inside the video with the fades applied. */
+  private musicLevels = computed(() => {
+    const p = this.musicPeaks();
+    if (!p) return null;
+    const n = p.peaks.length, k = this.musicFactor(), start = this.musicStart(), len = this.renderLength();
+    const fadeIn = this.musicFadeIn(), fadeOut = this.musicFadeOut();
+    return Array.from(p.peaks, (v, i) => {
+      const t = ((i + 0.5) / n) * p.duration - start;
+      const inside = t >= 0 && t <= len;
+      const fade = inside ? Math.max(0, Math.min(1, fadeIn > 0 ? t / fadeIn : 1, fadeOut > 0 ? (len - t) / fadeOut : 1)) : 1;
+      return { level: v * k * fade, inside };
+    });
+  });
+  /** The levels drawn from −48 dB at the bottom to full scale at the top. */
+  musicPath = computed(() => {
+    const levels = this.musicLevels();
+    if (!levels) return '';
+    const n = levels.length;
+    const pts = levels.map(({ level }, i) => {
+      const db = 20 * Math.log10(level + 1e-6);
+      return `${(((i + 0.5) / n) * 1000).toFixed(1)},${(60 - Math.min(1, Math.max(0, (db + 48) / 48)) * 56).toFixed(1)}`;
+    });
     return `M0,60 L${pts.join(' L')} L1000,60 Z`;
   });
+  /** Ticks where the part in the video clips. */
+  musicClipPath = computed(() => {
+    const levels = this.musicLevels();
+    if (!levels) return '';
+    const n = levels.length, d: string[] = [];
+    levels.forEach(({ level, inside }, i) => { if (inside && level >= 1) d.push(`M${(((i + 0.5) / n) * 1000).toFixed(1)},0 V10`); });
+    return d.join(' ');
+  });
+  musicLabel = computed(() => {
+    const p = this.musicPeaks();
+    return `Peaks of ${this.musicName()} at ${this.dbText(this.musicGain())} over ${preciseClock(p?.duration ?? 0)}; the video uses `
+      + `${preciseClock(this.musicStart())} to ${preciseClock(this.musicStart() + this.renderLength())}`;
+  });
+  musicX(t: number) {
+    const d = this.musicPeaks()?.duration;
+    return d ? (Math.min(d, Math.max(0, t)) / d) * 1000 : 0;
+  }
+  /** Time on a graph of a `duration`-long recording under the pointer. */
+  graphTime(e: MouseEvent, duration: number) {
+    const box = (e.currentTarget as Element).getBoundingClientRect();
+    return Math.round(Math.min(duration, Math.max(0, ((e.clientX - box.left) / box.width) * duration)) * 10) / 10;
+  }
+  musicPeakDb = computed(() => {
+    const p = this.musicPeaks();
+    return p && peakOver(p, this.musicStart(), this.musicStart() + this.renderLength(), this.musicGain(), -30);
+  });
+
+  onMusicFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) this.loadMusic(file);
+  }
+
+  async loadMusic(file: File) {
+    this.removeMusic();
+    this.musicFile = file;
+    this.musicUrl.set(URL.createObjectURL(file)); // plays from this computer, like the footage
+    this.selectMedia('music');
+    this.musicName.set(file.name);
+    this.muted.set(false);
+    try {
+      const peaks = await soundPeaks(file);
+      if (this.musicFile === file) this.musicPeaks.set(peaks);
+    } catch {
+      this.backdropError.set(`Couldn't read the music in ${file.name}. Try an MP3, M4A, WAV or OGG.`);
+    }
+    this.syncAudio(true);
+  }
+
+  removeMusic() {
+    this.musicEl()?.nativeElement.pause();
+    const url = this.musicUrl();
+    if (url) URL.revokeObjectURL(url);
+    this.musicFile = null;
+    this.musicUrl.set(null);
+    this.musicName.set('');
+    this.musicPeaks.set(null);
+    this.musicPlaying.set(false);
+  }
+
+  setMusicStart(v: number) {
+    if (!Number.isFinite(v)) return;
+    this.musicStart.set(Math.max(0, Math.round(v * 100) / 100));
+    this.syncAudio(true);
+  }
+
+  setFade(fade: { set(v: number): void }, v: number) {
+    if (Number.isFinite(v)) fade.set(Math.min(20, Math.max(0.5, v)));
+  }
+
+  /**
+   * Keeps the music under the footage: the Render range's start is `musicStart` into the song, and it plays to the
+   * end of the finished video, fading as it will there. Silent without footage on screen, which is its clock.
+   */
+  private syncMusic(force: boolean) {
+    const m = this.musicEl()?.nativeElement, v = this.bgVideo()?.nativeElement;
+    // The sound's fades, where the footage is in the finished video.
+    if (v && this.soundLevel) {
+      const at = v.currentTime - this.renderStart();
+      this.soundLevel.gain.value = this.soundOut() * fadeLevel(at, this.renderLength(), this.soundFadeIn(), this.soundFadeOut());
+    }
+    if (!m) return;
+    if (!v) { if (!m.paused) m.pause(); return; }
+    const t = v.currentTime - this.renderStart(), len = this.renderLength(), target = t + this.musicStart();
+    const inside = t >= 0 && t <= len && (!Number.isFinite(m.duration) || target < m.duration);
+    this.musicFade.set(fadeLevel(t, len, this.musicFadeIn(), this.musicFadeOut()));
+    if (this.musicLevel) this.musicLevel.gain.value = this.musicOut() * this.musicFade();
+    if (!inside || v.paused) {
+      if (!m.paused) m.pause();
+      if (inside && force) m.currentTime = target;
+      return;
+    }
+    if (force || Math.abs(m.currentTime - target) > 0.06) m.currentTime = target;
+    if (m.paused) m.play().catch(() => undefined);
+  }
+
+  // ---- the timeline: every file as a track, placed by its sync ----
+  soundMuted = signal(false);
+  musicMuted = signal(false);
+  /** What the sound and the music play at, mutes included. */
+  private soundOut = computed(() => (this.soundMuted() ? 0 : this.gainFactor()));
+  private musicOut = computed(() => (this.musicMuted() ? 0 : this.musicFactor()));
+  toggleMute(id: TrackId) {
+    if (id === 'sound') this.soundMuted.update(m => !m);
+    if (id === 'music') this.musicMuted.update(m => !m);
+  }
+  /**
+   * Video on top, numbered from the bottom layer up (the OSD over the footage over the stick cam, which shows in
+   * vertical only), then the sound: the sound track (or the footage's own) and the music, trimmed to what plays.
+   */
+  tracks = computed<TimelineTrack[]>(() => {
+    if (!this.hasVideo()) return [];
+    const video: Omit<TimelineTrack, 'label'>[] = [], audio: Omit<TimelineTrack, 'label'>[] = [];
+    const logAt = this.videoOffset(), soundAt = this.audioOffset() ?? 0;
+    const soundLen = this.soundPeaks()?.duration ?? this.audioProfile()?.duration ?? 0;
+    video.push({ id: 'osd', name: 'OSD overlay', kind: 'video', start: logAt, end: logAt + this.seconds() + this.tail() });
+    video.push({ id: 'footage', name: this.videoName(), kind: 'video', start: 0, end: this.videoDuration() });
+    if (this.vertical() && this.audioUrl() && this.audioIsVideo()) {
+      video.push({ id: 'cam', name: this.audioName(), kind: 'video', start: soundAt, end: soundAt + soundLen, shown: this.showPip() });
+    }
+    const k = this.gainFactor(), gain = this.dbText(this.soundGain());
+    const peaks = this.soundPeaks();
+    audio.push(this.audioUrl()
+      ? { id: 'sound', name: this.audioName(), kind: 'audio', start: soundAt, end: soundAt + soundLen, gain, muted: this.soundMuted(),
+          levels: peaks ? this.withFades(peaks, soundAt, k) : undefined }
+      : { id: 'sound', name: `${this.videoName()} (its own sound)`, kind: 'audio', start: 0, end: this.videoDuration(), gain, muted: this.soundMuted() });
+    const music = this.musicLevels(), song = this.musicPeaks();
+    if (this.musicUrl() && music && song) {
+      const at = this.renderStart(), len = Math.min(this.renderLength(), Math.max(0, song.duration - this.musicStart()));
+      audio.push({ id: 'music', name: this.musicName(), kind: 'audio', start: at, end: at + len, gain: this.dbText(this.musicGain()),
+                   muted: this.musicMuted(), levels: music.filter(m => m.inside).map(m => m.level) });
+    }
+    return [...video.map((t, i) => ({ ...t, label: `V${video.length - i}` })), ...audio.map((t, i) => ({ ...t, label: `A${i + 1}` }))];
+  });
+  /** On the sound track's clip, as on its graph: the arming and launch heard, the claps, and where the sound is. */
+  trackMarks = computed<Partial<Record<TrackId, TimelineMark[]>>>(() => {
+    const at = this.audioOffset();
+    if (!this.audioUrl() || at === null) return {};
+    const name = this.audioName(), claps = this.audioClaps(), pick = this.audioClapIndex();
+    const marks: TimelineMark[] = claps.map((c, i) => ({
+      at: at + c, kind: 'clap', chosen: this.hasVideo() && i === pick,
+      label: `Clap${claps.length > 1 ? ` ${i + 1}` : ''} heard at ${preciseClock(c)} in ${name}.`
+        + (this.hasVideo() && i === pick ? ' This is the clap Sync on the clap uses.' : ' Pick it under Clap in the sound to sync on it.'),
+    }));
+    const arm = this.audioArming(), launch = this.launchInAudio();
+    if (arm) {
+      const chosen = this.audioLogStart() === arm.logStart;
+      const used = chosen ? ' The sound track is lined up on it.' : ' Use the arming it heard to line the sound up on it.';
+      marks.push({ at: at + arm.logStart, kind: 'arm', chosen, label: `Arming heard at ${preciseClock(arm.logStart)} in ${name}: where the log starts.${used}` });
+      if (launch !== null) {
+        marks.push({ at: at + launch, kind: 'arm', chosen, label: `Launch heard at ${preciseClock(launch)} in ${name}, as long after arming as the log's takeoff.` });
+      }
+    }
+    const now = this.soundCursor();
+    marks.push({ at: at + now, kind: 'now', label: `Sound track position: ${preciseClock(now)}. It follows the overlay; the Sound track slider in A1's settings moves it on its own.` });
+    return { sound: marks };
+  });
+  /** A sound's peaks at gain `k`, with the sound's fades where the finished video starts and ends; it starts at `at`. */
+  private withFades(p: SoundPeaks, at: number, k: number) {
+    const n = p.peaks.length, start = this.renderStart(), len = this.renderLength(), up = this.soundFadeIn(), down = this.soundFadeOut();
+    return Array.from(p.peaks, (v, i) => v * k * fadeLevel(at + ((i + 0.5) / n) * p.duration - start, len, up, down));
+  }
+  timelineFrom = computed(() => Math.min(0, ...this.tracks().map(t => t.start)));
+  timelineTo = computed(() => Math.max(this.videoDuration(), ...this.tracks().map(t => t.end)));
+  trackLabel = computed(() => {
+    const id = this.mediaSelected();
+    if (!id) return 'Track';
+    const names: Record<TrackId, string> = { osd: 'OSD overlay', footage: 'Flight footage', cam: 'Stick cam',
+                                              sound: this.audioUrl() ? 'Sound track' : 'Footage sound', music: 'Music' };
+    const tr = this.tracks().find(t => t.id === id);
+    return (tr ? `${tr.label} · ` : '') + names[id];
+  });
+
+  // ---- the footage, overlay and sound locked together ----
+  /** The footage has been lined up on the log by hand: a sync button, the motor sound, or a typed start. */
+  private footageSynced = signal(false);
+  /** The same for the sound track. */
+  private soundSynced = signal(false);
+  /** Locked: the Flight footage and Sound track sliders, and the Render handles, move the overlay and each other too. */
+  locked = signal(false);
+  canLock = computed(() => this.hasVideo() && this.footageSynced());
+  lockTitle = computed(() => (this.locked()
+    ? 'Locked: the footage, overlay and sound move together. Click to unlock and move one on its own.'
+    : 'Unlocked: the Flight footage and Sound track sliders move only their own. Click to lock them together.'));
+
+  /** Locks once everything loaded is lined up, which is when the last sync button is pressed. */
+  private lockIfSynced() {
+    if (this.canLock() && (!this.audioUrl() || this.soundSynced())) this.locked.set(true);
+  }
+
   launchInAudio = computed(() => {
     const arm = this.audioArming(), t = this.takeoffTime();
     return arm && t !== null ? arm.logStart + t : null;
-  });
-  profileLabel = computed(() => {
-    const arm = this.audioArming(), claps = this.audioClaps(), launch = this.launchInAudio();
-    const parts = [`Loudness of ${this.audioName()} over ${preciseClock(this.audioProfile()?.duration ?? 0)}`];
-    if (arm) parts.push(`arming at ${preciseClock(arm.logStart)}` + (launch !== null ? `, launch at ${preciseClock(launch)}` : ''));
-    if (claps.length) parts.push(`claps at ${claps.map(c => preciseClock(c)).join(', ')}`);
-    return parts.join('; ');
   });
   /** Footage time at which the sound track starts: both are placed on the log. Null without footage. */
   audioOffset = computed(() => (this.hasVideo() ? this.videoOffset() - this.audioLogStart() : null));
@@ -1231,22 +1701,13 @@ export class OverlayExportComponent {
     return o >= 0 ? `${preciseClock(o)} into your footage` : `${preciseClock(-o)} before your footage`;
   });
   readonly clockOf = preciseClock;
-  profileX(t: number) {
-    const d = this.audioProfile()?.duration;
-    return d ? (Math.min(d, Math.max(0, t)) / d) * 1000 : 0;
-  }
-  private profileTime(e: MouseEvent) {
-    const d = this.audioProfile()?.duration ?? 0, box = (e.currentTarget as Element).getBoundingClientRect();
-    return Math.min(d, Math.max(0, ((e.clientX - box.left) / box.width) * d));
-  }
-  hoverProfile(e: MouseEvent) { this.profileHover.set(this.profileTime(e)); }
-  seekProfile(e: MouseEvent) { this.scrubSound(this.profileTime(e)); }
-
-  /** Moves only the sound track, like the Flight footage slider moves only the footage. */
+  /** Moves only the sound track, as the playhead moves only the footage when unlocked; locked, everything follows. */
   scrubSound(t: number) {
     const d = this.audioProfile()?.duration ?? 0;
     if (this.videoPlaying() || this.audioPlaying()) this.stopVideo();
-    this.soundCursor.set(Math.round(Math.min(d, Math.max(0, t)) * 1000) / 1000);
+    const at = Math.round(Math.min(d, Math.max(0, t)) * 1000) / 1000;
+    if (this.locked() && this.bgVideo()) this.scrubVideo(at - this.audioLogStart() + this.videoOffset());
+    this.soundCursor.set(at);
   }
 
   stepSound(dir: -1 | 1) { this.scrubSound(this.soundCursor() + dir / 30); }
@@ -1254,6 +1715,8 @@ export class OverlayExportComponent {
   /** The sound track's position is arming: the log starts there, and the overlay jumps to its start. */
   soundArmingHere() {
     this.audioLogStart.set(Math.round(this.soundCursor() * 100) / 100);
+    this.soundSynced.set(true);
+    this.lockIfSynced();
     this.previewTime.set(0);
     this.seekVideoToPreview();
     this.syncAudio(true);
@@ -1264,6 +1727,8 @@ export class OverlayExportComponent {
     const t = this.takeoffTime();
     if (t === null) return;
     this.audioLogStart.set(Math.round((this.soundCursor() - t) * 100) / 100);
+    this.soundSynced.set(true);
+    this.lockIfSynced();
     this.previewTime.set(t);
     this.seekVideoToPreview();
     this.syncAudio(true);
@@ -1328,6 +1793,8 @@ export class OverlayExportComponent {
       if (url) URL.revokeObjectURL(url);
       const audio = this.audioUrl();
       if (audio) URL.revokeObjectURL(audio);
+      this.removeMusic();
+      this.audioCtx?.close();
     });
     effect(() => this.drawPreview());
   }
@@ -1382,10 +1849,9 @@ export class OverlayExportComponent {
     if (on && key === 'showCraft' && !this.hasCraft()) this.pickElement('craft');
   }
 
-  /** Picks an OSD element (outlined on the preview, its settings shown) and drops any picked video. */
+  /** Picks an OSD element: outlined on the preview, its settings in Components. */
   pickElement(key: ElementKey) {
     this.selected.set(key);
-    this.mediaSelected.set(null);
   }
 
   /** The Show toggles: what each switches, its icon and hover text, and whether this log has the data for it. */
@@ -1408,25 +1874,22 @@ export class OverlayExportComponent {
   hasCraft = computed(() => !!this.opts().craftText.trim());
 
   // ---- the component panel: the picked video or OSD element, and everything about it ----
-  inspected = computed<ElementKey | 'footage' | 'cam' | null>(() => this.mediaSelected() ?? this.selected());
+  inspected = computed<ElementKey | null>(() => this.selected());
   inspectedLabel = computed(() => {
     const k = this.inspected();
-    return k === null ? 'Components' : k === 'footage' ? 'Flight footage' : k === 'cam' ? 'Stick cam' : this.labels[k];
+    return k === null ? 'Components' : this.labels[k];
   });
   /** What can be picked: the videos on screen, every OSD element drawn, and the title and craft name even while empty. */
   inspectables = computed(() => {
-    const list: { key: ElementKey | 'footage' | 'cam'; label: string }[] = [];
-    if (this.hasFootage()) list.push({ key: 'footage', label: 'Flight footage' });
-    if (this.hasCam()) list.push({ key: 'cam', label: 'Stick cam' });
+    const list: { key: ElementKey; label: string }[] = [];
     for (const p of this.placed()) if (p.key !== 'title' && p.key !== 'craft') list.push({ key: p.key, label: this.labels[p.key] });
     list.push({ key: 'title', label: this.hasTitle() ? 'Title' : 'Add title' });
     list.push({ key: 'craft', label: this.hasCraft() ? 'Craft name' : 'Add craft name' });
     return list;
   });
 
-  inspect(key: ElementKey | 'footage' | 'cam') {
-    if (key === 'footage' || key === 'cam') this.selectMedia(key);
-    else this.pickElement(key);
+  inspect(key: ElementKey) {
+    this.pickElement(key);
   }
 
   setTrailIntensity(value: number) {
@@ -1524,13 +1987,14 @@ export class OverlayExportComponent {
     const pt = this.canvasPoint(e);
     const p = this.hit(pt.x, pt.y);
     if (!p) {
-      // Not on an OSD element: pick the video under the pointer, so its settings show in Options.
-      this.selectMedia(this.mediaAt(pt.y));
+      // Not on an OSD element: let go of the picked one, and pick the video under the pointer as a track.
+      this.selected.set(null);
+      const media = this.mediaAt(pt.y);
+      if (media) this.selectMedia(media);
       return;
     }
     e.preventDefault();
     this.selected.set(p.key);
-    this.mediaSelected.set(null);
     this.drag = { key: p.key, dx: pt.x - (p.x + p.w / 2), dy: pt.y - (p.y + p.h / 2) };
     this.dragging.set(true);
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
@@ -1597,6 +2061,9 @@ export class OverlayExportComponent {
 
   loadVideo(file: File) {
     this.stopVideo();
+    this.selectMedia('footage');
+    this.footageSynced.set(false);
+    this.locked.set(false);
     const old = this.videoUrl();
     if (old) URL.revokeObjectURL(old);
     // Played straight from the file on this computer; nothing is uploaded.
@@ -1639,11 +2106,16 @@ export class OverlayExportComponent {
     this.audioClapIndex.set(0);
     this.audioArming.set(null);
     this.audioProfile.set(null);
+    this.soundPeaks.set(null);
     this.audioLogStart.set(0);
+    this.soundSynced.set(false);
+    this.locked.set(false);
+    this.selectMedia('sound');
     this.muted.set(false); // adding sound means wanting to hear it
     this.clapStatus.set(`Listening for arming and claps in ${file.name}...`);
     try {
       this.audioProfile.set(await soundProfile(file));
+      this.soundPeaks.set(await soundPeaks(file));
       const claps = (await findClaps(file, 4)).claps;
       const takeoff = this.takeoffTime();
       const arm = takeoff === null ? null : await findArming(file, takeoff);
@@ -1723,6 +2195,7 @@ export class OverlayExportComponent {
     this.audioClaps.set([]);
     this.audioArming.set(null);
     this.audioProfile.set(null);
+    this.soundPeaks.set(null);
     this.footageClap.set(null);
   }
 
@@ -1731,6 +2204,7 @@ export class OverlayExportComponent {
    * re-seeked when it drifts more than 60 ms (or on every seek). Silent where the recording hasn't started yet or has ended.
    */
   syncAudio(force = false) {
+    this.syncMusic(force);
     const v = this.bgVideo()?.nativeElement, a = this.extAudio()?.nativeElement, o = this.audioOffset();
     if (!v) return; // no footage on screen: the sound plays on its own
     if (!a || o === null) { a?.pause(); return; }
@@ -1759,13 +2233,21 @@ export class OverlayExportComponent {
     if (v) this.videoTime.set(v.currentTime);
   }
 
-  /** Moves only the video (pausing it), so you can find a frame without the overlay moving. */
+  /**
+   * Moves only the video (pausing it), so you can find a frame without the overlay moving. Locked, the overlay goes to
+   * the same moment (hidden before the log starts), and the sound track follows the video as it seeks.
+   */
   scrubVideo(t: number) {
     const v = this.bgVideo()?.nativeElement;
     if (!v || !Number.isFinite(t)) return;
     v.pause();
     v.currentTime = Math.max(0, t);
     this.videoTime.set(v.currentTime);
+    if (this.locked()) {
+      const logT = v.currentTime - this.videoOffset();
+      this.beforeLog.set(logT < 0);
+      this.previewTime.set(this.clampPreview(logT));
+    }
   }
 
   /** The overlay one frame back or forward at the export frame rate; a paused video follows, like the slider. */
@@ -1794,6 +2276,8 @@ export class OverlayExportComponent {
   setAudioLogStart(v: number) {
     if (!Number.isFinite(v)) return;
     this.audioLogStart.set(Math.round(v * 100) / 100); // negative: the recording started after arming
+    this.soundSynced.set(true);
+    this.lockIfSynced();
     const a = this.extAudio()?.nativeElement;
     if (a && this.audioOnly() && !a.paused) a.currentTime = this.previewTime() + this.audioLogStart();
     this.syncAudio(true);
@@ -1835,6 +2319,8 @@ export class OverlayExportComponent {
   setOffset(v: number) {
     if (!Number.isFinite(v)) return;
     this.videoOffset.set(Math.round(v * 100) / 100);
+    this.footageSynced.set(true);
+    this.lockIfSynced();
     if (!this.videoPlaying()) this.seekVideoToPreview(); // keep the overlay where it is and slide the video under it
   }
 
@@ -1872,6 +2358,8 @@ export class OverlayExportComponent {
     this.videoOffset.set(Math.round((v.currentTime - t) * 100) / 100);
     this.previewTime.set(t);
     this.beforeLog.set(false);
+    this.footageSynced.set(true);
+    this.lockIfSynced();
   }
 
   /** Use the frame on screen as the moment of arming. */
@@ -1882,6 +2370,8 @@ export class OverlayExportComponent {
     this.videoOffset.set(Math.round(v.currentTime * 100) / 100);
     this.previewTime.set(0);
     this.beforeLog.set(false);
+    this.footageSynced.set(true);
+    this.lockIfSynced();
   }
 
   /** While the video plays, the overlay follows its clock, frame by frame where the browser supports it. */
@@ -1891,6 +2381,7 @@ export class OverlayExportComponent {
     const t = v.currentTime - this.videoOffset();
     this.beforeLog.set(t < 0);
     this.previewTime.set(Math.min(this.previewMax(), Math.max(0, t)));
+    this.videoTime.set(v.currentTime);
     this.syncAudio();
     const next = () => this.followVideo();
     if ('requestVideoFrameCallback' in v) {
@@ -1903,6 +2394,7 @@ export class OverlayExportComponent {
   private stopVideo() {
     this.bgVideo()?.nativeElement.pause();
     this.extAudio()?.nativeElement.pause();
+    this.musicEl()?.nativeElement.pause();
     if (this.audioFrame !== null) { cancelAnimationFrame(this.audioFrame); this.audioFrame = null; }
     this.videoPlaying.set(false);
   }
@@ -1913,7 +2405,7 @@ export class OverlayExportComponent {
 
   // ---- picking a video in the preview ----
   /** The video whose picture settings show in Options; only one thing (a video or an OSD element) is picked at a time. */
-  mediaSelected = signal<'footage' | 'cam' | null>(null);
+  mediaSelected = signal<TrackId | null>(null);
   hasFootage = computed(() => this.hasVideo());
   /** The stick cam's picture is on screen: vertical only (landscape plays just its sound), and switched on. */
   hasCam = computed(() => this.vertical() && !!this.audioUrl() && this.audioIsVideo() && this.showPip());
@@ -1926,9 +2418,8 @@ export class OverlayExportComponent {
   }
 
   /** Picks a video, or nothing (clicking empty preview), and drops any picked OSD element either way. */
-  selectMedia(media: 'footage' | 'cam' | null) {
+  selectMedia(media: TrackId | null) {
     this.mediaSelected.set(media);
-    this.selected.set(null);
   }
 
   // ---- finished video: the footage range to render, set from the footage slider ----
@@ -1940,6 +2431,18 @@ export class OverlayExportComponent {
   clipText = computed(() => this.wholeClip()
     ? `the whole clip (${preciseClock(this.videoDuration())})`
     : `${preciseClock(this.renderStart())} – ${preciseClock(this.renderEnd())} (${preciseClock(this.renderEnd() - this.renderStart())})`);
+  /**
+   * The post-flight stats in the finished video: they come up where the flight ends, or at the end of the render range
+   * if that's sooner (as when you disarm), and the last footage frame holds for as long as they run past the footage.
+   * `after` is in log time; `hold` is the seconds added after the range. No stats if the log hasn't started by then.
+   */
+  renderStats = computed(() => {
+    const offset = this.videoOffset();
+    const at = Math.min(offset + this.seconds(), this.renderEnd());
+    if (!this.opts().showStats || at < offset || at < this.renderStart()) return { after: this.seconds(), hold: 0, end: this.seconds() };
+    const tail = this.tail();
+    return { after: at - offset, hold: Math.max(0, at + tail - this.renderEnd()), end: at - offset + tail };
+  });
   /** How the render slider's handles read out to assistive tech. */
   readonly clockText = (v: number) => preciseClock(v);
 
@@ -1951,8 +2454,9 @@ export class OverlayExportComponent {
   /** What the finished video holds, as hover text on its heading. */
   finishedHover = computed(() =>
     `Finished video (.mp4): your footage${this.hasCam() ? ', stick cam' : ''}, `
-    + `${this.audioUrl() ? `${this.audioName()}'s sound` : 'its sound'} and the OSD in one file, as in the preview. `
+    + `${this.audioUrl() ? `${this.audioName()}'s sound` : 'its sound'}${this.musicUrl() ? `, ${this.musicName()} as music` : ''} and the OSD in one file, as in the preview. `
     + `${this.clipText()[0].toUpperCase()}${this.clipText().slice(1)} at ${this.resolutions()[this.resIndex()].label}, ${fpsLabel(this.fps())} fps`
+    + `${this.renderStats().hold > 0 ? `, then the last frame holds ${this.renderStats().hold.toFixed(1)} s under the flight stats` : ''}`
     + `${this.fadeOut() > 0 ? `, fading out over ${this.fadeOut()} s` : ''}. Set its range with the Render slider under the preview.`);
 
   /** What the overlay export makes, as hover text on its button. */
@@ -2021,7 +2525,9 @@ export class OverlayExportComponent {
       }
     }
 
-    const sound = this.soundFile && this.audioUrl() ? { file: this.soundFile, offset: this.audioOffset() ?? 0 } : null;
+    const fadeIn = this.soundFadeIn(), fadeOut = this.soundFadeOut();
+    const sound = this.soundFile && this.audioUrl() ? { file: this.soundFile, offset: this.audioOffset() ?? 0, gain: this.soundOut(), fadeIn, fadeOut } : null;
+    const stats = this.renderStats();
     const plan: RenderPlan = {
       width: w, height: h, fps, vertical: this.vertical(),
       footage: {
@@ -2033,10 +2539,13 @@ export class OverlayExportComponent {
         picture: { brightness: this.camBrightness(), contrast: this.camContrast(), saturation: this.camSaturation(), zoom: this.camZoom(),
                    panX: this.camPanX(), panY: this.camPanY() },
       } : null,
-      sound,
-      // The stats follow the whole flight here, not the overlay export's window.
-      overlay: { renderer: this.renderer(), opts: { ...this.opts(), statsAfter: this.seconds() }, logOffset: this.videoOffset(),
-                 logEnd: this.seconds() + this.tail() },
+      // Without a sound track, the footage's own sound, at the sound's gain.
+      sound: sound ?? { file: footage, offset: 0, gain: this.soundOut(), fadeIn, fadeOut },
+      music: this.musicFile && this.musicUrl() ? {
+        file: this.musicFile, start: this.musicStart(), gain: this.musicOut(), fadeIn: this.musicFadeIn(), fadeOut: this.musicFadeOut(),
+      } : null,
+      hold: stats.hold,
+      overlay: { renderer: this.renderer(), opts: { ...this.opts(), statsAfter: stats.after }, logOffset: this.videoOffset(), logEnd: stats.end },
       fadeOut: this.fadeOut(),
     };
 

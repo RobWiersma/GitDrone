@@ -2,7 +2,7 @@ import { Component, input } from '@angular/core';
 
 export type IconName =
   | 'play' | 'pause' | 'volume' | 'mute' | 'prev' | 'next' | 'close' | 'reset' | 'sliders' | 'folder' | 'trash'
-  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait' | 'title' | 'craft';
+  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait' | 'title' | 'craft' | 'music' | 'fade-in' | 'lock' | 'unlock';
 
 /**
  * A small outline icon in the app's style (24x24, current text colour). Decorative: the button around it carries the
@@ -33,6 +33,10 @@ export type IconName =
         @case ('signal') { <path d="M5 20v-3M10 20v-7M15 20v-11M20 20V4" /> }
         @case ('layers') { <path d="M12 3l9 5-9 5-9-5 9-5z" /><path d="M3 13l9 5 9-5" /> }
         @case ('film') { <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" /> }
+        @case ('lock') { <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /> }
+        @case ('unlock') { <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.6-1.8" /> }
+        @case ('music') { <path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /> }
+        @case ('fade-in') { <path d="M3 18h18M7 18a5 5 0 0 1 10 0M12 3v6M9.5 5.5 12 3l2.5 2.5" /> }
         @case ('fade') { <path d="M3 18h18M7 18a5 5 0 0 1 10 0M12 6v3M5.6 9.6l1.8 1.8M18.4 9.6l-1.8 1.8" /> }
         @case ('checker') { <rect x="4" y="4" width="16" height="16" rx="1" /><path fill="currentColor" stroke="none" d="M4 4h8v8H4zM12 12h8v8h-8z" /> }
         @case ('sky') { <path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9.5a4.3 4.3 0 0 1-1 8.5z" /> }

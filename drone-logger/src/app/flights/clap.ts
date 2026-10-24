@@ -245,3 +245,24 @@ export async function soundProfile(recording: Blob, steps = 800): Promise<SoundP
   const range = Math.max(1, top - floor);
   return { duration, levels: db.map(v => Math.min(1, Math.max(0, (v - floor) / range))) };
 }
+
+export interface SoundPeaks {
+  duration: number;
+  /** The loudest sample on any channel (1 is full scale) in even steps across the recording. */
+  peaks: Float32Array;
+}
+
+/** A recording's sample peaks over time, to see where it clips at a given gain. */
+export async function soundPeaks(recording: Blob, steps = 800): Promise<SoundPeaks> {
+  const audio = await decode(recording);
+  const peaks = new Float32Array(steps);
+  const per = audio.length / steps;
+  for (let c = 0; c < audio.numberOfChannels; c++) {
+    const data = audio.getChannelData(c);
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i]), b = Math.min(steps - 1, Math.floor(i / per));
+      if (v > peaks[b]) peaks[b] = v;
+    }
+  }
+  return { duration: audio.duration, peaks };
+}

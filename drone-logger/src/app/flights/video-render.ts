@@ -21,10 +21,16 @@ export interface RenderPlan {
   vertical: boolean;
   /** The footage and the part of it (seconds, footage time) to render. */
   footage: { file: File; start: number; end: number; picture: Picture; /** Landscape 4:3: show it whole (pillarboxed). */ fit: boolean };
+  /** Seconds after `footage.end` that the last footage frame stays up, so the post-flight stats can finish over it. */
+  hold: number;
   /** A stick cam whose picture fills the bottom of a vertical frame; `offset` is where it starts in footage time. */
   cam: { file: File; offset: number; picture: Picture } | null;
-  /** Where the sound comes from: the sound track (at its offset in footage time), or else the footage's own. */
-  sound: { file: File; offset: number } | null;
+  /** Where the sound comes from: the sound track (at its offset in footage time, raised or lowered by `gain`, 1 for as
+   *  recorded), or else the footage's own. */
+  sound: { file: File; offset: number; gain: number; fadeIn: number; fadeOut: number } | null;
+  /** Music under the whole video: `start` seconds into the song at the first frame, at `gain`, faded in and out over
+   *  `fadeIn` / `fadeOut` seconds (0 for none). */
+  music: { file: File; start: number; gain: number; fadeIn: number; fadeOut: number } | null;
   overlay: { renderer: OverlayRenderer; opts: OverlayOptions; /** Footage time where the log starts. */ logOffset: number; /** Log time after which nothing is drawn. */ logEnd: number };
   /** Seconds at the end over which the picture fades to black and the sound to silence; 0 for none. */
   fadeOut: number;
@@ -75,7 +81,8 @@ export const fpsLabel = (fps: number) => String(Number(fps.toFixed(3)));
 export async function renderVideo(plan: RenderPlan, target: RenderTarget | null, progress: (done: number, total: number) => void,
                                   control: { cancelled: boolean }, stage: (what: string) => void = () => undefined): Promise<Blob | null> {
   const { width: W, height: H, fps } = plan;
-  const total = Math.max(1, Math.round((plan.footage.end - plan.footage.start) * fps));
+  const moving = Math.max(1, Math.round((plan.footage.end - plan.footage.start) * fps));
+  const total = moving + Math.max(0, Math.round(plan.hold * fps));
   const seconds = total / fps;
 
   stage('Checking what this browser can encode...');
@@ -112,8 +119,7 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
 
     // Sound first: it's small, and once it's in, the frames can stream straight through.
     if (audio) {
-      stage(`Reading the sound from ${(plan.sound?.file ?? plan.footage.file).name}...`);
-      const sound = await mixSound(plan, seconds, open);
+      const sound = await mixSound(plan, seconds, open, stage);
       if (sound) await audio.add(sound);
     }
     if (control.cancelled) throw new RenderCancelled();
@@ -122,16 +128,18 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
     // Decoded frames, scaled down to roughly the size they're shown at to save work.
     const footageSink = new CanvasSink(footageTrack, { width: Math.min(footageTrack.displayWidth, Math.max(W, H)) });
     const times = Array.from({ length: total }, (_, i) => plan.footage.start + i / fps);
-    const footageFrames = footageSink.canvasesAtTimestamps(times);
+    // The footage only as far as its end; the hold after it repeats the last frame. The stick cam (and the sound) run on.
+    const footageFrames = footageSink.canvasesAtTimestamps(times.slice(0, moving));
     const camDuration = camOk ? await camTrack!.computeDuration() : 0;
     const camFrames = camOk
       ? new CanvasSink(camTrack!, { width: Math.min(camTrack!.displayWidth, W) }).canvasesAtTimestamps(times.map(t => Math.max(0, t - plan.cam!.offset)))
       : null;
 
+    let foot: WrappedCanvas | null = null;
     for (let i = 0; i < total; i++) {
       if (control.cancelled) throw new RenderCancelled();
       const t = times[i];
-      const foot = (await footageFrames.next()).value ?? null;
+      if (i < moving) foot = (await footageFrames.next()).value ?? null;
       const camFrame = camFrames ? (await camFrames.next()).value ?? null : null;
       const camT = plan.cam ? t - plan.cam.offset : -1;
       const cam = camFrame && camT >= 0 && camT <= camDuration ? camFrame : null;
@@ -208,12 +216,11 @@ function draw(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement | OffscreenC
 
 /**
  * The output's sound as one stereo 48 kHz buffer: the sound track (or the footage's own audio) from the matching
- * point, silent where the recording hasn't started yet or has ended. Null when the source has no audio.
+ * point, silent where the recording hasn't started yet or has ended, with the music under it. Null when there's no
+ * sound to be had.
  */
-async function mixSound(plan: RenderPlan, seconds: number, open: (file: File) => Input): Promise<AudioBuffer | null> {
-  const source = plan.sound ?? { file: plan.footage.file, offset: 0 };
-  const track = await open(source.file).getPrimaryAudioTrack();
-  if (!track || !(await track.canDecode())) return null;
+async function mixSound(plan: RenderPlan, seconds: number, open: (file: File) => Input, stage: (what: string) => void): Promise<AudioBuffer | null> {
+  const source = plan.sound ?? { file: plan.footage.file, offset: 0, gain: 1, fadeIn: 0, fadeOut: 0 };
   const rate = 48000;
   const mix = new OfflineAudioContext(2, Math.max(1, Math.ceil(seconds * rate)), rate);
   // Everything goes through one gain, which ramps to silence over the fade, in step with the picture.
@@ -224,14 +231,63 @@ async function mixSound(plan: RenderPlan, seconds: number, open: (file: File) =>
     out.gain.setValueAtTime(1, seconds - fade);
     out.gain.linearRampToValueAtTime(0, seconds);
   }
-  const from = plan.footage.start - source.offset; // where the output's first moment is in the recording
-  for await (const { buffer, timestamp } of new AudioBufferSink(track).buffers(Math.max(0, from), from + seconds)) {
-    const node = mix.createBufferSource();
-    node.buffer = buffer;
-    node.connect(out);
-    const at = timestamp - from;
-    if (at >= 0) node.start(at);
-    else if (-at < buffer.duration) node.start(0, -at);
-  }
+  // From where the output's first moment is in the recording.
+  // The sound's and the music's own fades each ride on a gain of their own, before the whole mix's fade out.
+  stage(`Reading the sound from ${source.file.name}...`);
+  const heard = await addTrack(mix, fades(mix, out, source.fadeIn, source.fadeOut, seconds), open(source.file),
+                               plan.footage.start - source.offset, seconds, source.gain);
+  if (plan.music) stage(`Reading the music from ${plan.music.file.name}...`);
+  const music = !!plan.music && await addTrack(mix, fades(mix, out, plan.music.fadeIn, plan.music.fadeOut, seconds),
+                                                open(plan.music.file), plan.music.start, seconds, plan.music.gain);
+  if (!heard && !music) return null;
+  stage('Mixing the sound...');
   return mix.startRendering();
+}
+
+/** A gain into `into` that ramps up from silence over the first `fadeIn` seconds and down to it over the last `fadeOut`. */
+function fades(mix: OfflineAudioContext, into: AudioNode, fadeIn: number, fadeOut: number, seconds: number): GainNode {
+  const gain = mix.createGain();
+  gain.connect(into);
+  const up = Math.min(fadeIn, seconds), down = Math.min(fadeOut, seconds);
+  if (up > 0) {
+    gain.gain.setValueAtTime(0, 0);
+    gain.gain.linearRampToValueAtTime(1, up);
+  }
+  if (down > 0) {
+    gain.gain.setValueAtTime(1, Math.max(up, seconds - down));
+    gain.gain.linearRampToValueAtTime(0, seconds);
+  }
+  return gain;
+}
+
+/**
+ * Lays `seconds` of a recording's sound into `mix` through a gain of `gain`, starting `from` seconds into the recording
+ * (negative: the recording starts that far into the output). False when it has no sound this browser can decode.
+ */
+async function addTrack(mix: OfflineAudioContext, into: AudioNode, input: Input, from: number, seconds: number, gain: number): Promise<boolean> {
+  const track = await input.getPrimaryAudioTrack();
+  if (!track || !(await track.canDecode())) return false;
+  // The decoded chunks are copied into one buffer covering the whole output, at the recording's own rate, and played as
+  // one node: the offline mixer slows to a crawl with a node per chunk (thousands for a few minutes of sound).
+  let whole: AudioBuffer | null = null;
+  for await (const { buffer, timestamp } of new AudioBufferSink(track).buffers(Math.max(0, from), from + seconds)) {
+    whole ??= mix.createBuffer(buffer.numberOfChannels, Math.max(1, Math.ceil(seconds * buffer.sampleRate)), buffer.sampleRate);
+    // Where the chunk lands in the output, in samples; a chunk starting before the output's first moment is cut.
+    const at = Math.round((timestamp - from) * whole.sampleRate), skip = Math.max(0, -at);
+    const count = Math.min(buffer.length - skip, whole.length - Math.max(0, at));
+    if (count <= 0) continue;
+    for (let c = 0; c < whole.numberOfChannels; c++) {
+      const data = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1));
+      whole.copyToChannel(data.subarray(skip, skip + count), c, Math.max(0, at));
+    }
+  }
+  if (!whole) return true; // nothing of it falls inside the output
+  const level = mix.createGain();
+  level.gain.value = gain;
+  level.connect(into);
+  const node = mix.createBufferSource();
+  node.buffer = whole;
+  node.connect(level);
+  node.start(0);
+  return true;
 }

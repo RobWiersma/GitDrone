@@ -39,8 +39,9 @@ renders the finished video, YouTube Shorts included, right in your browser.
 Drop in a blackbox log and export a transparent `.mov` for Premiere Pro or After Effects: speed, battery,
 sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, resize and recolour every element,
 draw it all in your goggles' `font_bf.bin`, and preview it full screen, playing over your own footage with sound,
-synced to your takeoff automatically from the motor sound, the arming beep or a clap.
-Free, no account, and nothing is uploaded: the video is rendered in your browser.
+synced to your takeoff automatically from the motor sound, the arming beep or a clap. A Premiere-style timeline shows
+the footage, OSD, sound and music as tracks, locked together once they're synced, with waveforms that turn red where
+they clip. Free, no account, and nothing is uploaded: the video is rendered in your browser.
 
 ### 📱 Finished videos and Shorts
 
@@ -48,11 +49,12 @@ Skip the editor: GitDrone renders the finished `.mp4` itself, with your footage,
 in, in seconds thanks to your GPU's video encoder. Make it **landscape 16:9** for YouTube or **vertical 9:16** for Shorts,
 Reels and TikTok, a split screen with your FPV footage on top, the stick cam below, big sticks and the battery over it,
 and the bottom kept clear of the Shorts buttons. Add a **title** in two colours and your **craft name** in Impact with an
-outline, grade and zoom both videos, pick the part to render, and fade out at the end. The frame rate follows your
-footage (100 or 120 fps footage comes out at 60).
+outline, grade and zoom both videos, add a **music** track, set each sound's gain and fades, pick the part to render, and
+fade out at the end, with Betaflight's post-flight stats as the last frame holds. The frame rate follows your footage
+(100 or 120 fps footage comes out at 60).
 
 <p align="center">
-  <img src="docs/screenshots/shorts.png" alt="The editor in vertical 9:16: the Title component panel on the left with its text, colours, outline, position and size; a tall preview with the O4 footage on top, the stick cam below, big sticks and the battery over it, and the title and craft name; the sound track lined up on arming underneath; and Options with Sources, Show and Output, then the Export row" width="860">
+  <img src="docs/screenshots/shorts.png" alt="The editor in vertical 9:16: the Title settings and the A2 Music track's settings (graph, gain, peak, song start, fades) on the left; a tall preview with the O4 footage on top, the stick cam below, big sticks and the battery over it, and the title and craft name; the timeline under it with the OSD, footage, stick cam, sound and music tracks, locked; and Options with Sources, Show and Output, then the Export row" width="860">
 </p>
 
 ### 🔌 Logs straight off the quad
@@ -62,7 +64,7 @@ the same as the Configurator's button, then opens its drive and loads the newest
 (Chrome or Edge).
 
 <p align="center">
-  <img src="docs/screenshots/overlay.png" alt="The overlay editor: the Sticks component panel on the left with position, stick and colour settings; a preview of real FPV footage with the title, craft name, speed, battery, sticks and mini map drawn in a Betaflight OSD font; footage, render, overlay and export sliders under it; and Options along the bottom in three boxes, Sources, Show and Output, with the Export row and its Overlay .mov and Video .mp4 buttons under them" width="860">
+  <img src="docs/screenshots/overlay.png" alt="The overlay editor in 16:9: the Sticks settings and the A1 Sound track's settings (gain, peak, sync, claps, fades) on the left; a preview of real FPV footage with speed, battery, sticks and the mini map in a Betaflight OSD font; under it the Premiere-style timeline with the OSD, footage, sound and music tracks, the sound's waveform with its arming and clap markers, and the Render range; and Options along the bottom in three boxes, Sources, Show and Output, with the Export row and its Overlay .mov and Video .mp4 buttons" width="860">
 </p>
 
 <table>
@@ -113,7 +115,7 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 | Frontend | [Angular 22](https://angular.dev/) (standalone components, signals), TypeScript, [Leaflet](https://leafletjs.com/) + OpenStreetMap, Canvas 2D for the overlay renderer |
 | Backend | ASP.NET Core minimal APIs on .NET 10, Entity Framework Core with SQLite |
 | Log decoding | `Services/BlackboxDecoder.cs`, a C# port of Betaflight's Blackbox Explorer decoder |
-| Video | Overlay: PNG frames in a QuickTime `.mov` written in the browser (`flights/mov-writer.ts`), alpha kept. Finished video: H.264/AAC `.mp4` decoded, composited and encoded in the browser with WebCodecs via [Mediabunny](https://mediabunny.dev/) (`flights/video-render.ts`) |
+| Video | Overlay: PNG frames in a QuickTime `.mov` written in the browser (`flights/mov-writer.ts`), alpha kept. Finished video: H.264/AAC `.mp4` decoded, composited and encoded in the browser with WebCodecs via [Mediabunny](https://mediabunny.dev/) (`flights/video-render.ts`), its sound mixed with Web Audio. Editor timeline: `flights/track-timeline.component.ts` |
 | USB | Web Serial (MSP) to reboot the flight controller into mass storage, File System Access to read its drive (`flights/fc-usb.ts`) |
 | Hosting | One free Linux Azure App Service (F1), deployed by GitHub Actions on every push to `master` |
 | Auth | App Service Authentication (Microsoft), owner-only writes |
@@ -266,22 +268,31 @@ transparent HUD video to put on a track above your footage in Premiere Pro or Af
 It can draw the HUD with your goggles' Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format),
 including Betaflight's own icons; the title and craft name keep their own display font.
 
-**The editor.** It's laid out like Premiere: a **component panel** on the left of the preview and **Options** along the
-bottom. Click anything in the preview (an OSD element, the title, the footage or the stick cam) and the panel shows
-everything about it, grouped: text and colours, position and size (50–300%), the size of each reading inside a panel
-(speed, G-force, satellites, pack voltage, mAh, ...), stick mode, trails and colours, or a video's picture and framing.
-With nothing picked, the panel lists every component to choose from, so it all works from the keyboard too. Options holds
-the rest in three boxes, **Sources** (the backdrop, footage, sound track and OSD font), **Show** (one icon toggle per HUD
+**The editor.** It's laid out like Premiere: a **Components** panel and a **Track** panel on the left of the preview, a
+**timeline** under it, and **Options** along the bottom. Click an OSD element in the preview (or the title or craft
+name) and Components shows everything about it, grouped: text and colours, position and size (50–300%), the size of
+each reading inside a panel (speed, G-force, satellites, pack voltage, mAh, ...), stick mode, trails and colours. With
+nothing picked, it lists every element to choose from, so it all works from the keyboard too.
+
+**The timeline** shows every file as a track where its sync puts it, like Premiere's: V2 the OSD over V1 the footage
+(and the stick cam under them in vertical), then A1 the sound (the sound track, or the footage's own) and A2 the music,
+trimmed to what plays. Sound tracks show their waveform at their gain, red where they clip, with an **M** to mute them
+(in the preview and the finished video) and the gain in the header. Drag along the ruler to move the playhead; the
+**Render** range sits over the clips. The sound track's clip also marks the arming and launch it heard, its claps and
+where the sound is; hover one (or Tab to it) for what it is. Click a track (or a video in the preview) and
+the **Track** panel shows its settings: sync, picture and framing for the footage, picture and framing for the stick
+cam, gain and sync for the sound, and gain, start and fades for the music. Options holds
+the rest in three boxes, **Sources** (the backdrop, footage, sound track, music and OSD font), **Show** (one icon toggle per HUD
 element, the title and craft name, the stats length and the panel background) and **Output** (format, resolution and
 frame rate), with a full-width **Export** row under them for the two render buttons.
 Small buttons are icons; hover any of them for what it does. Positions are stored as fractions of the frame, so a layout
 looks the same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.
 
 **Preview over your own video.** Load your flight footage under **Sources** to play it behind the overlay, synced live
-(the file plays from your computer; nothing is uploaded). Its brightness, contrast, saturation and zoom are in the
-component panel when you click it (they apply to the finished video too); 4:3 footage shows whole in the 16:9 frame. To
-line them up, move the **Flight footage** slider (its arrow buttons step single frames) to the moment you leave the
-ground and press **Takeoff is here**:
+(the file plays from your computer; nothing is uploaded). Its brightness, contrast, saturation and zoom are in its
+Track panel (they apply to the finished video too); 4:3 footage shows whole in the 16:9 frame. To line them up, move the
+playhead (the arrow buttons step single frames), or the **Flight footage** slider in the footage's Track panel, to the
+moment you leave the ground and press **Takeoff is here** there:
 GitDrone finds takeoff in the log as the first throttle punch over 20%, or the first GPS movement without stick data.
 **Arming is here** does the same on the arming moment, and **Log starts at** holds the result, so you can type it too.
 The overlay is hidden before the log starts, like in your editor. H.264 MP4s play everywhere; H.265 only in some
@@ -293,17 +304,32 @@ keeps the best correlation, and only applies it when the match clearly beats eve
 ground, or a stick cam) instead of the footage's own. In vertical, if it's a video, its picture fills the bottom half of
 the split screen (toggle it under **Show**), with its own brightness, contrast, saturation, zoom and pan; in 16:9 it
 plays just its sound, so the footage keeps the whole frame. It's its own track, placed on the log just like the footage, with its own
-**Log starts at**, so moving the footage never moves the sound. Its loudness is drawn with what was heard in it marked
-(hover to read times), and the **Sound track** slider (or a click on the graph) moves only the sound, to find a moment in
+**Log starts at**, so moving the footage never moves the sound. Its clip on the timeline marks what was heard in it
+(hover a mark for what it is), and the **Sound track** slider in its Track panel moves only the sound, to find a moment in
 it. Ways to place it (`flights/clap.ts`):
 
 - **Arming and launch sound**, done for you when the file is added. A phone near the quad hears the motors arm, a jump
   from quiet to a steady idle, then the launch exactly as long after as the log says; that moment is where the log
   starts. No sound is needed in the footage.
-- **Takeoff is here / Arming is here** under the sound track, after moving it to that moment by ear or by the graph.
+- **Takeoff is here / Arming is here** in the sound's Track panel, after moving it to that moment by ear or by its waveform
+  on the timeline.
 - **A clap**, with footage loaded. The audio is high-passed at 2.5 kHz and the first sudden burst far above the half
   second before it is the clap. Pick which clap in the sound, find it in the footage (found from the footage's own sound,
   or step to the frame and press **Clap is here**), and **Sync on the clap** places the sound so the two land together.
+
+**Lock.** Once the footage and the sound track are both lined up (the last sync button you press does it), they lock
+together: the playhead, the **Sound track** slider and the **Render** handles then move the overlay and each other too,
+so setting the render range shows everything in step. The lock button next to Play (and beside **Log starts at**) unlocks them
+to move one on its own (and locks them again); loading a new file unlocks until it's lined up.
+
+**Sound gain** raises or lowers it (−12 to +12 dB) in the preview and the finished video alike. Next to it is the peak of
+the part that gets rendered at that gain, red past 0 dB where it would clip, with a **Peak at −1 dB** button; red ticks
+along the top of its waveform on the timeline show every spot that clips. It can fade in and out at the start and end of
+the finished video too, like the music.
+
+**Music.** Add a song under **Sources** and it plays under the whole finished video, starting where the **Render** range
+does: set **Song starts at** to skip an intro, its own **Music gain** (−30 to +12 dB) and peak, and an optional fade in
+and fade out (2 s by default; type any length). It plays with the footage in the preview, fades included.
 
 It works without footage too: with the Checkerboard or Sky backdrop, **Play** runs the overlay along with the sound.
 Preview only: the exported overlay has no sound; in Premiere, Synchronize → Audio lines the two up. Checkerboard and Sky backdrops are there too; none of them end up in the export.
@@ -342,13 +368,18 @@ overlaps it with the footage in front.
 ## Finished video
 
 **Export → Video .mp4** renders the whole thing, ready to upload, with no editor: your footage, the stick cam, the sound
-(the sound track's, or the footage's own) and the OSD, laid out, graded and synced exactly as the preview shows them,
+(the sound track's, or the footage's own, at its gain), the music and the OSD, laid out, graded and synced exactly as the preview shows them,
 in the format, resolution and frame rate set under Output (`flights/video-render.ts`).
 
-- **Range.** The **Render** slider under the Flight footage slider has two handles: drag them to the start and end
+- **Range.** The **Render** range on the timeline has two handles: drag them to the start and end
   (the preview jumps to that frame while you drag), or leave it on the whole clip.
 - **Fade out.** On by default: the picture fades to black and the sound to silence over the last 1.5 s (set the length,
   or turn it off).
+- **Sound.** The sound track (or the footage's own sound) and the music, each at its gain, with its own fades and mute,
+  mixed in the browser with Web Audio and encoded as AAC. Each track is laid into one continuous buffer before mixing,
+  so minutes of sound mix in seconds.
+- **Post-flight stats.** The Betaflight stats screen comes up where the flight ends, or at the end of the range if that's
+  sooner. If they run past the footage, the last frame holds under them until they're done.
 - **Frame rate.** Loading the footage sets Output's frame rate to match it, snapped to the nearest standard rate
   (a phone's 29.86 becomes 29.97). High-speed footage, 100 fps and up like the O4's, comes out at 60, as high as YouTube
   goes. The overlay `.mov` uses the same rate.
