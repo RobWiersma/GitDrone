@@ -11,6 +11,7 @@ import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, findArming, findClap
 import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
+import { KeepFileDirective } from './file-handles';
 import { TimelineMark, TimelineTrack, TrackId, TrackTimelineComponent } from './track-timeline.component';
 import { IconComponent, IconName } from '../icon.component';
 
@@ -84,6 +85,57 @@ type SaveFilePicker = (o: { suggestedName: string; types: { description: string;
 
 /** Where the preview's footage and stick cam sliders start, and what Reset goes back to (percent; pan in % of the box). */
 const FOOTAGE_DEFAULTS = { zoom: 100 };
+
+const PREFS_KEY = 'gitdrone-editor-prefs';
+/** The Show toggles and panel background, which each format keeps its own of. */
+type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats' | 'showTitle' | 'showCraft' | 'panelOpacity'>;
+/** What each format starts with: vertical leaves out what doesn't fit a narrow frame, and has the title and craft name. */
+const showDefaults = (vertical: boolean): ShowState => ({
+  showSpeed: !vertical, showBattery: true, showSticks: true, showMap: !vertical, showRssi: !vertical, showStats: true,
+  showTitle: vertical, showCraft: vertical, panelOpacity: vertical ? 0 : 0.35,
+});
+const formatOf = (vertical: boolean) => (vertical ? 'vertical' : 'landscape');
+
+/** What a new video starts from: the look and levels last used, remembered in this browser. */
+export interface EditorPrefs {
+  footageGrade: Grade;
+  footageZoom: number;
+  cam: { brightness: number; contrast: number; saturation: number; zoom: number; panX: number; panY: number };
+  soundGain: number;
+  soundFadeIn: number;
+  soundFadeOut: number;
+  musicGain: number;
+  musicFadeIn: number;
+  musicFadeOut: number;
+  statsSeconds: number;
+  showPip: boolean;
+  show: Partial<Record<'landscape' | 'vertical', ShowState>>;
+}
+
+/** A saved session: the remembered settings as they were, plus the format, the sync, the lock, the ranges and the mutes. */
+export interface EditorState extends EditorPrefs {
+  vertical: boolean;
+  videoOffset: number;
+  audioLogStart: number;
+  musicStart: number;
+  renderStart: number;
+  renderEnd: number;
+  exportStart: number;
+  exportEnd: number;
+  footageSynced: boolean;
+  soundSynced: boolean;
+  locked: boolean;
+  soundMuted: boolean;
+  musicMuted: boolean;
+  resIndex: number;
+  fps: number;
+}
+
+function readPrefs(): Partial<EditorPrefs> {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') ?? {}; } catch { return {}; }
+}
+/** A format's Show toggles: as last left in that format, else its defaults. */
+const savedShow = (vertical: boolean): ShowState => ({ ...showDefaults(vertical), ...readPrefs().show?.[formatOf(vertical)] });
 /** The footage's grade to start from: a punchier look for flat FPV footage, the values from your Lumetri Basic Correction. */
 const FOOTAGE_GRADE: Grade = { ...NEUTRAL_GRADE, saturation: 148.5, exposure: 0.2, contrast: 39.1 };
 /** The grade sliders, in Lumetri's order, under its two headings. */
@@ -241,7 +293,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     '(document:fullscreenchange)': 'onFullscreenChange()',
     '(document:keydown)': 'onFullscreenKey($event)',
   },
-  imports: [FormsModule, IconComponent, TrackTimelineComponent],
+  imports: [FormsModule, IconComponent, TrackTimelineComponent, KeepFileDirective],
   template: `
         <div class="layout">
           <section class="panel preview-panel" aria-labelledby="preview-heading">
@@ -879,7 +931,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <span class="mono" [title]="videoName() || 'No footage loaded'">{{ videoName() || 'No footage' }}</span>
                 <label class="btn small step" [title]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'">
                   <app-icon name="folder" />
-                  <input class="sr-only" type="file" accept="video/*" [attr.aria-label]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'"
+                  <input class="sr-only" type="file" appKeepFile accept="video/*" [attr.aria-label]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'"
                          (change)="onVideoFile($event)" />
                 </label>
                 @if (hasVideo()) {
@@ -893,7 +945,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <span class="mono" [title]="audioName() || 'No sound track loaded'">{{ audioUrl() ? audioName() : 'No sound track' }}</span>
                 <label class="btn small step" [title]="audioUrl() ? 'Change the sound track' : 'Load a sound track'">
                   <app-icon name="folder" />
-                  <input class="sr-only" type="file" accept="audio/*,video/*" [attr.aria-label]="audioUrl() ? 'Change the sound track' : 'Load a sound track'"
+                  <input class="sr-only" type="file" appKeepFile accept="audio/*,video/*" [attr.aria-label]="audioUrl() ? 'Change the sound track' : 'Load a sound track'"
                          (change)="onAudioFile($event)" />
                 </label>
                 @if (audioUrl()) {
@@ -911,7 +963,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <span class="mono" [title]="musicName() || 'No music loaded'">{{ musicUrl() ? musicName() : 'No music' }}</span>
                 <label class="btn small step" [title]="musicUrl() ? 'Change the music' : 'Load music'">
                   <app-icon name="folder" />
-                  <input class="sr-only" type="file" accept="audio/*" [attr.aria-label]="musicUrl() ? 'Change the music' : 'Load music'"
+                  <input class="sr-only" type="file" appKeepFile accept="audio/*" [attr.aria-label]="musicUrl() ? 'Change the music' : 'Load music'"
                          (change)="onMusicFile($event)" />
                 </label>
                 @if (musicUrl()) {
@@ -1272,10 +1324,9 @@ export class OverlayExportComponent {
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    showSticks: true, stickTrails: true, showSpeed: !this.vertical(), showBattery: true, showMap: !this.vertical(), showRssi: !this.vertical(),
-    showTitle: this.vertical(), showCraft: this.vertical(), altSource: 'gps', showStats: true, statsAfter: 0, flightSeconds: 0,
+    stickTrails: true, altSource: 'gps', statsAfter: 0, flightSeconds: 0, ...savedShow(this.vertical()),
     ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
-    stickMode: readStickMode(), panelOpacity: this.vertical() ? 0 : 0.35, font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
+    stickMode: readStickMode(), font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
   });
   private units = inject(UnitsService);
 
@@ -1336,7 +1387,7 @@ export class OverlayExportComponent {
   /** 4:3 footage (O4 at 4:3, older cams) is shown whole in the middle of the 16:9 preview, with black bars at the sides. */
   footage43 = computed(() => this.videoAspect() < 1.5);
   /** The footage's colour (Lumetri's Basic Correction), in the preview and the finished video alike. */
-  footageGrade = signal<Grade>({ ...FOOTAGE_GRADE });
+  footageGrade = signal<Grade>({ ...FOOTAGE_GRADE, ...readPrefs().footageGrade });
   readonly startGrade = FOOTAGE_GRADE;
   readonly gradeSliders = GRADE_SLIDERS;
   readonly gradeGroups = ['Color', 'Light'] as const;
@@ -1347,7 +1398,7 @@ export class OverlayExportComponent {
     if (Number.isFinite(v)) this.footageGrade.update(g => ({ ...g, [key]: v }));
   }
   /** Zoom of the footage inside its box, in percent. */
-  footageZoom = signal(FOOTAGE_DEFAULTS.zoom);
+  footageZoom = signal(readPrefs().footageZoom ?? FOOTAGE_DEFAULTS.zoom);
   footageAdjusted = computed(() =>
     JSON.stringify(this.footageGrade()) !== JSON.stringify(FOOTAGE_GRADE) || this.footageZoom() !== FOOTAGE_DEFAULTS.zoom);
 
@@ -1377,13 +1428,13 @@ export class OverlayExportComponent {
   }
 
   /** The same for a stick cam's picture, plus panning; it starts zoomed in on the hands and a little darker. */
-  camBrightness = signal(CAM_DEFAULTS.brightness);
-  camContrast = signal(CAM_DEFAULTS.contrast);
-  camSaturation = signal(CAM_DEFAULTS.saturation);
-  camZoom = signal(CAM_DEFAULTS.zoom);
+  camBrightness = signal(readPrefs().cam?.brightness ?? CAM_DEFAULTS.brightness);
+  camContrast = signal(readPrefs().cam?.contrast ?? CAM_DEFAULTS.contrast);
+  camSaturation = signal(readPrefs().cam?.saturation ?? CAM_DEFAULTS.saturation);
+  camZoom = signal(readPrefs().cam?.zoom ?? CAM_DEFAULTS.zoom);
   /** Moves the stick cam inside its box, as a percentage of the box: + is right and down. */
-  camPanX = signal(CAM_DEFAULTS.panX);
-  camPanY = signal(CAM_DEFAULTS.panY);
+  camPanX = signal(readPrefs().cam?.panX ?? CAM_DEFAULTS.panX);
+  camPanY = signal(readPrefs().cam?.panY ?? CAM_DEFAULTS.panY);
   camFilter = computed(() => gradeFilter(this.camBrightness(), this.camContrast(), this.camSaturation()));
   camTransform = computed(() => {
     const z = this.camZoom(), x = this.camPanX(), y = this.camPanY();
@@ -1421,7 +1472,7 @@ export class OverlayExportComponent {
   private extAudio = viewChild<ElementRef<HTMLMediaElement>>('extAudio');
   /** The sound track came from a video, so in vertical its picture can show in the bottom half. */
   audioIsVideo = signal(false);
-  showPip = signal(true);
+  showPip = signal(readPrefs().showPip ?? true);
   audioUrl = signal<string | null>(null);
   audioName = signal('');
   /** Claps found in the phone recording, in seconds, earliest first. */
@@ -1448,7 +1499,7 @@ export class OverlayExportComponent {
   audioProfile = signal<SoundProfile | null>(null);
   // ---- the sound track's level ----
   /** Gain on the sound track in dB, in the preview and the finished video alike. */
-  soundGain = signal(0);
+  soundGain = signal(readPrefs().soundGain ?? 0);
   soundPeaks = signal<SoundPeaks | null>(null);
   private gainFactor = computed(() => 10 ** (this.soundGain() / 20));
   /** "+3.0 dB", "−6.5 dB", "0.0 dB". */
@@ -1532,13 +1583,13 @@ export class OverlayExportComponent {
   musicPlaying = signal(false);
   musicPeaks = signal<SoundPeaks | null>(null);
   /** Music gain in dB. */
-  musicGain = signal(0);
+  musicGain = signal(readPrefs().musicGain ?? 0);
   private musicFactor = computed(() => 10 ** (this.musicGain() / 20));
   /** Seconds into the song at the finished video's first moment (the Render range's start). */
   musicStart = signal(0);
   /** Seconds the music fades in over at the start, and out over at the end; 0 for none. */
-  musicFadeIn = signal(0);
-  musicFadeOut = signal(0);
+  musicFadeIn = signal(readPrefs().musicFadeIn ?? 0);
+  musicFadeOut = signal(readPrefs().musicFadeOut ?? 0);
   readonly musicFades = [
     { id: 'music-fade-in', value: this.musicFadeIn, icon: 'fade-in', label: 'Fade the music in',
       title: 'Fade the music in: it rises from silence over the start of the video' },
@@ -1546,8 +1597,8 @@ export class OverlayExportComponent {
       title: 'Fade the music out: it falls to silence over the end of the video' },
   ] as const;
   /** Seconds the sound (the sound track, or the footage's own) fades in over at the start and out over at the end; 0 for none. */
-  soundFadeIn = signal(0);
-  soundFadeOut = signal(0);
+  soundFadeIn = signal(readPrefs().soundFadeIn ?? 0);
+  soundFadeOut = signal(readPrefs().soundFadeOut ?? 0);
   readonly soundFades = [
     { id: 'sound-fade-in', value: this.soundFadeIn, icon: 'fade-in', label: 'Fade the sound in',
       title: 'Fade the sound in: it rises from silence over the start of the video' },
@@ -1621,6 +1672,7 @@ export class OverlayExportComponent {
   async loadMusic(file: File) {
     this.removeMusic();
     this.musicFile = file;
+    this.music.set(file);
     this.musicUrl.set(URL.createObjectURL(file)); // plays from this computer, like the footage
     this.selectMedia('music');
     this.musicName.set(file.name);
@@ -1639,6 +1691,7 @@ export class OverlayExportComponent {
     const url = this.musicUrl();
     if (url) URL.revokeObjectURL(url);
     this.musicFile = null;
+    this.music.set(null);
     this.musicUrl.set(null);
     this.musicName.set('');
     this.musicPeaks.set(null);
@@ -1679,6 +1732,103 @@ export class OverlayExportComponent {
     }
     if (force || Math.abs(m.currentTime - target) > 0.06) m.currentTime = target;
     if (m.paused) m.play().catch(() => undefined);
+  }
+
+  // ---- remembered settings and saved sessions ----
+  /** The music file, for a saved session to see. */
+  music = signal<File | null>(null);
+  /** The settings a new video starts from, as they stand. */
+  private prefsNow = computed<EditorPrefs>(() => {
+    const o = this.opts();
+    const show = Object.fromEntries(Object.keys(showDefaults(false)).map(k => [k, o[k as keyof ShowState]])) as ShowState;
+    return {
+      footageGrade: this.footageGrade(), footageZoom: this.footageZoom(),
+      cam: { brightness: this.camBrightness(), contrast: this.camContrast(), saturation: this.camSaturation(), zoom: this.camZoom(),
+             panX: this.camPanX(), panY: this.camPanY() },
+      soundGain: this.soundGain(), soundFadeIn: this.soundFadeIn(), soundFadeOut: this.soundFadeOut(),
+      musicGain: this.musicGain(), musicFadeIn: this.musicFadeIn(), musicFadeOut: this.musicFadeOut(),
+      statsSeconds: this.statsSeconds(), showPip: this.showPip(),
+      // This format's toggles as they are, the other's as last left.
+      show: { ...readPrefs().show, [formatOf(this.vertical())]: show },
+    };
+  });
+  private rememberPrefs = effect(() => {
+    const prefs = this.prefsNow();
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* not remembered */ }
+  });
+
+  /** Everything a saved session keeps from the editor. */
+  sessionState = computed<EditorState>(() => ({
+    ...this.prefsNow(),
+    vertical: this.vertical(), videoOffset: this.videoOffset(), audioLogStart: this.audioLogStart(), musicStart: this.musicStart(),
+    renderStart: this.renderStart(), renderEnd: this.renderEnd(), exportStart: this.start(), exportEnd: this.end(),
+    footageSynced: this.footageSynced(), soundSynced: this.soundSynced(), locked: this.locked(),
+    soundMuted: this.soundMuted(), musicMuted: this.musicMuted(), resIndex: this.resIndex(), fps: this.fps(),
+  }));
+
+  /** A restore waiting for its files to load: their names, so it waits for these files and not ones already loaded. */
+  private pendingRestore = signal<{ state: EditorState; footage: string | null; sound: string | null; music: string | null } | null>(null);
+  /** A saved session is still coming back (its files loading): nothing to save yet. */
+  restoring = computed(() => !!this.pendingRestore());
+
+  /**
+   * Takes a saved session back. The format and look apply now; the sync, ranges and lock once the footage, sound and
+   * music it names have loaded, since loading them sets their own (the sound listens for arming, the footage sets the
+   * frame rate and resolution). Gives up waiting after 20 s and applies what it has.
+   */
+  restore(state: EditorState, files: { footage: File | null; sound: File | null; music: File | null }) {
+    if (state.vertical !== this.vertical()) this.setVertical(state.vertical);
+    this.opts.update(o => ({ ...o, ...state.show[formatOf(state.vertical)] }));
+    this.footageGrade.set({ ...NEUTRAL_GRADE, ...state.footageGrade });
+    this.footageZoom.set(state.footageZoom);
+    this.camBrightness.set(state.cam.brightness);
+    this.camContrast.set(state.cam.contrast);
+    this.camSaturation.set(state.cam.saturation);
+    this.camZoom.set(state.cam.zoom);
+    this.camPanX.set(state.cam.panX);
+    this.camPanY.set(state.cam.panY);
+    this.soundGain.set(state.soundGain);
+    this.soundFadeIn.set(state.soundFadeIn);
+    this.soundFadeOut.set(state.soundFadeOut);
+    this.musicGain.set(state.musicGain);
+    this.musicFadeIn.set(state.musicFadeIn);
+    this.musicFadeOut.set(state.musicFadeOut);
+    this.statsSeconds.set(state.statsSeconds);
+    this.showPip.set(state.showPip);
+    const pending = { state, footage: files.footage?.name ?? null, sound: files.sound?.name ?? null, music: files.music?.name ?? null };
+    this.pendingRestore.set(pending);
+    setTimeout(() => { if (this.pendingRestore() === pending) this.finishRestore(); }, 20_000);
+  }
+
+  private restoreWhenLoaded = effect(() => {
+    const p = this.pendingRestore();
+    if (!p) return;
+    const footage = !p.footage || (this.videoName() === p.footage && this.videoDuration() > 0 && this.footageFps() !== null);
+    const sound = !p.sound || (this.audioName() === p.sound && !!this.audioProfile() && !this.clapStatus());
+    const music = !p.music || (this.musicName() === p.music && !!this.musicPeaks());
+    if (footage && sound && music) untracked(() => this.finishRestore());
+  });
+
+  private finishRestore() {
+    const p = this.pendingRestore();
+    if (!p) return;
+    this.pendingRestore.set(null);
+    const s = p.state;
+    this.videoOffset.set(s.videoOffset);
+    this.audioLogStart.set(s.audioLogStart);
+    this.musicStart.set(s.musicStart);
+    this.footageSynced.set(s.footageSynced);
+    this.soundSynced.set(s.soundSynced);
+    this.locked.set(s.locked);
+    this.soundMuted.set(s.soundMuted);
+    this.musicMuted.set(s.musicMuted);
+    this.resIndex.set(s.resIndex);
+    this.fps.set(s.fps);
+    this.renderStart.set(s.renderStart);
+    this.renderEnd.set(s.renderEnd);
+    this.start.set(s.exportStart);
+    this.end.set(s.exportEnd);
+    if (this.bgVideo()) this.scrubVideo(s.renderStart);
   }
 
   // ---- the timeline: every file as a track, placed by its sync ----
@@ -1844,7 +1994,7 @@ export class OverlayExportComponent {
 
   // ---- end-of-flight stats ----
   readonly gapMs = Math.round(STATS_GAP_S * 1000);
-  statsSeconds = signal(2);
+  statsSeconds = signal(readPrefs().statsSeconds ?? 2);
   /** Blank pause plus the stats screen, added after the export's end. */
   private tail = computed(() => (this.opts().showStats ? STATS_GAP_S + this.statsSeconds() : 0));
   exportSeconds = computed(() => Math.max(0, this.end() - this.start()) + this.tail());
@@ -2046,8 +2196,7 @@ export class OverlayExportComponent {
     this.vertical.set(vertical);
     try { localStorage.setItem(FORMAT_KEY, vertical ? 'vertical' : 'landscape'); } catch { /* not remembered */ }
     this.selected.set(null);
-    this.opts.update(o => ({ ...o, layout: readLayout(vertical), showSpeed: !vertical, showMap: !vertical, showRssi: !vertical, showTitle: vertical, showCraft: vertical,
-      panelOpacity: vertical ? 0 : 0.35 }));
+    this.opts.update(o => ({ ...o, layout: readLayout(vertical), ...savedShow(vertical) }));
   }
 
   resetLayout() {
@@ -2147,6 +2296,7 @@ export class OverlayExportComponent {
 
   loadVideo(file: File) {
     this.stopVideo();
+    this.videoDuration.set(0);
     this.selectMedia('footage');
     this.footageSynced.set(false);
     this.locked.set(false);

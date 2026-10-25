@@ -288,6 +288,9 @@ element, the title and craft name, the stats length and the panel background) an
 frame rate), with a full-width **Export** row under them for the two render buttons.
 Small buttons are icons; hover any of them for what it does. Positions are stored as fractions of the frame, so a layout
 looks the same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.
+So are the rest of your settings: the footage's grade and zoom, the stick cam's picture, the sound's and music's gains
+and fades, the stats length and each format's Show toggles, so every new video starts from your last setup. The sync and
+ranges belong to each video, and live in its saved session.
 
 **Preview over your own video.** Load your flight footage under **Sources** to play it behind the overlay, synced live
 (the file plays from your computer; nothing is uploaded). Its colour is graded like Lumetri's Basic Correction
@@ -401,7 +404,15 @@ in the format, resolution and frame rate set under Output (`flights/video-render
 The **LovelyOSD Overlay** tab (`/osd`) is the quick route: pick a blackbox log, see the same stats, map, playback
 and charts as a flight page, and export the overlay video, without adding anything to the hangar. The API reads the
 file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
-page, so leaving it clears them. A file with several armed sessions gets a session picker. It's open to visitors who
+page, so leaving it clears them, unless you save the session. A file with several armed sessions gets a session picker.
+
+**Saved sessions.** **Save session** (next to the session's name, above the editor) keeps everything about a video in
+your browser (IndexedDB; nothing is uploaded): the log and which armed session, the footage, sound track and music, the
+sync points and lock, the Render and Export ranges, the mutes and every setting. Once saved, it saves itself a moment after
+each change. **Recent sessions** at the top of the page lists them with **Open** and delete. In Chrome and Edge the file
+pickers keep a handle to each file (`flights/file-handles.ts`), so Open reads them again after one OK, logs straight off
+the flight controller's drive included; in other browsers, or for a file that has moved, Open asks for each file by name.
+It waits for the files to load before putting the sync back, since loading them sets their own (`flights/session-store.ts`). It's open to visitors who
 aren't signed in, since nothing is stored; to protect the small App Service plan, the API decodes at most two logs at
 once (two more wait, the rest get a "busy, try again" 503).
 

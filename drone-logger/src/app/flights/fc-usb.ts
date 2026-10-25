@@ -4,6 +4,8 @@
  * Configurator's "Activate Mass Storage Device Mode" button does, minus the Configurator.
  */
 
+import { rememberHandle } from './file-handles';
+
 // Just enough of the Web Serial and File System Access types for this file; TypeScript's DOM lib has neither yet.
 interface SerialPortLike {
   open(options: { baudRate: number }): Promise<void>;
@@ -97,7 +99,12 @@ export async function readDriveLogs(): Promise<{ drive: string; files: File[] } 
   }
   const files: File[] = [];
   for await (const entry of dir.values()) {
-    if (entry.kind === 'file' && entry.getFile && LOG_FILE_PATTERN.test(entry.name)) files.push(await entry.getFile());
+    if (entry.kind === 'file' && entry.getFile && LOG_FILE_PATTERN.test(entry.name)) {
+      const file = await entry.getFile();
+      // The entry is the file's handle: a saved session can read the log from the drive again.
+      rememberHandle(file, entry as unknown as FileSystemFileHandle);
+      files.push(file);
+    }
   }
   // FCs without a clock stamp every file with the same date, so the log number breaks the tie.
   files.sort((a, b) => b.lastModified - a.lastModified || b.name.localeCompare(a.name, undefined, { numeric: true }));
