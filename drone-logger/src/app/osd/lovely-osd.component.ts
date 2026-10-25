@@ -342,7 +342,11 @@ export class LovelyOsdComponent {
     this.error.set('');
     this.sampleLoading.set(true);
     try {
-      const get = async (name: string, type: string) => new File([await (await fetch(`samples/${name}`)).blob()], name, { type });
+      const get = async (name: string, type: string) => {
+        const res = await fetch(`samples/${name}`);
+        if (!res.ok) throw new Error(`${name}: ${res.status}`);
+        return new File([await res.blob()], name, { type });
+      };
       const [log, footage, sound] = await Promise.all([
         get('btfl_018.bbl', 'application/octet-stream'), get('o4-footage.mp4', 'video/mp4'), get('phone-stick-cam.mp4', 'video/mp4'),
       ]);

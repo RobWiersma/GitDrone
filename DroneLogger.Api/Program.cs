@@ -100,8 +100,12 @@ app.MapGet("/api/me", (HttpContext http) => new
 // The built Angular app is copied into wwwroot at deploy time, so the site and the API share one origin.
 // index.html must be revalidated on every load, or browsers keep running the previous deploy's scripts.
 // The scripts and styles it points at have content hashes in their names, so those can be cached for good.
+// Static files only serve types they know, so the sample flight's blackbox log needs naming.
+var spaTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+spaTypes.Mappings[".bbl"] = "application/octet-stream";
 var spaFiles = new StaticFileOptions
 {
+    ContentTypeProvider = spaTypes,
     OnPrepareResponse = ctx =>
     {
         var headers = ctx.Context.Response.Headers;
