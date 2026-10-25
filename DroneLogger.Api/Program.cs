@@ -71,8 +71,9 @@ app.Use(async (http, next) =>
     var method = http.Request.Method;
     var readOnly = HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method);
     // LovelyOSD reads a log and stores nothing, so visitors can use it too (it's rate limited instead).
-    // Visit counting has to work for visitors, and only stores a daily hash.
-    var openToAll = http.Request.Path.StartsWithSegments("/api/osd") || http.Request.Path.StartsWithSegments("/api/visit");
+    // Visit and usage counting have to work for visitors, and only store a daily hash (and, for usage, an action's name).
+    var openToAll = http.Request.Path.StartsWithSegments("/api/osd") || http.Request.Path.StartsWithSegments("/api/visit")
+        || http.Request.Path.StartsWithSegments("/api/event");
     // Changes need an owner (see SignIn): signed out gets 401, signed in with another account 403.
     if (!readOnly && !openToAll && http.Request.Path.StartsWithSegments("/api") && !SignIn.IsOwner(http))
     {
