@@ -109,7 +109,7 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 ### 🏠 And a front page to show it off
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="The home page, leading with LovelyOSD Editor: the headline Your FPV footage with its OSD, ready to upload, Open the editor and How it works buttons, a carousel of real footage with its OSD, four feature cards about the editor, a video-in-three-steps section, and the free, private, open source promises" width="860">
+  <img src="docs/screenshots/home.png" alt="The home page, leading with LovelyOSD Editor: the headline Your FPV footage with its OSD, ready to upload, Open the editor and How it works buttons, a looping clip of a real flight rendered with its OSD, four feature cards about the editor, a video-in-three-steps section, and the free, private, open source promises" width="860">
 </p>
 
 ## Tech stack

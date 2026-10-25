@@ -1,5 +1,5 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { DatePipe, NgOptimizedImage } from '@angular/common';
+import { Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FlightService } from '../flights/flight.service';
 import { Flight, flightDate, formatDistance, formatDuration } from '../flights/flight.models';
@@ -10,7 +10,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
 /** Welcome page, all about LovelyOSD Editor; someone signed in also gets the latest flights from their logbook. */
 @Component({
   selector: 'app-home',
-  imports: [DatePipe, NgOptimizedImage, RouterLink, FlightThumbComponent, PhoneNoticeComponent],
+  imports: [DatePipe, RouterLink, FlightThumbComponent, PhoneNoticeComponent],
   template: `
     <div class="page home">
       <section class="hero" aria-labelledby="hero-heading">
@@ -32,32 +32,24 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
         </div>
 
         <figure class="reel">
-          <div class="frames" aria-roledescription="carousel" aria-label="LovelyOSD overlay on real footage">
-            @for (f of frames; track f.src; let i = $index) {
-              <div class="frame" [class.on]="i === current()" [attr.aria-hidden]="i !== current()"
-                   [attr.aria-roledescription]="'slide'" [attr.aria-label]="(i + 1) + ' of ' + frames.length">
-                <img [ngSrc]="f.src" fill [priority]="i === 0" [alt]="f.alt" />
-              </div>
-            }
+          <!-- The first 15 seconds of a real render, on a loop and silent. A pause button, since it moves for more than 5 s;
+               visitors who asked for reduced motion get the still and press play themselves. -->
+          <div class="frames">
+            <video #clip class="clip" src="home/lovelyosd-demo.mp4" poster="home/lovelyosd-demo.jpg" muted [muted]="true" loop playsinline preload="auto"
+                   [autoplay]="playing()" (play)="playing.set(true)" (pause)="playing.set(false)"
+                   aria-label="FPV flight over golden hills, with the OSD from the blackbox log: speed, battery, sticks, the mini map and satellites"></video>
             <div class="reel-controls">
-              <button type="button" class="pause" (click)="togglePlay()"
-                      [attr.aria-label]="playing() ? 'Pause the slideshow' : 'Play the slideshow'">
+              <button type="button" class="pause" (click)="togglePlay()" [attr.aria-label]="playing() ? 'Pause the video' : 'Play the video'">
                 @if (playing()) {
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="3" stroke-linecap="round" /></svg>
                 } @else {
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor" /></svg>
                 }
               </button>
-              <div class="dots">
-                @for (f of frames; track f.src; let i = $index) {
-                  <button type="button" [class.on]="i === current()" [attr.aria-current]="i === current() ? 'true' : null"
-                          [attr.aria-label]="'Show frame ' + (i + 1)" (click)="show(i)"></button>
-                }
-              </div>
             </div>
           </div>
           <figcaption class="hint">
-            Real footage with its OSD, made in LovelyOSD Editor.
+            A real flight rendered in LovelyOSD Editor: O4 footage with its OSD drawn from the blackbox log.
           </figcaption>
         </figure>
       </section>
@@ -162,28 +154,17 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
     .cta { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: .5rem; }
     .phone { margin-top: 1rem; }
 
-    /* Slideshow of real footage with the overlay. */
+    /* A real render on a loop. */
     .reel { margin: 0; display: grid; gap: .45rem; }
     .reel figcaption { margin: 0; font-size: .85rem; }
     .frames { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
               background: #0a0f14; box-shadow: var(--shadow); }
-    .frame { position: absolute; inset: 0; opacity: 0; transition: opacity 1s ease; }
-    .frame.on { opacity: 1; }
-    .frame img { object-fit: cover; }
-    @media (prefers-reduced-motion: reduce) { .frame { transition: none; } }
-    .reel-controls { position: absolute; left: .6rem; right: .6rem; bottom: .6rem; display: flex; align-items: center; justify-content: space-between;
-                     pointer-events: none; }
-    .reel-controls > * { pointer-events: auto; }
+    .clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+    .reel-controls { position: absolute; left: .6rem; bottom: .6rem; }
     .pause { width: 2rem; height: 2rem; border-radius: 50%; border: 0; background: rgb(8 12 16 / .65); color: #fff; display: grid; place-items: center;
              cursor: pointer; padding: 0; }
     .pause svg { width: .9rem; height: .9rem; }
-    .dots { display: flex; gap: .35rem; background: rgb(8 12 16 / .55); padding: .4rem .55rem; border-radius: 999px; }
-    /* Each dot is a 24px tap target around an 8px dot. */
-    .dots button { width: 1.5rem; height: 1.5rem; margin: -.5rem -.25rem; border: 0; padding: 0; background: none; cursor: pointer; position: relative; }
-    .dots button::after { content: ''; position: absolute; inset: 50% auto auto 50%; width: .5rem; height: .5rem; border-radius: 50%;
-                          transform: translate(-50%, -50%); background: rgb(255 255 255 / .5); }
-    .dots button.on::after { background: #fff; width: 1rem; border-radius: 999px; }
-    .pause:focus-visible, .dots button:focus-visible { outline: 2px solid #9be564; outline-offset: 2px; border-radius: 999px; }
+    .pause:focus-visible { outline: 2px solid #9be564; outline-offset: 2px; border-radius: 999px; }
 
     .features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; }
     .features h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
@@ -215,46 +196,22 @@ export class HomeComponent {
   readonly auth = inject(AuthService);
   latest = signal<Flight[]>([]);
 
-  /** Frames from a real flight with its OSD from LovelyOSD Editor (Speedybee Mario 5 X). */
-  readonly frames = [
-    { src: 'home/osd-hillside.jpg', alt: 'FPV view over a sunny hillside and bay, with the overlay showing a speed of 47, 3.94 V per cell, the mini map and both sticks' },
-    { src: 'home/osd-treetop.jpg', alt: 'Looking straight down at a tree from above, with the overlay showing speed, battery, flight time and the mini map' },
-    { src: 'home/osd-field.jpg', alt: 'Diving toward a dirt field, with the overlay showing a speed of 11, satellites, RSSI and the stick positions' },
-    { src: 'home/osd-picnic.jpg', alt: 'Low over a picnic area, with the overlay showing 3.73 V per cell, 402 mAh used and 3:10 flight time' },
-    { src: 'home/osd-treeline.jpg', alt: 'Skimming the grass toward a tree line under blue sky, with the overlay showing a speed of 28 and 454 mAh used' },
-  ];
-  current = signal(0);
-  /** Auto-advance, unless the visitor asked for reduced motion. */
+  private clip = viewChild<ElementRef<HTMLVideoElement>>('clip');
+  /** Plays on its own, unless the visitor asked for reduced motion. */
   playing = signal(!matchMedia('(prefers-reduced-motion: reduce)').matches);
-  private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     // Only fetched for someone signed in, the only ones who see them.
     void this.auth.load().then(me => {
       if (me.signedIn) this.flights.feed(0, 3).subscribe({ next: p => this.latest.set(p.flights), error: () => this.latest.set([]) });
     });
-    if (this.playing()) this.start();
-    inject(DestroyRef).onDestroy(() => this.stop());
-  }
-
-  show(i: number) {
-    this.current.set(i);
-    if (this.playing()) { this.stop(); this.start(); } // a full interval on the frame you picked
   }
 
   togglePlay() {
-    this.playing.update(p => !p);
-    if (this.playing()) this.start(); else this.stop();
-  }
-
-  private start() {
-    this.stop();
-    this.timer = setInterval(() => this.current.update(i => (i + 1) % this.frames.length), 5000);
-  }
-
-  private stop() {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    const v = this.clip()?.nativeElement;
+    if (!v) return;
+    if (v.paused) v.play().catch(() => undefined);
+    else v.pause();
   }
 
   date(f: Flight) {
