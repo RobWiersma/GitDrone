@@ -57,6 +57,15 @@ export class VisitService {
     this.http.post(`${API_BASE}/event`, { name }).subscribe({ error: () => undefined });
   }
 
+  /** Files the site handed over itself (the sample flight's): opening those isn't a visitor bringing their own. */
+  private sampleFiles = new WeakSet<File>();
+  markSample(...files: File[]) { files.forEach(f => this.sampleFiles.add(f)); }
+
+  /** Counts a file being loaded, unless it's one of the sample flight's (that has its own count, sample-loaded). */
+  fileEvent(name: UsageEvent, file: File) {
+    if (!this.sampleFiles.has(file)) this.event(name);
+  }
+
   /** The public totals for the About page; anyone can read them. */
   publicStats(): Observable<PublicStats> {
     return this.http.get<PublicStats>(`${API_BASE}/stats/public`);

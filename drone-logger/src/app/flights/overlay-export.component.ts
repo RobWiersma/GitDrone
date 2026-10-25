@@ -2310,7 +2310,7 @@ export class OverlayExportComponent {
     this.videoUrl.set(URL.createObjectURL(file));
     this.videoName.set(file.name);
     this.footageFile = file;
-    this.usage.event('footage-loaded');
+    this.usage.fileEvent('footage-loaded', file);
     this.video.set(file);
     this.videoAspect.set(16 / 9); // until the new file says otherwise
     // Exports follow the footage's resolution too, so 4K footage isn't scaled down; set once its size is known.
@@ -2341,7 +2341,7 @@ export class OverlayExportComponent {
 
   async loadAudio(file: File) {
     this.soundFile = file;
-    this.usage.event('sound-loaded');
+    this.usage.fileEvent('sound-loaded', file);
     this.sound.set(file);
     const old = this.audioUrl();
     if (old) URL.revokeObjectURL(old);

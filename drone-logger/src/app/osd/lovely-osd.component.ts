@@ -300,7 +300,7 @@ export class LovelyOsdComponent {
         this.index.set(0);
         this.result.set(r);
         this.logFile.set(file);
-        this.usage.event('log-loaded');
+        this.usage.fileEvent('log-loaded', file);
         then?.();
       },
       error: (e: HttpErrorResponse) => {
@@ -351,6 +351,7 @@ export class LovelyOsdComponent {
         get('btfl_018.bbl', 'application/octet-stream'), get('o4-footage.mp4', 'video/mp4'), get('phone-stick-cam.mp4', 'video/mp4'),
       ]);
       this.usage.event('sample-loaded');
+      this.usage.markSample(log, footage, sound);
       this.loadNew(log);
       this.sampleThen = () => {
         this.video.set(footage);
