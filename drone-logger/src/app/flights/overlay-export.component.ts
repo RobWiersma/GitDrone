@@ -12,6 +12,7 @@ import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, expectedBitra
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
 import { KeepFileDirective } from './file-handles';
+import { VisitService } from '../stats/visit.service';
 import { TimelineMark, TimelineTrack, TrackId, TrackTimelineComponent } from './track-timeline.component';
 import { IconComponent, IconName } from '../icon.component';
 
@@ -1329,6 +1330,8 @@ export class OverlayExportComponent {
     stickMode: readStickMode(), font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
   });
   private units = inject(UnitsService);
+  /** Counts what visitors do here (loads, renders), for the owner's Visitors page; names only. */
+  private usage = inject(VisitService);
 
   // ---- layout editing ----
   readonly labels = ELEMENT_LABELS;
@@ -1672,6 +1675,7 @@ export class OverlayExportComponent {
   async loadMusic(file: File) {
     this.removeMusic();
     this.musicFile = file;
+    this.usage.event('music-loaded');
     this.music.set(file);
     this.musicUrl.set(URL.createObjectURL(file)); // plays from this computer, like the footage
     this.selectMedia('music');
@@ -2306,6 +2310,7 @@ export class OverlayExportComponent {
     this.videoUrl.set(URL.createObjectURL(file));
     this.videoName.set(file.name);
     this.footageFile = file;
+    this.usage.event('footage-loaded');
     this.video.set(file);
     this.videoAspect.set(16 / 9); // until the new file says otherwise
     // Exports follow the footage's resolution too, so 4K footage isn't scaled down; set once its size is known.
@@ -2336,6 +2341,7 @@ export class OverlayExportComponent {
 
   async loadAudio(file: File) {
     this.soundFile = file;
+    this.usage.event('sound-loaded');
     this.sound.set(file);
     const old = this.audioUrl();
     if (old) URL.revokeObjectURL(old);
@@ -2844,10 +2850,13 @@ export class OverlayExportComponent {
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
       }
       this.renderMessage.set(`Rendered ${name} (${this.renderTotal()} frames).${fallbackNote}`);
+      this.usage.event('video-rendered');
+      if (this.vertical()) this.usage.event('short-rendered');
     } catch (e) {
       if (e instanceof RenderCancelled) this.renderMessage.set('Render cancelled; nothing was saved.');
       else {
         console.error('[render] failed while:', this.renderStage(), e);
+        this.usage.event('render-failed');
         this.renderError.set(`The render stopped while ${this.renderStage().replace(/\.\.\.$/, '').toLowerCase() || 'starting'}: `
           + (e instanceof Error && e.message ? e.message : String(e)));
       }
@@ -2955,6 +2964,7 @@ export class OverlayExportComponent {
       } else {
         await writer.close();
         this.message.set(`Exported ${name} (${total} frames).`);
+        this.usage.event('overlay-exported');
       }
     } catch (e) {
       await writer.abort().catch(() => undefined);

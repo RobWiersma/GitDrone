@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
-import { DatePipe, DecimalPipe } from '@angular/common';
-import { VisitService, VisitStats } from './visit.service';
+import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { UsageEvent, VisitService, VisitStats } from './visit.service';
 
 /** Friendly names for the paths the API folds visits onto. */
 const PAGE_NAMES: Record<string, string> = {
@@ -8,10 +8,25 @@ const PAGE_NAMES: Record<string, string> = {
   '/flights/:id/overlay': 'Flight overlay export', '/hangar': 'Hangar', '/hangar/:id': 'Aircraft page',
   '/hangar/new': 'Add aircraft', '/hangar/:id/edit': 'Edit aircraft', '/hangar/:id/tunes/import': 'Import tune',
   '/hangar/:id/tunes/bulk': 'Bulk import tunes', '/hangar/:id/flights/upload': 'Upload log', '/tunes/compare': 'Compare tunes',
-  '/stats': 'Stats', '/other': 'Other',
+  '/stats': 'Stats', '/guides/add-osd-to-dji-o4-footage': 'Guide: OSD on DJI O4 footage', '/about': 'About', '/other': 'Other',
 };
 
 const RANGES = [7, 30, 90];
+
+/** What each usage event means, in the order a visit goes; indented ones are part of the one above. */
+const EVENT_NAMES: Record<UsageEvent, { label: string; sub?: boolean }> = {
+  'log-loaded': { label: 'Loaded a log' },
+  'log-from-usb': { label: 'straight off the quad over USB', sub: true },
+  'footage-loaded': { label: 'Added footage' },
+  'sound-loaded': { label: 'Added a sound track' },
+  'music-loaded': { label: 'Added music' },
+  'video-rendered': { label: 'Rendered a finished video' },
+  'short-rendered': { label: 'of them vertical Shorts', sub: true },
+  'overlay-exported': { label: 'Exported a transparent overlay' },
+  'render-failed': { label: 'Had a render fail' },
+  'session-saved': { label: 'Saved a session' },
+  'session-opened': { label: 'Reopened a saved session' },
+};
 
 /** Round tick step (1, 2 or 5 x 10^n) giving about `count` ticks from 0 to max. */
 function ticks(max: number, count = 3): number[] {
@@ -28,7 +43,7 @@ function ticks(max: number, count = 3): number[] {
 /** Owner-only page: daily unique visitors and the pages they open, from the privacy-friendly counter. */
 @Component({
   selector: 'app-stats',
-  imports: [DatePipe, DecimalPipe],
+  imports: [DatePipe, DecimalPipe, PercentPipe],
   template: `
     <div class="page stats">
       <div class="head">
@@ -92,6 +107,31 @@ function ticks(max: number, count = 3): number[] {
               </tbody>
             </table>
           </details>
+        </section>
+
+        <section class="panel" aria-labelledby="usage-heading">
+          <h2 id="usage-heading">What editor visitors did</h2>
+          <p class="hint">
+            Counted like visits, once per visitor per day, with how many times all told. Only the action is recorded: no file
+            names, sizes or settings. The share is of LovelyOSD Editor's {{ editorVisitors() | number }} visitors in this period.
+          </p>
+          @if (s.events.length) {
+            <table class="pages usage">
+              <thead><tr><th scope="col">Action</th><th scope="col">Visitors</th><th scope="col">Times</th><th scope="col">Share</th></tr></thead>
+              <tbody>
+                @for (e of s.events; track e.name) {
+                  <tr [class.sub]="eventName(e.name).sub">
+                    <th scope="row">{{ eventName(e.name).label }}</th>
+                    <td>{{ e.visitors | number }}</td>
+                    <td>{{ e.times | number }}</td>
+                    <td>{{ editorVisitors() ? (e.visitors / editorVisitors() | percent) : '–' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p>Nobody has loaded a log or made a video in this period yet.</p>
+          }
         </section>
 
         <section class="panel" aria-labelledby="refs-heading">
@@ -182,6 +222,8 @@ function ticks(max: number, count = 3): number[] {
     .pages td:nth-child(2) { text-align: right; width: 5rem; }
     .path { color: var(--muted); font-family: var(--mono); font-size: .78rem; margin-left: .4rem; }
     .meter { width: 30%; }
+    .usage td { text-align: right; width: 5.5rem; }
+    .usage .sub th { padding-left: 1.25rem; color: var(--muted); }
     .meter i { display: block; height: .5rem; border-radius: 0 4px 4px 0; background: var(--chart-line); min-width: 2px; }
   `],
 })
@@ -199,6 +241,8 @@ export class StatsComponent {
     const best = d.reduce((a, b) => (b.visitors > a.visitors ? b : a), d[0]);
     return best && best.visitors > 0 ? best : null;
   });
+  /** Visitor-days on the editor page, the base for each action's share. */
+  editorVisitors = computed(() => this.stats()?.pages.find(p => p.path === '/osd')?.visitors ?? 0);
   yTicks = computed(() => ticks(Math.max(0, ...(this.stats()?.daily.map(d => d.visitors) ?? [0]))));
   yMax = computed(() => this.yTicks().at(-1) || 1);
 
@@ -212,6 +256,10 @@ export class StatsComponent {
         error: () => this.error.set('Could not load the visitor stats. Check that you are signed in.'),
       });
     });
+  }
+
+  eventName(name: UsageEvent) {
+    return EVENT_NAMES[name] ?? { label: name };
   }
 
   pageName(path: string) {

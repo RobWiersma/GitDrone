@@ -127,6 +127,20 @@ public class Visit
     public string? Referrer { get; set; }
 }
 
+/// <summary>
+/// Something a visitor did in LovelyOSD Editor ("video-rendered"), one row per visitor, event and day, with how many
+/// times. Same daily hash as <see cref="Visit"/>, so nothing ties one day's rows to another's.
+/// </summary>
+public class UsageEvent
+{
+    public int Id { get; set; }
+    public DateOnly Day { get; set; }
+    public string VisitorHash { get; set; } = "";
+    /// <summary>One of a fixed list of names (see VisitEndpoints.EventNames).</summary>
+    public string Name { get; set; } = "";
+    public int Count { get; set; }
+}
+
 /// <summary>The secret for one day's visitor hashes. Deleted once the day is over, so old hashes can't be recomputed.</summary>
 public class VisitSalt
 {

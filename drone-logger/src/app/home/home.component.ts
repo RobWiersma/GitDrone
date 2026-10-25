@@ -129,6 +129,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
 
       <section class="promises" aria-labelledby="promises-heading">
         <h2 id="promises-heading">Free, private, open source</h2>
+        <p class="about-link">How many videos have been made so far? <a routerLink="/about">See the numbers</a>.</p>
         <ul>
           <li><strong>Free, no account.</strong> LovelyOSD Editor works without signing up.</li>
           <li><strong>Nothing kept.</strong> A log you open in the editor is read and forgotten, and every video is rendered in your browser.</li>
@@ -206,6 +207,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
     .steps-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; }
     .steps ol { margin: 0 0 1rem; padding-left: 1.3rem; display: grid; gap: .5rem; line-height: 1.5; }
 
+    .about-link { margin: -.25rem 0 .75rem; }
     .promises ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem 1.5rem; }
     .promises li { line-height: 1.5; padding-left: 1.4rem; position: relative; }
     .promises li::before { content: '✓'; position: absolute; left: 0; color: var(--ok); font-weight: 800; }

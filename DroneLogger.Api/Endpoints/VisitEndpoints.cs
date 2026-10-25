@@ -11,13 +11,20 @@ namespace DroneLogger.Api.Endpoints;
 
 /// <summary>Referrer is the site the visitor arrived from (hostname only), sent with the first page of a visit.</summary>
 public record VisitRequest(string? Path, string? Referrer);
+public record EventRequest(string? Name);
+/// <summary>Times an action was done, all told and in the last 30 days.</summary>
+public record PublicCountDto(string Name, int Total, int Last30Days);
+/// <summary>The public numbers: since when they've been counted, and the totals per action.</summary>
+public record PublicStatsDto(DateOnly? Since, IReadOnlyList<PublicCountDto> Counts);
+/// <summary>Visitors: visitor-days that did it at least once. Times: how often, all told.</summary>
+public record EventStatsDto(string Name, int Visitors, int Times);
 public record DayVisitorsDto(DateOnly Day, int Visitors);
 public record PageVisitorsDto(string Path, int Visitors);
 /// <summary>Source is a site name ("LinkedIn", "github.com") or "Direct" for typed addresses, bookmarks and apps that send none.</summary>
 public record ReferrerVisitorsDto(string Source, int Visitors);
 /// <summary>Daily unique visitors over the period, and per page how many visitor-days opened it.</summary>
 public record VisitStatsDto(int Days, int Today, int Total, IReadOnlyList<DayVisitorsDto> Daily, IReadOnlyList<PageVisitorsDto> Pages,
-    IReadOnlyList<ReferrerVisitorsDto> Referrers);
+    IReadOnlyList<ReferrerVisitorsDto> Referrers, IReadOnlyList<EventStatsDto> Events);
 
 /// <summary>
 /// Privacy-friendly visit counting: no cookies, no IP addresses stored. Each visitor is a hash of IP and browser with a
@@ -28,21 +35,19 @@ public static partial class VisitEndpoints
     public static void MapVisits(this IEndpointRouteBuilder app)
     {
         app.MapPost("/api/visit", Record);
+        app.MapPost("/api/event", RecordEvent);
         app.MapGet("/api/stats/visits", Stats);
+        app.MapGet("/api/stats/public", PublicStats);
     }
 
     /// <summary>Called by the site on each page change. Always 204, so it never gets in the way of the page.</summary>
     private static async Task<IResult> Record(VisitRequest body, HttpContext http, AppDbContext db, CancellationToken ct)
     {
-        var agent = http.Request.Headers.UserAgent.ToString();
-        // The owner's own visits (signed in) and obvious robots aren't counted.
-        if (SignIn.IsSignedIn(http, countDevelopment: false) || agent.Length == 0 || Bots().IsMatch(agent)) return Results.NoContent();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hash = await VisitorHashAsync(http, today, db, ct);
+        if (hash is null) return Results.NoContent();
 
         var path = NormalizePath(body.Path);
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var salt = await SaltForAsync(today, db, ct);
-        var ip = ClientIp(http);
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{salt}|{ip}|{agent}")))[..16].ToLowerInvariant();
 
         var referrer = NormalizeReferrer(body.Referrer, http.Request.Host.Host);
         var existing = await db.Visits.FirstOrDefaultAsync(v => v.Day == today && v.VisitorHash == hash && v.Path == path, ct);
@@ -56,6 +61,71 @@ public static partial class VisitEndpoints
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException) { /* the same visit arriving twice at once; the unique index keeps one */ }
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// What a visitor did in LovelyOSD Editor, from a fixed list (anything else is ignored). Counted per visitor and day
+    /// like visits, with the number of times. Always 204.
+    /// </summary>
+    private static async Task<IResult> RecordEvent(EventRequest body, HttpContext http, AppDbContext db, CancellationToken ct)
+    {
+        var name = body.Name?.Trim().ToLowerInvariant() ?? "";
+        if (!EventNames.Contains(name)) return Results.NoContent();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hash = await VisitorHashAsync(http, today, db, ct);
+        if (hash is null) return Results.NoContent();
+
+        var row = await db.UsageEvents.FirstOrDefaultAsync(e => e.Day == today && e.VisitorHash == hash && e.Name == name, ct);
+        if (row is null) db.UsageEvents.Add(new UsageEvent { Day = today, VisitorHash = hash, Name = name, Count = 1 });
+        else row.Count++;
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException) { /* the same event arriving twice at once; the unique index keeps one */ }
+        return Results.NoContent();
+    }
+
+    /// <summary>The actions the About page shows, in its order. Render failures and sessions stay on the owner's page.</summary>
+    private static readonly string[] PublicEvents =
+        ["video-rendered", "short-rendered", "overlay-exported", "log-loaded", "log-from-usb", "footage-loaded"];
+
+    /// <summary>
+    /// Anyone can read these: how many times each action has been done, all told and lately. Totals only, nothing per
+    /// visitor or per day. Cached for five minutes, so a busy About page costs one query.
+    /// </summary>
+    private static async Task<IResult> PublicStats(HttpContext http, AppDbContext db, CancellationToken ct)
+    {
+        var from = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-29);
+        var rows = await db.UsageEvents.AsNoTracking().Where(e => PublicEvents.Contains(e.Name))
+            .GroupBy(e => e.Name)
+            .Select(g => new { Name = g.Key, Total = g.Sum(e => e.Count), Recent = g.Where(e => e.Day >= from).Sum(e => e.Count) })
+            .ToListAsync(ct);
+        var since = await db.UsageEvents.AsNoTracking().OrderBy(e => e.Day).Select(e => (DateOnly?)e.Day).FirstOrDefaultAsync(ct);
+        var counts = PublicEvents.Select(name =>
+        {
+            var row = rows.FirstOrDefault(r => r.Name == name);
+            return new PublicCountDto(name, row?.Total ?? 0, row?.Recent ?? 0);
+        }).ToList();
+        http.Response.Headers.CacheControl = "public, max-age=300";
+        return Results.Ok(new PublicStatsDto(since, counts));
+    }
+
+    /// <summary>The events LovelyOSD Editor reports, in the order of a visit: loading, then making something, then keeping it.</summary>
+    internal static readonly string[] EventOrder =
+    [
+        "log-loaded", "log-from-usb", "footage-loaded", "sound-loaded", "music-loaded",
+        "video-rendered", "short-rendered", "overlay-exported", "render-failed", "session-saved", "session-opened",
+    ];
+    private static readonly HashSet<string> EventNames = [.. EventOrder];
+
+    /// <summary>
+    /// Today's hash for this visitor, or null for the owner (signed in) and obvious robots, who aren't counted.
+    /// </summary>
+    private static async Task<string?> VisitorHashAsync(HttpContext http, DateOnly today, AppDbContext db, CancellationToken ct)
+    {
+        var agent = http.Request.Headers.UserAgent.ToString();
+        if (SignIn.IsSignedIn(http, countDevelopment: false) || agent.Length == 0 || Bots().IsMatch(agent)) return null;
+        var salt = await SaltForAsync(today, db, ct);
+        var ip = ClientIp(http);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{salt}|{ip}|{agent}")))[..16].ToLowerInvariant();
     }
 
     /// <summary>Owners only. days = 1..365 (default 30), ending today.</summary>
@@ -79,7 +149,11 @@ public static partial class VisitEndpoints
             .Select(g => g.Select(r => r.Referrer).FirstOrDefault(x => x is not null) ?? "Direct")
             .GroupBy(source => source).Select(g => new ReferrerVisitorsDto(g.Key, g.Count()))
             .OrderByDescending(r => r.Visitors).ThenBy(r => r.Source).ToList();
-        return Results.Ok(new VisitStatsDto(n, perDay.GetValueOrDefault(today), daily.Sum(d => d.Visitors), daily, pages, referrers));
+        var eventRows = await db.UsageEvents.AsNoTracking().Where(e => e.Day >= from)
+            .GroupBy(e => e.Name).Select(g => new { Name = g.Key, Visitors = g.Count(), Times = g.Sum(e => e.Count) }).ToListAsync(ct);
+        var events = eventRows.OrderBy(e => Array.IndexOf(EventOrder, e.Name))
+            .Select(e => new EventStatsDto(e.Name, e.Visitors, e.Times)).ToList();
+        return Results.Ok(new VisitStatsDto(n, perDay.GetValueOrDefault(today), daily.Sum(d => d.Visitors), daily, pages, referrers, events));
     }
 
     /// <summary>Today's secret, made on the first visit of the day. Older ones are deleted on the spot.</summary>
@@ -152,7 +226,7 @@ public static partial class VisitEndpoints
     [GeneratedRegex(@"/\d+(?=/|$)")]
     private static partial Regex Ids();
 
-    [GeneratedRegex(@"^/(flights(/:id(/overlay)?)?|hangar(/new|/:id(/edit|/tunes/import|/tunes/bulk|/flights/upload)?)?|osd|tunes/compare|stats)?$")]
+    [GeneratedRegex(@"^/(flights(/:id(/overlay)?)?|hangar(/new|/:id(/edit|/tunes/import|/tunes/bulk|/flights/upload)?)?|osd|guides/[a-z0-9-]+|about|tunes/compare|stats)?$")]
     private static partial Regex KnownRoutes();
 
     [GeneratedRegex(@"bot|crawl|spider|slurp|preview|monitor|curl|wget|python|httpclient|headless", RegexOptions.IgnoreCase)]

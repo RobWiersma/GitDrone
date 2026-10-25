@@ -27,6 +27,8 @@ export const routes: Routes = [
   { path: 'stats', canActivate: [requireSignIn], loadComponent: () => import('./stats/stats.component').then(m => m.StatsComponent), title: 'Visitors' },
   { path: 'guides/add-osd-to-dji-o4-footage', loadComponent: () => import('./guides/dji-o4-osd.component').then(m => m.DjiO4OsdGuideComponent),
     title: 'How to add OSD to DJI O4 footage, free in your browser · LovelyOSD Editor' },
+  { path: 'about', loadComponent: () => import('./about/about.component').then(m => m.AboutComponent),
+    title: 'About LovelyOSD Editor: free OSD video editing for FPV pilots' },
   { path: 'osd', loadComponent: () => import('./osd/lovely-osd.component').then(m => m.LovelyOsdComponent), title: 'LovelyOSD Editor' },
 
   // Old /aircraft addresses, kept so bookmarks still work.

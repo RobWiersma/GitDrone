@@ -290,6 +290,36 @@ namespace DroneLogger.Api.Migrations
                     b.ToTable("TuneSnapshots");
                 });
 
+            modelBuilder.Entity("DroneLogger.Api.Domain.UsageEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VisitorHash")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Day", "VisitorHash", "Name")
+                        .IsUnique();
+
+                    b.ToTable("UsageEvents");
+                });
+
             modelBuilder.Entity("DroneLogger.Api.Domain.Visit", b =>
                 {
                     b.Property<int>("Id")

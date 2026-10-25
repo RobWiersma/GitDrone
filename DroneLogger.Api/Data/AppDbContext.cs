@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Flight> Flights => Set<Flight>();
     public DbSet<Visit> Visits => Set<Visit>();
     public DbSet<VisitSalt> VisitSalts => Set<VisitSalt>();
+    public DbSet<UsageEvent> UsageEvents => Set<UsageEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -70,6 +71,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Referrer).HasMaxLength(60);
             // One row per visitor, page and day: repeat views don't add rows.
             e.HasIndex(x => new { x.Day, x.VisitorHash, x.Path }).IsUnique();
+        });
+
+        b.Entity<UsageEvent>(e =>
+        {
+            e.Property(x => x.VisitorHash).HasMaxLength(16).IsRequired();
+            e.Property(x => x.Name).HasMaxLength(40).IsRequired();
+            // One row per visitor, event and day; doing it again counts up.
+            e.HasIndex(x => new { x.Day, x.VisitorHash, x.Name }).IsUnique();
         });
 
         b.Entity<VisitSalt>(e =>

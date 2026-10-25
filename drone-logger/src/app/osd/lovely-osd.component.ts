@@ -14,6 +14,7 @@ import { KeepFileDirective, canKeepFiles } from '../flights/file-handles';
 import { SavedSession, deleteSession, listSessions, putSession, reopen, savedFile } from '../flights/session-store';
 import { IconComponent } from '../icon.component';
 import { PhoneNoticeComponent } from '../phone-notice.component';
+import { VisitService } from '../stats/visit.service';
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
@@ -99,7 +100,7 @@ interface Opening {
             </div>
           }
 
-          <app-fc-usb [disabled]="busy() || exporting()" (picked)="loadNew($event)" />
+          <app-fc-usb [disabled]="busy() || exporting()" (picked)="fromUsb($event)" />
           <div class="field">
             <label for="osd-file">Log file</label>
             <input id="osd-file" type="file" appKeepFile accept=".bbl,.bfl,.bbs,.txt" (change)="onFile($event)" [disabled]="busy() || exporting()" />
@@ -203,6 +204,7 @@ interface Opening {
 })
 export class LovelyOsdComponent {
   private service = inject(FlightService);
+  private usage = inject(VisitService);
   private exporter = viewChild(OverlayExportComponent);
 
   fileName = signal('');
@@ -240,6 +242,12 @@ export class LovelyOsdComponent {
     if (!this.loadNew(file)) input.value = '';
   }
 
+  /** A log read straight off the flight controller over USB. */
+  fromUsb(file: File) {
+    this.usage.event('log-from-usb');
+    this.loadNew(file);
+  }
+
   /** A log picked by hand starts a new, unsaved session. */
   loadNew(file: File) {
     this.sessionId.set(null);
@@ -262,6 +270,7 @@ export class LovelyOsdComponent {
         this.index.set(0);
         this.result.set(r);
         this.logFile.set(file);
+        this.usage.event('log-loaded');
         then?.();
       },
       error: (e: HttpErrorResponse) => {
@@ -330,6 +339,7 @@ export class LovelyOsdComponent {
   }
 
   saveSession() {
+    this.usage.event('session-saved');
     if (!this.sessionName()) this.sessionName.set(this.defaultName());
     this.sessionId.set(crypto.randomUUID());
     void this.writeSession();
@@ -395,6 +405,7 @@ export class LovelyOsdComponent {
     this.opening.set(null);
     const { session, files } = o;
     this.sessionId.set(null); // saving resumes once it's all back
+    this.usage.event('session-opened');
     this.sessionName.set(session.name);
     this.load(log, () => {
       this.index.set(Math.max(0, Math.min(session.logIndex, (this.result()?.sessions.length ?? 1) - 1)));

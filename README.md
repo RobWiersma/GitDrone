@@ -458,7 +458,16 @@ cookies and without storing IP addresses:
   once the day is over, so old hashes can't be recomputed or linked to anyone.
 - The same person on two days counts as two; nobody can be followed over time. Signed-in visits and obvious bots
   aren't counted.
+- **What editor visitors did.** LovelyOSD Editor also calls `POST /api/event` with just an action's name: loaded a log
+  (and whether straight off the quad), added footage, a sound track or music, rendered a video (and whether a vertical
+  Short), exported an overlay, had a render fail, saved or reopened a session. Never a file name, size or setting. Each is
+  stored like a visit, once per visitor per day with how many times (`UsageEvents`), and the API takes that fixed list of
+  names only. `/stats` shows them as a share of the editor's visitors, so you can see whether people who come try it.
 - `GET /api/stats/visits?days=30` returns the numbers (signed in only).
+- **Public numbers.** The **About** page (`/about`) shows the totals anyone can see: finished videos rendered (and
+  how many were Shorts), overlays exported, logs loaded (and how many over USB) and clips of footage loaded, all told and
+  in the last 30 days, from `GET /api/stats/public` (no sign-in, cached for five minutes). Totals only: nothing per
+  visitor or per day, and render failures and sessions stay on the private page.
 
 ## License
 
