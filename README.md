@@ -44,7 +44,8 @@ sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, r
 draw it all in your goggles' `font_bf.bin`, and preview it full screen, playing over your own footage with sound,
 synced to your takeoff automatically from the motor sound, the arming beep or a clap. A Premiere-style timeline shows
 the footage, OSD, sound and music as tracks, locked together once they're synced, with waveforms that turn red where
-they clip. Free, no account, and nothing is uploaded: the video is rendered in your browser.
+they clip. Free, no account, and nothing is uploaded: the video is rendered in your browser. No files handy?
+**Try a sample flight** (or [`/osd?sample`](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/osd?sample)) loads a real one.
 
 ### 📱 Finished videos and Shorts
 
@@ -418,6 +419,12 @@ Those pages still work for anyone with a link.
 (`/guides/add-osd-to-dji-o4-footage`) walks the whole job in plain words, for search and for linking in forums. The site
 has a `sitemap.xml` and `robots.txt`, and link-preview tags with a preview image (`public/og-image.png`) so a shared link
 shows a proper card.
+
+**A sample flight.** **Try a sample flight** at the top of the page (also `/osd?sample`, linked from the home page)
+loads a real flight from `drone-logger/public/samples/`: its blackbox log (`btfl_018.bbl`), the first 20 seconds of its
+O4 footage (`o4-footage.mp4`, 960x720, no sound) and of a phone filming the sticks (`phone-stick-cam.mp4`, with sound).
+The clips are cut from zero, so their timing is the flight's. It opens already synced and locked: the phone's sound on
+the arming it hears, the footage on its takeoff at 0:13. A tip says how, to do the same with your own.
 
 **Saved sessions.** **Save session** (next to the session's name, above the editor) keeps everything about a video in
 your browser (IndexedDB; nothing is uploaded): the log and which armed session, the footage, sound track and music, the

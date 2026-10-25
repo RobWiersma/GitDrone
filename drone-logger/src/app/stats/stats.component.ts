@@ -15,6 +15,7 @@ const RANGES = [7, 30, 90];
 
 /** What each usage event means, in the order a visit goes; indented ones are part of the one above. */
 const EVENT_NAMES: Record<UsageEvent, { label: string; sub?: boolean }> = {
+  'sample-loaded': { label: 'Tried the sample flight' },
   'log-loaded': { label: 'Loaded a log' },
   'log-from-usb': { label: 'straight off the quad over USB', sub: true },
   'footage-loaded': { label: 'Added footage' },

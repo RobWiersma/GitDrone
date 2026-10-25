@@ -26,7 +26,8 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
             <a class="btn btn-primary" routerLink="/osd">Open the editor</a>
             <a class="btn" routerLink="/guides/add-osd-to-dji-o4-footage">How it works</a>
           </div>
-          <p class="hint">Free and open source. No install, no account, and your files never leave your computer. Best in Chrome or Edge.</p>
+          <p class="hint">Free and open source. No install, no account, and your files never leave your computer. Best in Chrome or Edge.
+            No files handy? <a routerLink="/osd" [queryParams]="{ sample: 1 }">Try a sample flight</a>.</p>
           <!-- Phones only: the editor wants a computer. -->
           <app-phone-notice class="phone" />
         </div>

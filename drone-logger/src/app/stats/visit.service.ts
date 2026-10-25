@@ -25,7 +25,7 @@ export interface PublicStats {
 
 /** The things LovelyOSD Editor reports. The API takes these names only. */
 export type UsageEvent =
-  | 'log-loaded' | 'log-from-usb' | 'footage-loaded' | 'sound-loaded' | 'music-loaded'
+  | 'sample-loaded' | 'log-loaded' | 'log-from-usb' | 'footage-loaded' | 'sound-loaded' | 'music-loaded'
   | 'video-rendered' | 'short-rendered' | 'overlay-exported' | 'render-failed' | 'session-saved' | 'session-opened';
 
 /**

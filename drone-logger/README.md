@@ -24,6 +24,9 @@ npx ng test    # unit tests with Vitest
 The build keeps each component's styles under a budget (`angular.json`: a warning at 8 kB, an error at 10 kB). The
 overlay editor sits close to it, so new styles there should reuse the existing classes where they can.
 
+The sample flight behind **Try a sample flight** lives in `public/samples/`: a blackbox log and 20-second cuts of its
+footage and phone stick cam, about 13 MB in all.
+
 ## Where things are
 
 ```text

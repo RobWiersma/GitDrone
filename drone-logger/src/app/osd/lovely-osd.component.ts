@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FlightService } from '../flights/flight.service';
@@ -50,6 +50,14 @@ interface Opening {
         <app-phone-notice class="phone" />
 
         <div class="panel pick">
+          <!-- No files handy? A real flight to try everything on: the log, 20 s of O4 footage and a phone recording. -->
+          @if (!result() && !busy()) {
+            <div class="sample-row">
+              <button class="btn btn-primary" type="button" (click)="loadSample()" [disabled]="sampleLoading()">
+                {{ sampleLoading() ? 'Loading the sample...' : 'Try a sample flight' }}</button>
+              <span class="hint">No files handy? Load a real flight: its blackbox log, 20 seconds of O4 footage and a phone recording.</span>
+            </div>
+          }
           <!-- Saved sessions, newest first: open one to pick up where you left off. -->
           @if (sessions().length && !opening()) {
             <div class="recent">
@@ -151,6 +159,21 @@ interface Opening {
           <section aria-labelledby="osd-export-heading">
             <h2 id="osd-export-heading">Video overlay</h2>
             <p class="hint">It starts at arming. Play it over your own video to check the layout and line it up with your takeoff.</p>
+            @if (sample()) {
+              <!-- The sample opens synced and locked; this says how, so the visitor can do the same with their own. -->
+              <aside class="callout sample-tip" aria-labelledby="sample-tip-title">
+                <h3 id="sample-tip-title">A sample flight, already lined up</h3>
+                <ol>
+                  <li><strong>The sound lined itself up.</strong> The phone heard the motors arm about 3 seconds in (the green marks on
+                    the A1 track), so the editor put the log there.</li>
+                  <li><strong>The footage is one press.</strong> The quad lifts off at <strong>0:13</strong> in the clip: with the
+                    playhead there and the footage's track (V1) picked, <strong>Takeoff is here</strong> snaps the OSD to the flight.
+                    That's done for you here, so the footage, OSD and sound are locked together.</li>
+                  <li><strong>Press play</strong> to watch it, or <strong>Video .mp4</strong> under Export to render it.</li>
+                </ol>
+                <button class="link" type="button" (click)="sample.set(false)">Hide this</button>
+              </aside>
+            }
             <!-- Save the whole setup (log, files, sync, look) to come back to; once saved, it keeps itself up to date. -->
             <div class="session-bar">
               <label for="session-name">Session</label>
@@ -196,6 +219,12 @@ interface Opening {
     .recent-text .hint { margin: 0; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .reopen { display: grid; gap: .5rem; margin-bottom: 1rem; padding: .9rem 1rem; border-radius: 8px; }
     .reopen-file, .reopen-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+    .sample-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; margin-bottom: 1rem; padding-bottom: 1rem;
+                  border-bottom: 1px solid var(--line); }
+    .sample-row .hint { margin: 0; }
+    .sample-tip { margin: .75rem 0 0; padding: .9rem 1.1rem; border-radius: 10px; }
+    .sample-tip h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
+    .sample-tip ol { margin: 0 0 .6rem; padding-left: 1.2rem; display: grid; gap: .3rem; line-height: 1.5; }
     .session-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin: .75rem 0 0; }
     .session-bar label { font-weight: 600; }
     .session-bar input { font: inherit; padding: .35rem .55rem; border: 1px solid var(--line); border-radius: 6px; background: var(--surface);
@@ -250,6 +279,7 @@ export class LovelyOsdComponent {
 
   /** A log picked by hand starts a new, unsaved session. */
   loadNew(file: File) {
+    this.sample.set(false);
     this.sessionId.set(null);
     this.sessionName.set('');
     return this.load(file);
@@ -299,6 +329,66 @@ export class LovelyOsdComponent {
     return `${when}, ${formatDuration(s.flight.durationMs)}${s.flight.hasGps ? ', GPS' : ''}`;
   }
 
+  // ---- the sample flight ----
+  /** The sample is in: shows the tip on lining it up. */
+  sample = signal(false);
+  sampleLoading = signal(false);
+
+  /**
+   * Loads the sample: the log first, then the footage and phone recording, like picking them. The phone's sound lines
+   * itself up from the arming it hears; the footage waits for the visitor, which is the point.
+   */
+  async loadSample() {
+    this.error.set('');
+    this.sampleLoading.set(true);
+    try {
+      const get = async (name: string, type: string) => new File([await (await fetch(`samples/${name}`)).blob()], name, { type });
+      const [log, footage, sound] = await Promise.all([
+        get('btfl_018.bbl', 'application/octet-stream'), get('o4-footage.mp4', 'video/mp4'), get('phone-stick-cam.mp4', 'video/mp4'),
+      ]);
+      this.usage.event('sample-loaded');
+      this.loadNew(log);
+      this.sampleThen = () => {
+        this.video.set(footage);
+        this.sound.set(sound);
+        this.sample.set(true);
+        this.sampleUnsynced.set({ footage: true, sound: true });
+      };
+    } catch {
+      this.error.set("Couldn't load the sample flight. Check your connection and try again.");
+    } finally {
+      this.sampleLoading.set(false);
+    }
+  }
+  /** What to do once the sample's log has loaded. */
+  private sampleThen: (() => void) | null = null;
+  private sampleAfterLog = effect(() => {
+    if (!this.result()) return;
+    untracked(() => {
+      const then = this.sampleThen;
+      this.sampleThen = null;
+      then?.();
+    });
+  });
+
+  /**
+   * The sample opens synced and locked. Once its footage has loaded (loading resets the sync), takeoff goes on 0:13.2 in
+   * the clip, the frame the quad leaves the ground; once the arming is found in the sound, that counts as lined up too.
+   */
+  private sampleUnsynced = signal({ footage: false, sound: false });
+  private syncSample = effect(() => {
+    const ex = this.exporter(), todo = this.sampleUnsynced();
+    if (!ex) return;
+    const footage = todo.footage && ex.videoDuration() > 0, arming = todo.sound ? ex.audioArming() : null;
+    if (!footage && !arming) return;
+    untracked(() => {
+      if (footage) ex.setOffset(-0.35); // lined up by eye, frame by frame
+      if (arming) ex.setAudioLogStart(3.12); // after its own arming detection, which would move it; 3.12 by ear beats its 3.08
+      ex.scrubVideo(12.5); // just before takeoff, a good first frame; once locked, the overlay and sound follow
+      this.sampleUnsynced.set({ footage: todo.footage && !footage, sound: todo.sound && !arming });
+    });
+  });
+
   // ---- saved sessions (this browser only) ----
   readonly keepsFiles = canKeepFiles();
   readonly kindLabel: Record<FileKind, string> = { log: 'Log', footage: 'Footage', sound: 'Sound track', music: 'Music' };
@@ -315,6 +405,8 @@ export class LovelyOsdComponent {
 
   constructor() {
     void this.refreshSessions();
+    // /osd?sample opens straight into the sample flight, for links in posts and guides.
+    if (inject(ActivatedRoute).snapshot.queryParamMap.has('sample')) void this.loadSample();
   }
 
   private async refreshSessions() {

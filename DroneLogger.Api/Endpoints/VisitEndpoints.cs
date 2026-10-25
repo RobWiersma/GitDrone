@@ -111,7 +111,7 @@ public static partial class VisitEndpoints
     /// <summary>The events LovelyOSD Editor reports, in the order of a visit: loading, then making something, then keeping it.</summary>
     internal static readonly string[] EventOrder =
     [
-        "log-loaded", "log-from-usb", "footage-loaded", "sound-loaded", "music-loaded",
+        "sample-loaded", "log-loaded", "log-from-usb", "footage-loaded", "sound-loaded", "music-loaded",
         "video-rendered", "short-rendered", "overlay-exported", "render-failed", "session-saved", "session-opened",
     ];
     private static readonly HashSet<string> EventNames = [.. EventOrder];
