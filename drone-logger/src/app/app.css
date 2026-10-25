@@ -29,7 +29,7 @@
 .menu-note { margin: 0; font-size: .85rem; color: var(--muted); max-width: 18rem; }.dropdown .item { display: block; padding: .45rem .6rem; margin: 0 -.6rem; border-radius: 8px; color: var(--ink); text-decoration: none; font-weight: 600; }
 .dropdown .item:hover { background: var(--accent-soft); }
 .dropdown .item.active { color: var(--accent); }
-.stats-item { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px !important; padding-top: .7rem !important; }
+.account-links { display: grid; gap: .1rem; padding-bottom: .6rem; border-bottom: 1px solid var(--line); }
 .dropdown .item:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 .choice { display: grid; gap: .35rem; }
 .seg { display: flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; }

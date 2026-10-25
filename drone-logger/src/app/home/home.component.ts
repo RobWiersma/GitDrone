@@ -4,9 +4,10 @@ import { RouterLink } from '@angular/router';
 import { FlightService } from '../flights/flight.service';
 import { Flight, flightDate, formatDistance, formatDuration } from '../flights/flight.models';
 import { FlightThumbComponent } from '../flights/flight-thumb.component';
+import { AuthService } from '../auth.service';
 import { PhoneNoticeComponent } from '../phone-notice.component';
 
-/** Welcome page: LovelyOSD Editor first (what most visitors come for), then the rest of GitDrone and the latest flights. */
+/** Welcome page, all about LovelyOSD Editor; someone signed in also gets the latest flights from their logbook. */
 @Component({
   selector: 'app-home',
   imports: [DatePipe, NgOptimizedImage, RouterLink, FlightThumbComponent, PhoneNoticeComponent],
@@ -23,7 +24,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
           </p>
           <div class="cta">
             <a class="btn btn-primary" routerLink="/osd">Open the editor</a>
-            <a class="btn" routerLink="/flights">Browse flights</a>
+            <a class="btn" routerLink="/guides/add-osd-to-dji-o4-footage">How it works</a>
           </div>
           <p class="hint">Free and open source. No install, no account, and your files never leave your computer. Best in Chrome or Edge.</p>
           <!-- Phones only: the editor wants a computer. -->
@@ -93,20 +94,6 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
               newest log. No Configurator, no copying files (Chrome or Edge).
             </p>
           </li>
-          <li class="panel">
-            <h3><a routerLink="/flights">Flight analysis</a></h3>
-            <p>
-              Every flight gets a map coloured by speed; height, speed, battery and RSSI charts; a stick replay; and the numbers
-              that matter: top speed, lowest cell, mAh used, peak power.
-            </p>
-          </li>
-          <li class="panel">
-            <h3><a routerLink="/hangar">Tunes and hangar</a></h3>
-            <p>
-              Paste a <code>diff all</code> after each change to see what changed, compare any two tunes, and keep each quad's photo,
-              specs, tunes and flights in one place.
-            </p>
-          </li>
         </ul>
       </section>
 
@@ -142,7 +129,8 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
         </ul>
       </section>
 
-      @if (latest().length) {
+      <!-- The logbook is for whoever's signed in; visitors get the editor. -->
+      @if (auth.signedIn() && latest().length) {
         <section aria-labelledby="latest-heading">
           <div class="latest-head">
             <h2 id="latest-heading">Latest flights</h2>
@@ -197,7 +185,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
     .dots button.on::after { background: #fff; width: 1rem; border-radius: 999px; }
     .pause:focus-visible, .dots button:focus-visible { outline: 2px solid #9be564; outline-offset: 2px; border-radius: 999px; }
 
-    .features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; }
+    .features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; }
     .features h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
     .features h3 a { color: inherit; text-decoration: none; }
     .features h3 a:hover { color: var(--accent); }
@@ -224,6 +212,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
 })
 export class HomeComponent {
   private flights = inject(FlightService);
+  readonly auth = inject(AuthService);
   latest = signal<Flight[]>([]);
 
   /** Frames from a real flight with its OSD from LovelyOSD Editor (Speedybee Mario 5 X). */
@@ -240,7 +229,10 @@ export class HomeComponent {
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    this.flights.feed(0, 3).subscribe({ next: p => this.latest.set(p.flights), error: () => this.latest.set([]) });
+    // Only fetched for someone signed in, the only ones who see them.
+    void this.auth.load().then(me => {
+      if (me.signedIn) this.flights.feed(0, 3).subscribe({ next: p => this.latest.set(p.flights), error: () => this.latest.set([]) });
+    });
     if (this.playing()) this.start();
     inject(DestroyRef).onDestroy(() => this.stop());
   }

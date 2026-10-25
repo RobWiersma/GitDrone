@@ -109,7 +109,7 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 ### 🏠 And a front page to show it off
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="The home page, leading with LovelyOSD Editor: the headline Your FPV footage with its OSD, ready to upload, an Open the editor button, a carousel of real footage with its OSD, six feature cards (four for the editor, then flight analysis and tunes), a video-in-three-steps section and the latest flights with map thumbnails" width="860">
+  <img src="docs/screenshots/home.png" alt="The home page, leading with LovelyOSD Editor: the headline Your FPV footage with its OSD, ready to upload, Open the editor and How it works buttons, a carousel of real footage with its OSD, four feature cards about the editor, a video-in-three-steps section, and the free, private, open source promises" width="860">
 </p>
 
 ## Tech stack
@@ -405,10 +405,14 @@ in the format, resolution and frame rate set under Output (`flights/video-render
 
 ## LovelyOSD Editor
 
-The **LovelyOSD Editor** tab (`/osd`), first in the nav and what the home page leads with, is the quick route: pick a blackbox log, see the same stats, map, playback
+The **LovelyOSD Editor** tab (`/osd`), first in the nav and what the home page is about, is the quick route: pick a blackbox log, see the same stats, map, playback
 and charts as a flight page, and export the overlay video, without adding anything to the hangar. The API reads the
 file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
 page, so leaving it clears them, unless you save the session. A file with several armed sessions gets a session picker.
+
+**The site is about the editor.** The nav is LovelyOSD Editor and About; your logbook (Flights, Hangar, and Visitor
+stats for owners) is in the account menu once you're signed in, and the home page shows the latest flights only then.
+Those pages still work for anyone with a link.
 
 **A guide for newcomers.** [How to add your OSD to DJI O4 footage](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/guides/add-osd-to-dji-o4-footage)
 (`/guides/add-osd-to-dji-o4-footage`) walks the whole job in plain words, for search and for linking in forums. The site

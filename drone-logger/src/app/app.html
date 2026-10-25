@@ -13,8 +13,6 @@
       <span>GitDrone</span>
     </a>
     <a class="link" routerLink="/osd" routerLinkActive="active" ariaCurrentWhenActive="page">LovelyOSD<span class="long"> Editor</span></a>
-    <a class="link" routerLink="/flights" routerLinkActive="active" ariaCurrentWhenActive="page">Flights</a>
-    <a class="link" routerLink="/hangar" routerLinkActive="active" ariaCurrentWhenActive="page">Hangar</a>
     <a class="link" routerLink="/about" routerLinkActive="active" ariaCurrentWhenActive="page">About</a>
     <span class="account">
       @if (auth.signedIn()) {
@@ -30,6 +28,14 @@
           @if (open() === 'account') {
             <div id="account-menu" class="dropdown">
               <p class="menu-head">Signed in as <strong>{{ auth.name() || 'you' }}</strong></p>
+              <!-- Your own logbook lives here, so the main nav is all about the editor. -->
+              <nav class="account-links" aria-label="Your logbook">
+                <a class="item" routerLink="/flights" routerLinkActive="active" ariaCurrentWhenActive="page">Flights</a>
+                <a class="item" routerLink="/hangar" routerLinkActive="active" ariaCurrentWhenActive="page">Hangar</a>
+                @if (auth.canEdit()) {
+                  <a class="item" routerLink="/stats" routerLinkActive="active" ariaCurrentWhenActive="page">Visitor stats</a>
+                }
+              </nav>
               @if (auth.canSignOut()) {
                 <a class="item" [href]="auth.signOutUrl">Sign out</a>
               } @else {
@@ -68,9 +74,6 @@
               }
             </div>
           </div>
-          @if (auth.canEdit()) {
-            <a class="item stats-item" routerLink="/stats" routerLinkActive="active" ariaCurrentWhenActive="page">Visitor stats</a>
-          }
         </div>
       }
     </div>
