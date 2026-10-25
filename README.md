@@ -472,7 +472,8 @@ cookies and without storing IP addresses:
   aren't counted.
 - **What editor visitors did.** LovelyOSD Editor also calls `POST /api/event` with just an action's name: loaded a log
   (and whether straight off the quad), added footage, a sound track or music, rendered a video (and whether a vertical
-  Short), exported an overlay, had a render fail, saved or reopened a session. Never a file name, size or setting. Each is
+  Short), exported an overlay, had a render fail, saved or reopened a session, or tried the sample flight (whose own
+  files don't count as loads). Signed-in users' actions count too, unlike their visits; bots still don't. Never a file name, size or setting. Each is
   stored like a visit, once per visitor per day with how many times (`UsageEvents`), and the API takes that fixed list of
   names only. `/stats` shows them as a share of the editor's visitors, so you can see whether people who come try it.
 - `GET /api/stats/visits?days=30` returns the numbers (signed in only).

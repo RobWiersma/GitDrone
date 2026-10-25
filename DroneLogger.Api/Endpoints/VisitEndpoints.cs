@@ -65,14 +65,14 @@ public static partial class VisitEndpoints
 
     /// <summary>
     /// What a visitor did in LovelyOSD Editor, from a fixed list (anything else is ignored). Counted per visitor and day
-    /// like visits, with the number of times. Always 204.
+    /// like visits, with the number of times. Signed-in users count too: a render is a render, whoever made it. Always 204.
     /// </summary>
     private static async Task<IResult> RecordEvent(EventRequest body, HttpContext http, AppDbContext db, CancellationToken ct)
     {
         var name = body.Name?.Trim().ToLowerInvariant() ?? "";
         if (!EventNames.Contains(name)) return Results.NoContent();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var hash = await VisitorHashAsync(http, today, db, ct);
+        var hash = await VisitorHashAsync(http, today, db, ct, countSignedIn: true);
         if (hash is null) return Results.NoContent();
 
         var row = await db.UsageEvents.FirstOrDefaultAsync(e => e.Day == today && e.VisitorHash == hash && e.Name == name, ct);
@@ -117,12 +117,14 @@ public static partial class VisitEndpoints
     private static readonly HashSet<string> EventNames = [.. EventOrder];
 
     /// <summary>
-    /// Today's hash for this visitor, or null for the owner (signed in) and obvious robots, who aren't counted.
+    /// Today's hash for this visitor, or null for obvious robots and, unless <paramref name="countSignedIn"/>, the owner
+    /// (signed in), who aren't counted.
     /// </summary>
-    private static async Task<string?> VisitorHashAsync(HttpContext http, DateOnly today, AppDbContext db, CancellationToken ct)
+    private static async Task<string?> VisitorHashAsync(HttpContext http, DateOnly today, AppDbContext db, CancellationToken ct,
+        bool countSignedIn = false)
     {
         var agent = http.Request.Headers.UserAgent.ToString();
-        if (SignIn.IsSignedIn(http, countDevelopment: false) || agent.Length == 0 || Bots().IsMatch(agent)) return null;
+        if ((!countSignedIn && SignIn.IsSignedIn(http, countDevelopment: false)) || agent.Length == 0 || Bots().IsMatch(agent)) return null;
         var salt = await SaltForAsync(today, db, ct);
         var ip = ClientIp(http);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{salt}|{ip}|{agent}")))[..16].ToLowerInvariant();
