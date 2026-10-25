@@ -4,7 +4,7 @@ import { VisitService, VisitStats } from './visit.service';
 
 /** Friendly names for the paths the API folds visits onto. */
 const PAGE_NAMES: Record<string, string> = {
-  '/': 'Home', '/osd': 'LovelyOSD Overlay', '/flights': 'Flights feed', '/flights/:id': 'Flight page',
+  '/': 'Home', '/osd': 'LovelyOSD Editor', '/flights': 'Flights feed', '/flights/:id': 'Flight page',
   '/flights/:id/overlay': 'Flight overlay export', '/hangar': 'Hangar', '/hangar/:id': 'Aircraft page',
   '/hangar/new': 'Add aircraft', '/hangar/:id/edit': 'Edit aircraft', '/hangar/:id/tunes/import': 'Import tune',
   '/hangar/:id/tunes/bulk': 'Bulk import tunes', '/hangar/:id/flights/upload': 'Upload log', '/tunes/compare': 'Compare tunes',

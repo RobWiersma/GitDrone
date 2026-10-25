@@ -4,11 +4,13 @@
 
 # GitDrone
 
-**Your flights, your tunes, and an OSD overlay for every video.**
+**LovelyOSD Editor: your FPV footage with its OSD, ready to upload.**
 
-GitDrone reads Betaflight blackbox logs (straight off the quad over USB) and turns them into maps, charts and stick
-replays, keeps your tune history, makes a transparent OSD overlay for your FPV footage in your goggles' own font, and
-renders the finished video, YouTube Shorts included, right in your browser.
+Drop in your Betaflight blackbox log (straight off the quad over USB, if you like) and your footage. LovelyOSD Editor
+lines them up on your takeoff, draws your OSD in your goggles' own font, grades the picture, mixes your sound and music,
+and renders a finished video or YouTube Short on your GPU, near lossless, right in your browser. Or it exports a
+transparent OSD overlay for Premiere. GitDrone, around it, keeps your flights as maps, charts and stick replays, and
+your tune history.
 
 [![Deploy to Azure](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml/badge.svg)](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
@@ -18,15 +20,15 @@ renders the finished video, YouTube Shorts included, right in your browser.
 ![Leaflet](https://img.shields.io/badge/maps-Leaflet%20%2B%20OSM-199900?logo=leaflet&logoColor=white)
 
 **[Open the live site](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/)** ·
-[Try LovelyOSD](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/osd) ·
+[Open LovelyOSD Editor](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/osd) ·
 [Features](#features) ·
 [Getting started](#getting-started) ·
 [Shorts](#vertical-video-shorts-reels-tiktok) ·
 [How it works](#comparing-tunes)
 
-<img src="drone-logger/public/home/osd-hillside.jpg" alt="FPV view over a sunny hillside and bay, with the LovelyOSD overlay showing speed, battery per cell, the mini map and both sticks" width="860">
+<img src="drone-logger/public/home/osd-hillside.jpg" alt="FPV view over a sunny hillside and bay, with its OSD from LovelyOSD Editor showing speed, battery per cell, the mini map and both sticks" width="860">
 
-<sub>Real footage with a LovelyOSD overlay rendered by GitDrone.</sub>
+<sub>Real footage with its OSD, made in LovelyOSD Editor.</sub>
 
 </div>
 
@@ -34,9 +36,10 @@ renders the finished video, YouTube Shorts included, right in your browser.
 
 ## Features
 
-### 🎬 LovelyOSD overlays
+### 🎬 LovelyOSD Editor
 
-Drop in a blackbox log and export a transparent `.mov` for Premiere Pro or After Effects: speed, battery,
+Free, no install, no account, at `/osd`. Drop in a blackbox log and your footage for a finished video (below), or
+export a transparent `.mov` for Premiere Pro or After Effects: speed, battery,
 sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, resize and recolour every element,
 draw it all in your goggles' `font_bf.bin`, and preview it full screen, playing over your own footage with sound,
 synced to your takeoff automatically from the motor sound, the arming beep or a clap. A Premiere-style timeline shows
@@ -106,7 +109,7 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 ### 🏠 And a front page to show it off
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="The GitDrone home page: headline, a footage carousel with the overlay, six feature cards, a video-in-three-steps section and the latest flights with map thumbnails" width="860">
+  <img src="docs/screenshots/home.png" alt="The home page, leading with LovelyOSD Editor: the headline Your FPV footage with its OSD, ready to upload, an Open the editor button, a carousel of real footage with its OSD, six feature cards (four for the editor, then flight analysis and tunes), a video-in-three-steps section and the latest flights with map thumbnails" width="860">
 </p>
 
 ## Tech stack
@@ -157,7 +160,7 @@ GitDrone/
 │       ├── flights/              Flight pages, map, charts, playback, overlay editor and export, finished-video
 │       │                         render, logs over USB
 │       ├── icon.component.ts     The small outline icons used across the editor
-│       ├── osd/                  LovelyOSD (no-account overlay tool)
+│       ├── osd/                  LovelyOSD Editor (no-account video and overlay tool)
 │       ├── tunes/                Import, timeline, compare
 │       └── home/ · stats/        Front page and visitor stats
 ├── docs/screenshots/             Images for this README
@@ -237,7 +240,7 @@ Upload a Betaflight `.bbl`/`.bfl` file on the aircraft page, or get it straight 
 in over USB (no battery needed), press **Connect FC over USB** and then **Open FC drive**. In Chrome and Edge, GitDrone
 sends the flight controller the same MSP reboot-to-mass-storage command as the Configurator's "Activate Mass Storage
 Device Mode" button (`flights/fc-usb.ts`, Web Serial), then lists the logs on the drive it becomes and picks the newest.
-LovelyOSD has the same buttons. Eject the drive and unplug the quad afterwards to put it back to normal. The API decodes it itself
+LovelyOSD Editor has the same buttons. Eject the drive and unplug the quad afterwards to put it back to normal. The API decodes it itself
 (`Services/BlackboxDecoder.cs`, ported from betaflight/blackbox-log-viewer), creates one flight per
 armed session, and links each to the newest tune saved before that flight (or the tune you pick).
 Craft name and device UID from the log header are not stored. The original file is kept in
@@ -255,7 +258,7 @@ its altitude from either.
 
 ## Video overlay
 
-Each flight page has **Export video overlay** (`/flights/:id/overlay`), and LovelyOSD has the same tool: a
+Each flight page has **Export video overlay** (`/flights/:id/overlay`), and LovelyOSD Editor has the same tool: a
 transparent HUD video to put on a track above your footage in Premiere Pro or After Effects. It shows:
 
 - a **speed panel**: speed, G-force, current and power;
@@ -399,9 +402,9 @@ in the format, resolution and frame rate set under Output (`flights/video-render
   streams straight to disk; if Chrome won't write where you picked, it lands in your Downloads folder instead. A status
   line and progress bar show each step, and Cancel stops it cleanly.
 
-## LovelyOSD Overlay
+## LovelyOSD Editor
 
-The **LovelyOSD Overlay** tab (`/osd`) is the quick route: pick a blackbox log, see the same stats, map, playback
+The **LovelyOSD Editor** tab (`/osd`), first in the nav and what the home page leads with, is the quick route: pick a blackbox log, see the same stats, map, playback
 and charts as a flight page, and export the overlay video, without adding anything to the hangar. The API reads the
 file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
 page, so leaving it clears them, unless you save the session. A file with several armed sessions gets a session picker.
@@ -431,7 +434,7 @@ App settings on the App Service:
 | `Auth__OwnerIds`             | Your account id (comma-separate several) |
 
 `/home` survives restarts and deploys, so SQLite is fine on a single instance. Turn on App Service
-Authentication (Microsoft provider) with **Allow unauthenticated access**: visitors can browse and use LovelyOSD.
+Authentication (Microsoft provider) with **Allow unauthenticated access**: visitors can browse and use LovelyOSD Editor.
 Only **owners** can add or change anything or see visitor stats: accounts whose id is in `Auth__OwnerIds`. Signing in
 with any other account changes nothing, and with the setting empty nobody can make changes (the API enforces all of
 this). Your id is the **Object ID** under Microsoft Entra ID → Users → your user.
@@ -464,7 +467,7 @@ GitDrone stands on the open-source FPV world:
   `diff all` format and OSD symbol codes (`osd_symbols.h`) this reads.
 - **[Blackbox Explorer](https://github.com/betaflight/blackbox-log-viewer)** (GPL-3.0): `Services/BlackboxDecoder.cs`
   is a port of its log decoder, which is why GitDrone is GPL-3.0 as well.
-- **[WTFOS msp-osd](https://github.com/fpv-wtf/msp-osd)**: the DJI goggles font format LovelyOSD reads. Fonts are
+- **[WTFOS msp-osd](https://github.com/fpv-wtf/msp-osd)**: the DJI goggles font format LovelyOSD Editor reads. Fonts are
   loaded from your own computer and never uploaded or bundled here.
 - **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause) and **[OpenStreetMap](https://www.openstreetmap.org/copyright)**
   contributors (ODbL) for the flight maps.

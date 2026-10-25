@@ -26,7 +26,7 @@ interface Opening {
 }
 
 /**
- * LovelyOSD: read a blackbox log for its stats and a video overlay without saving anything to the server. The server
+ * LovelyOSD Editor: a blackbox log's OSD on your footage, as a finished video or an overlay, without saving anything to the server. The server
  * decodes the file in memory and forgets it; the results live on this page, and a saved session (this browser only)
  * brings the whole setup back.
  */
@@ -35,11 +35,11 @@ interface Opening {
   imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent, KeepFileDirective, IconComponent],
   template: `
     <div class="page">
-      <h1>LovelyOSD Overlay</h1>
+      <h1>LovelyOSD Editor</h1>
       <p class="hint">
-        Load a Betaflight blackbox log (<code>.bbl</code> / <code>.bfl</code>) to see its stats and export a transparent OSD
-        video for your footage. The log isn't added to the hangar, and nothing is uploaded for keeps. Save a session to come
-        back to a video later; it's kept in this browser only.
+        Load a Betaflight blackbox log (<code>.bbl</code> / <code>.bfl</code>) and your footage, and make a finished video with
+        your OSD on it, or a transparent OSD overlay for your own editor. It all runs in your browser: no install, no account,
+        and your files aren't uploaded. Save a session to come back to a video later; it's kept in this browser only.
       </p>
 
         <div class="panel pick">

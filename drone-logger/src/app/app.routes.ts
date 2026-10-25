@@ -11,7 +11,7 @@ import { FlightFeedComponent } from './flights/flight-feed.component';
 import { HomeComponent } from './home/home.component';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', component: HomeComponent, title: 'GitDrone' },
+  { path: '', pathMatch: 'full', component: HomeComponent, title: 'LovelyOSD Editor: your FPV footage with its OSD, in your browser' },
   { path: 'flights', pathMatch: 'full', component: FlightFeedComponent, title: 'Flights' },
   { path: 'hangar', component: AircraftListComponent, title: 'Hangar' },
   { path: 'hangar/new', canActivate: [requireSignIn], component: AircraftFormComponent, title: 'Add aircraft' },
@@ -25,7 +25,7 @@ export const routes: Routes = [
   { path: 'flights/:id', loadComponent: () => import('./flights/flight-detail.component').then(m => m.FlightDetailComponent), title: 'Flight' },
   { path: 'tunes/compare', component: TuneCompareComponent, title: 'Compare tunes' },
   { path: 'stats', canActivate: [requireSignIn], loadComponent: () => import('./stats/stats.component').then(m => m.StatsComponent), title: 'Visitors' },
-  { path: 'osd', loadComponent: () => import('./osd/lovely-osd.component').then(m => m.LovelyOsdComponent), title: 'LovelyOSD Overlay' },
+  { path: 'osd', loadComponent: () => import('./osd/lovely-osd.component').then(m => m.LovelyOsdComponent), title: 'LovelyOSD Editor' },
 
   // Old /aircraft addresses, kept so bookmarks still work.
   { path: 'aircraft', pathMatch: 'full', redirectTo: 'hangar' },

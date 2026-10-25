@@ -1,6 +1,6 @@
 # GitDrone frontend (`drone-logger`)
 
-The Angular 22 app behind GitDrone: the hangar, flight pages, tune history and the LovelyOSD overlay editor. The
+The Angular 22 app behind GitDrone: the hangar, flight pages, tune history and LovelyOSD Editor (the video and overlay editor). The
 [main README](../README.md) covers what GitDrone does; this one is about working on the frontend.
 
 ## Running it
@@ -42,7 +42,7 @@ src/app/
 │   ├── range-window.component      The two-handle slider for the render range, on the timeline
 │   ├── clap                        Sound analysis: arming, launch, claps, motor-sound sync and sample peaks
 │   └── glyph-font, stick-math      Betaflight OSD fonts and stick modes
-├── osd/           LovelyOSD: the no-account overlay tool (/osd)
+├── osd/           LovelyOSD Editor: the no-account video and overlay tool (/osd)
 ├── tunes/         Import, timeline, compare
 ├── home/ · stats/ Front page and visitor stats
 └── icon.component.ts   The small outline icons used across the editor (hover text lives on the buttons)
@@ -60,5 +60,5 @@ src/app/
 | [Web Audio](https://developer.mozilla.org/docs/Web/API/Web_Audio_API) | Gain past 100%, mutes and fades in the preview; mixing the finished video's sound | Everywhere |
 | [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API) | Rebooting the flight controller into mass storage | Chrome and Edge |
 
-Nothing a visitor loads is uploaded except a log they decode (read in memory by the API and forgotten in LovelyOSD).
+Nothing a visitor loads is uploaded except a log they decode (read in memory by the API and forgotten in LovelyOSD Editor).
 Footage, sound tracks, music and fonts stay on their computer.

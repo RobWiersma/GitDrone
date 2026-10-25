@@ -42,7 +42,7 @@
   .nav { gap: .5rem .8rem; padding: .45rem .75rem; height: auto; min-height: 3.5rem; flex-wrap: wrap; }
   .account { gap: .5rem; }
   .theme { padding: .3rem .55rem; }
-  /* "LovelyOSD Overlay" is too long for a phone; "LovelyOSD" is still the start of the link's name. */
+  /* "LovelyOSD Editor" is too long for a phone; "LovelyOSD" is still the start of the link's name. */
   .link .long { display: none; }
   .who { display: none; }
   /* Visually hidden but still the link's name for screen readers. */

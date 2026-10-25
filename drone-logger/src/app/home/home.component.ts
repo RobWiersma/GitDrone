@@ -5,7 +5,7 @@ import { FlightService } from '../flights/flight.service';
 import { Flight, flightDate, formatDistance, formatDuration } from '../flights/flight.models';
 import { FlightThumbComponent } from '../flights/flight-thumb.component';
 
-/** Welcome page: what GitDrone does, the way into LovelyOSD, and the latest flights. */
+/** Welcome page: LovelyOSD Editor first (what most visitors come for), then the rest of GitDrone and the latest flights. */
 @Component({
   selector: 'app-home',
   imports: [DatePipe, NgOptimizedImage, RouterLink, FlightThumbComponent],
@@ -13,18 +13,18 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
     <div class="page home">
       <section class="hero" aria-labelledby="hero-heading">
         <div class="hero-text">
-          <p class="eyebrow">For FPV pilots</p>
-          <h1 id="hero-heading">Your flights, your tunes, and an OSD overlay for every video</h1>
+          <p class="eyebrow">LovelyOSD Editor · for FPV pilots</p>
+          <h1 id="hero-heading">Your FPV footage with its OSD, ready to upload</h1>
           <p class="lede">
-            GitDrone reads Betaflight blackbox logs, straight off the quad over USB, and turns them into maps, charts and stick
-            replays, keeps your tune history, and puts your OSD on your footage in your goggles' own font: as a finished video,
-            YouTube Shorts included, or a transparent overlay for your editor.
+            Drop in your Betaflight blackbox log and your footage. LovelyOSD Editor lines them up on your takeoff, draws your OSD
+            in your goggles' own font, grades the picture, mixes your sound and music, and renders a finished video or YouTube
+            Short on your GPU, near lossless and in 4K if you shot 4K. Or export a transparent overlay for Premiere.
           </p>
           <div class="cta">
-            <a class="btn btn-primary" routerLink="/osd">Make a video</a>
+            <a class="btn btn-primary" routerLink="/osd">Open the editor</a>
             <a class="btn" routerLink="/flights">Browse flights</a>
           </div>
-          <p class="hint">LovelyOSD is free, needs no account, and renders in your browser.</p>
+          <p class="hint">Free and open source. No install, no account, and your files never leave your computer. Best in Chrome or Edge.</p>
         </div>
 
         <figure class="reel">
@@ -53,34 +53,40 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
             </div>
           </div>
           <figcaption class="hint">
-            Real footage with a LovelyOSD overlay.
+            Real footage with its OSD, made in LovelyOSD Editor.
           </figcaption>
         </figure>
       </section>
 
       <section aria-labelledby="features-heading">
-        <h2 id="features-heading" class="sr-only">What you can do</h2>
+        <h2 id="features-heading" class="sr-only">What LovelyOSD Editor does</h2>
         <ul class="features">
           <li class="panel">
             <h3><a routerLink="/osd">Finished videos and Shorts</a></h3>
             <p>
-              Your footage, a stick cam, the sound and the OSD in one ready-to-upload <strong>.mp4</strong>, rendered in seconds in
-              your browser. Landscape for YouTube, or vertical for Shorts, Reels and TikTok with your FPV view on top and the
-              stick cam below, plus a title and your craft name.
+              Your footage, a stick cam, the sound, music and the OSD in one ready-to-upload <strong>.mp4</strong>, encoded on your GPU
+              at near-lossless quality. Landscape for YouTube, or vertical for Shorts, Reels and TikTok with your FPV view on top and
+              the stick cam below, plus a title, your craft name and Betaflight's post-flight stats at the end.
             </p>
           </li>
           <li class="panel">
-            <h3><a routerLink="/osd">LovelyOSD overlays</a></h3>
+            <h3><a routerLink="/osd">Edit like Premiere</a></h3>
             <p>
-              Drop in a blackbox log and export a transparent <strong>.mov</strong> for Premiere or After Effects: speed, battery,
-              sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, resize and recolour every element,
-              and preview it playing over your own footage.
+              A timeline with your footage, OSD, sound and music as tracks, locked together once they're synced. Grade the footage
+              with Lumetri-style colour, set each sound's gain and fades, and see where it clips. Save the session and pick it up later.
+            </p>
+          </li>
+          <li class="panel">
+            <h3><a routerLink="/osd">Your OSD, your way</a></h3>
+            <p>
+              Speed, battery, sticks, a mini map, RSSI and the stats screen, in your goggles' <code>font_bf.bin</code>. Drag, resize and
+              recolour everything, or export a transparent <strong>.mov</strong> to lay over your footage in Premiere or After Effects.
             </p>
           </li>
           <li class="panel">
             <h3><a routerLink="/osd">Logs straight off the quad</a></h3>
             <p>
-              Plug the flight controller in over USB and GitDrone puts it in mass storage mode, opens its drive and loads the
+              Plug the flight controller in over USB and the editor puts it in mass storage mode, opens its drive and loads the
               newest log. No Configurator, no copying files (Chrome or Edge).
             </p>
           </li>
@@ -92,15 +98,11 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
             </p>
           </li>
           <li class="panel">
-            <h3><a routerLink="/hangar">Tune history</a></h3>
+            <h3><a routerLink="/hangar">Tunes and hangar</a></h3>
             <p>
-              Paste a <code>diff all</code> after each change and see what you changed, grouped by PIDs, filters and rates. Compare
-              any two tunes, and see which tune each flight was flown on.
+              Paste a <code>diff all</code> after each change to see what changed, compare any two tunes, and keep each quad's photo,
+              specs, tunes and flights in one place.
             </p>
-          </li>
-          <li class="panel">
-            <h3><a routerLink="/hangar">Your hangar</a></h3>
-            <p>Each quad with its photo, specs, tunes and flights in one place.</p>
           </li>
         </ul>
       </section>
@@ -110,20 +112,20 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
         <ol>
           <li><strong>Load a log.</strong> Plug your quad in over USB to grab the newest one, or pick any Betaflight <code>.bbl</code>
             or <code>.bfl</code> file from your flight controller or SD card.</li>
-          <li><strong>Make it yours.</strong> Add your footage and a phone or stick cam recording, synced to your takeoff from the motor
-            sound, the arming beep or a clap. Load your goggles' <code>font_bf.bin</code>, pick 16:9 or a vertical Short, and click
-            anything to move it, resize it or change its colours.</li>
-          <li><strong>Export.</strong> A finished <code>.mp4</code> ready to upload, or a lossless transparent <code>.mov</code> to put
+          <li><strong>Make it yours.</strong> Add your footage, a phone or stick cam recording and music, synced to your takeoff from
+            the motor sound, the arming beep or a clap. Load your goggles' <code>font_bf.bin</code>, pick 16:9 or a vertical Short,
+            grade the footage, and click anything to move it, resize it or change its colours.</li>
+          <li><strong>Render.</strong> A finished <code>.mp4</code> ready to upload, or a lossless transparent <code>.mov</code> to put
             above your footage in your editor.</li>
         </ol>
-        <a class="btn btn-primary" routerLink="/osd">Try LovelyOSD</a>
+        <a class="btn btn-primary" routerLink="/osd">Open LovelyOSD Editor</a>
       </section>
 
       <section class="promises" aria-labelledby="promises-heading">
         <h2 id="promises-heading">Free, private, open source</h2>
         <ul>
-          <li><strong>Free, no account.</strong> LovelyOSD works without signing up.</li>
-          <li><strong>Nothing kept.</strong> A log you open in LovelyOSD is read and forgotten, and every video is rendered in your browser.</li>
+          <li><strong>Free, no account.</strong> LovelyOSD Editor works without signing up.</li>
+          <li><strong>Nothing kept.</strong> A log you open in the editor is read and forgotten, and every video is rendered in your browser.</li>
           <li><strong>Your files stay yours.</strong> Footage, sound and OSD fonts play from your computer and are never uploaded.</li>
           <li><strong>No tracking cookies.</strong> Visits are counted with a hash that changes daily. No IP addresses are stored.</li>
           <li>
@@ -214,7 +216,7 @@ export class HomeComponent {
   private flights = inject(FlightService);
   latest = signal<Flight[]>([]);
 
-  /** Frames from a real flight with a LovelyOSD overlay (Speedybee Mario 5 X). */
+  /** Frames from a real flight with its OSD from LovelyOSD Editor (Speedybee Mario 5 X). */
   readonly frames = [
     { src: 'home/osd-hillside.jpg', alt: 'FPV view over a sunny hillside and bay, with the overlay showing a speed of 47, 3.94 V per cell, the mini map and both sticks' },
     { src: 'home/osd-treetop.jpg', alt: 'Looking straight down at a tree from above, with the overlay showing speed, battery, flight time and the mini map' },
