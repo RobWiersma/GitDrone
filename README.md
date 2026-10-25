@@ -155,7 +155,7 @@ GitDrone/
 │   ├── Migrations/               EF Core migrations (SQLite)
 │   └── samples/                  Sample Betaflight diff all
 ├── drone-logger/                 Angular 22 frontend
-│   ├── public/                   Icons and home page footage stills
+│   ├── public/                   Icons, the home page clip and stills, and the sample flight (samples/)
 │   └── src/app/
 │       ├── aircraft/             Hangar: list, detail, form
 │       ├── flights/              Flight pages, map, charts, playback, overlay editor and export, finished-video
@@ -164,6 +164,7 @@ GitDrone/
 │       ├── osd/                  LovelyOSD Editor (no-account video and overlay tool)
 │       ├── guides/               How-to pages written for search, like adding your OSD to DJI O4 footage
 │       ├── tunes/                Import, timeline, compare
+│       ├── about/                The public By the numbers page
 │       └── home/ · stats/        Front page and visitor stats
 ├── docs/screenshots/             Images for this README
 └── .github/workflows/deploy.yml  Build Angular into wwwroot and deploy to Azure
