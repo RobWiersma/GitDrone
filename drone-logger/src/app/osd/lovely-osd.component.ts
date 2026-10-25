@@ -1,5 +1,6 @@
 import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FlightService } from '../flights/flight.service';
@@ -33,7 +34,7 @@ interface Opening {
  */
 @Component({
   selector: 'app-lovely-osd',
-  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent, KeepFileDirective, IconComponent, PhoneNoticeComponent],
+  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent, KeepFileDirective, IconComponent, PhoneNoticeComponent, RouterLink],
   template: `
     <div class="page">
       <h1>LovelyOSD Editor</h1>
@@ -41,6 +42,7 @@ interface Opening {
         Load a Betaflight blackbox log (<code>.bbl</code> / <code>.bfl</code>) and your footage, and make a finished video with
         your OSD on it, or a transparent OSD overlay for your own editor. It all runs in your browser: no install, no account,
         and your files aren't uploaded. Save a session to come back to a video later; it's kept in this browser only.
+        New here? Read the <a routerLink="/guides/add-osd-to-dji-o4-footage">step-by-step guide</a>.
       </p>
 
         <!-- Phones only: the editor wants a computer. -->

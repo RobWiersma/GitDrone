@@ -121,7 +121,10 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
           <li><strong>Render.</strong> A finished <code>.mp4</code> ready to upload, or a lossless transparent <code>.mov</code> to put
             above your footage in your editor.</li>
         </ol>
-        <a class="btn btn-primary" routerLink="/osd">Open LovelyOSD Editor</a>
+        <div class="steps-actions">
+          <a class="btn btn-primary" routerLink="/osd">Open LovelyOSD Editor</a>
+          <a routerLink="/guides/add-osd-to-dji-o4-footage">Step-by-step guide: adding your OSD to DJI O4 footage</a>
+        </div>
       </section>
 
       <section class="promises" aria-labelledby="promises-heading">
@@ -200,6 +203,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
     .features p { margin: 0; line-height: 1.5; }
     .features li { border-top: 3px solid var(--accent); }
 
+    .steps-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; }
     .steps ol { margin: 0 0 1rem; padding-left: 1.3rem; display: grid; gap: .5rem; line-height: 1.5; }
 
     .promises ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem 1.5rem; }

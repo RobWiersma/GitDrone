@@ -161,6 +161,7 @@ GitDrone/
 │       │                         render, logs over USB
 │       ├── icon.component.ts     The small outline icons used across the editor
 │       ├── osd/                  LovelyOSD Editor (no-account video and overlay tool)
+│       ├── guides/               How-to pages written for search, like adding your OSD to DJI O4 footage
 │       ├── tunes/                Import, timeline, compare
 │       └── home/ · stats/        Front page and visitor stats
 ├── docs/screenshots/             Images for this README
@@ -408,6 +409,11 @@ The **LovelyOSD Editor** tab (`/osd`), first in the nav and what the home page l
 and charts as a flight page, and export the overlay video, without adding anything to the hangar. The API reads the
 file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
 page, so leaving it clears them, unless you save the session. A file with several armed sessions gets a session picker.
+
+**A guide for newcomers.** [How to add your OSD to DJI O4 footage](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/guides/add-osd-to-dji-o4-footage)
+(`/guides/add-osd-to-dji-o4-footage`) walks the whole job in plain words, for search and for linking in forums. The site
+has a `sitemap.xml` and `robots.txt`, and link-preview tags with a preview image (`public/og-image.png`) so a shared link
+shows a proper card.
 
 **Saved sessions.** **Save session** (next to the session's name, above the editor) keeps everything about a video in
 your browser (IndexedDB; nothing is uploaded): the log and which armed session, the footage, sound track and music, the
