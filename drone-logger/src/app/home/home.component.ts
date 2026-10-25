@@ -4,11 +4,12 @@ import { RouterLink } from '@angular/router';
 import { FlightService } from '../flights/flight.service';
 import { Flight, flightDate, formatDistance, formatDuration } from '../flights/flight.models';
 import { FlightThumbComponent } from '../flights/flight-thumb.component';
+import { PhoneNoticeComponent } from '../phone-notice.component';
 
 /** Welcome page: LovelyOSD Editor first (what most visitors come for), then the rest of GitDrone and the latest flights. */
 @Component({
   selector: 'app-home',
-  imports: [DatePipe, NgOptimizedImage, RouterLink, FlightThumbComponent],
+  imports: [DatePipe, NgOptimizedImage, RouterLink, FlightThumbComponent, PhoneNoticeComponent],
   template: `
     <div class="page home">
       <section class="hero" aria-labelledby="hero-heading">
@@ -25,6 +26,8 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
             <a class="btn" routerLink="/flights">Browse flights</a>
           </div>
           <p class="hint">Free and open source. No install, no account, and your files never leave your computer. Best in Chrome or Edge.</p>
+          <!-- Phones only: the editor wants a computer. -->
+          <app-phone-notice class="phone" />
         </div>
 
         <figure class="reel">
@@ -165,6 +168,7 @@ import { FlightThumbComponent } from '../flights/flight-thumb.component';
     .hero h1 { font-size: clamp(1.9rem, 4vw, 2.7rem); margin: .3rem 0 .8rem; }
     .lede { font-size: 1.08rem; line-height: 1.55; margin: 0 0 1.2rem; max-width: 36rem; }
     .cta { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: .5rem; }
+    .phone { margin-top: 1rem; }
 
     /* Slideshow of real footage with the overlay. */
     .reel { margin: 0; display: grid; gap: .45rem; }

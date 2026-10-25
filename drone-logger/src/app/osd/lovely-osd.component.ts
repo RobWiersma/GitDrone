@@ -12,6 +12,7 @@ import { FcUsbComponent } from '../flights/fc-usb.component';
 import { KeepFileDirective, canKeepFiles } from '../flights/file-handles';
 import { SavedSession, deleteSession, listSessions, putSession, reopen, savedFile } from '../flights/session-store';
 import { IconComponent } from '../icon.component';
+import { PhoneNoticeComponent } from '../phone-notice.component';
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
@@ -32,7 +33,7 @@ interface Opening {
  */
 @Component({
   selector: 'app-lovely-osd',
-  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent, KeepFileDirective, IconComponent],
+  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent, KeepFileDirective, IconComponent, PhoneNoticeComponent],
   template: `
     <div class="page">
       <h1>LovelyOSD Editor</h1>
@@ -41,6 +42,9 @@ interface Opening {
         your OSD on it, or a transparent OSD overlay for your own editor. It all runs in your browser: no install, no account,
         and your files aren't uploaded. Save a session to come back to a video later; it's kept in this browser only.
       </p>
+
+        <!-- Phones only: the editor wants a computer. -->
+        <app-phone-notice class="phone" />
 
         <div class="panel pick">
           <!-- Saved sessions, newest first: open one to pick up where you left off. -->
@@ -167,6 +171,7 @@ interface Opening {
     </div>
   `,
   styles: [`
+    .phone { margin-top: 1rem; }
     .pick { margin: 1rem 0; display: grid; gap: .25rem; }
     .pick .field { margin: 0; }
     .pick app-fc-usb { display: block; margin-bottom: .5rem; }
