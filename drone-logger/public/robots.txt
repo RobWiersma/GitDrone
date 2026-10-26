@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/sitemap.xml
+Sitemap: https://lovelyosd.com/sitemap.xml

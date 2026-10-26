@@ -171,9 +171,13 @@ public static partial class VisitEndpoints
         return await db.VisitSalts.AsNoTracking().Where(s => s.Day == today).Select(s => s.Salt).FirstAsync(ct);
     }
 
-    /// <summary>The visitor's address. App Service puts it first in X-Forwarded-For, sometimes with a port.</summary>
+    /// <summary>
+    /// The visitor's address. Through lovelyosd.com, the Cloudflare Worker passes it in X-Visitor-IP (App Service only
+    /// sees the Worker); on the azurewebsites address, App Service puts it first in X-Forwarded-For, sometimes with a port.
+    /// </summary>
     private static string ClientIp(HttpContext http)
     {
+        if (IPAddress.TryParse(http.Request.Headers["X-Visitor-IP"].ToString().Trim(), out var visitor)) return visitor.ToString();
         var forwarded = http.Request.Headers["X-Forwarded-For"].ToString().Split(',')[0].Trim();
         if (forwarded.Length > 0)
         {

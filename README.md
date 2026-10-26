@@ -19,8 +19,8 @@ your tune history.
 ![SQLite](https://img.shields.io/badge/SQLite-EF%20Core-003b57?logo=sqlite&logoColor=white)
 ![Leaflet](https://img.shields.io/badge/maps-Leaflet%20%2B%20OSM-199900?logo=leaflet&logoColor=white)
 
-**[Open the live site](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/)** ·
-[Open LovelyOSD Editor](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/osd) ·
+**[Open the live site](https://lovelyosd.com/)** ·
+[Open LovelyOSD Editor](https://lovelyosd.com/osd) ·
 [Features](#features) ·
 [Getting started](#getting-started) ·
 [Shorts](#vertical-video-shorts-reels-tiktok) ·
@@ -45,7 +45,7 @@ draw it all in your goggles' WTFOS font, and preview it full screen, playing ove
 synced to your takeoff automatically from the motor sound, the arming beep or a clap. A Premiere-style timeline shows
 the footage, OSD, sound and music as tracks, locked together once they're synced, with waveforms that turn red where
 they clip. Free, no account, and nothing is uploaded: the video is rendered in your browser. No files handy?
-**Try a sample flight** (or [`/osd?sample`](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/osd?sample)) loads a real one.
+**Try a sample flight** (or [`/osd?sample`](https://lovelyosd.com/osd?sample)) loads a real one.
 
 ### 📱 Finished videos and Shorts
 
@@ -422,7 +422,7 @@ page, so leaving it clears them, unless you save the session. A file with severa
 stats for owners) is in the account menu once you're signed in, and the home page shows the latest flights only then.
 Those pages still work for anyone with a link.
 
-**A guide for newcomers.** [How to add your OSD to DJI O4 footage](https://gitdrone-bxa9ejf9gbhva9ek.westus3-01.azurewebsites.net/guides/add-osd-to-dji-o4-footage)
+**A guide for newcomers.** [How to add your OSD to DJI O4 footage](https://lovelyosd.com/guides/add-osd-to-dji-o4-footage)
 (`/guides/add-osd-to-dji-o4-footage`) walks the whole job in plain words, for search and for linking in forums. The site
 has a `sitemap.xml` and `robots.txt`, and link-preview tags with a preview image (`public/og-image.png`) so a shared link
 shows a proper card.
