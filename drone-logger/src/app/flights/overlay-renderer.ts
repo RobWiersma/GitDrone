@@ -122,6 +122,11 @@ export interface OverlayOptions {
    */
   titleFont: string;
   craftFont: string;
+  /**
+   * A small "OSD by lovelyosd.com" at the end, so people who see the video can find the editor: under the stats screen,
+   * or without one over the last few seconds before `statsAfter`.
+   */
+  showCredit: boolean;
   layout: OverlayLayout;
   /** Text size multipliers for items inside panels; missing means 100%. */
   itemScale: Partial<Record<ItemKey, number>>;
@@ -288,6 +293,10 @@ export class OverlayRenderer {
         case 'craft': drawCraft(ctx, p.x, p.y, s, o); break;
       }
     }
+    // Without a stats screen, the credit comes up over the last few seconds instead: top centre in 16:9, between the
+    // title and the mini map, and just above the split in vertical (clear of the Shorts buttons and caption).
+    if (o.showCredit && !o.showStats && t >= o.statsAfter - CREDIT_SECONDS && t <= o.statsAfter)
+      drawCredit(ctx, W / 2, H > W ? 0.537 * H - (CREDIT_H / 2 + 12) * u : (48 + CREDIT_H / 2) * u, u);
   }
 
   /**
@@ -440,6 +449,7 @@ export class OverlayRenderer {
       text(ctx, ':', x0 + labelW + gap, y, size, 'left', 700);
       text(ctx, value, x0 + labelW + gap + colonW + gap, y, size, 'left', 700);
     });
+    if (o.showCredit) drawCredit(ctx, W / 2, y0 + blockH + (40 + CREDIT_H / 2) * u, u);
   }
 
   /**
@@ -1055,6 +1065,69 @@ function drawTitle(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
   for (const [part] of parts) { outerStroke(ctx, part, tx, ty, TITLE_STROKE * s, o.titleStrokeColor); tx += ctx.measureText(part).width; }
   tx = x + TITLE_PAD_X * s;
   for (const [part, color] of parts) { ctx.fillStyle = color; ctx.fillText(part, tx, ty); tx += ctx.measureText(part).width; }
+  ctx.restore();
+}
+
+/** How long the credit shows at the end of a video without a stats screen (s). */
+const CREDIT_SECONDS = 3;
+/** The site's dark theme: page background, text, and the green accent (as in styles.css). */
+const SITE_BG = '#0a0f14', SITE_LINE = '#233040', SITE_INK = '#e6edf3';
+/** The credit badge's height (1080p px). */
+const CREDIT_H = 46;
+
+/**
+ * The editor's credit as a badge centred on (cx, cy): the GitDrone mark, then "OSD by" and "lovelyosd.com" in bold
+ * Impact, in the site's dark theme colours on a dark tile. Under the stats screen, or over a video's last seconds without one.
+ */
+function drawCredit(ctx: CanvasRenderingContext2D, cx: number, cy: number, u: number) {
+  const lead = 'OSD by ', site = 'lovelyosd.com';
+  const size = 28 * u, logo = 30 * u, gap = 10 * u, padX = 14 * u, h = CREDIT_H * u;
+  ctx.save();
+  ctx.font = `${size}px ${DISPLAY_FONT}`;
+  ctx.letterSpacing = `${u}px`;
+  const leadW = ctx.measureText(lead).width, siteW = ctx.measureText(site).width;
+  const w = padX + logo + gap + leadW + siteW + padX;
+  const x0 = cx - w / 2;
+  ctx.beginPath();
+  ctx.roundRect(x0, cy - h / 2, w, h, 10 * u);
+  ctx.fillStyle = SITE_BG;
+  ctx.globalAlpha = 0.88;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 2 * u;
+  ctx.strokeStyle = SITE_LINE;
+  ctx.stroke();
+  drawLogo(ctx, x0 + padX, cy - logo / 2, logo);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const baseline = cy + size * 0.37, tx = x0 + padX + logo + gap;
+  ctx.fillStyle = SITE_INK;
+  ctx.fillText(lead, tx, baseline);
+  ctx.fillStyle = ACCENT;
+  ctx.fillText(site, tx + leadW, baseline);
+  ctx.restore();
+}
+
+/** The GitDrone mark (the nav logo and favicon): an X frame, four rotors and a body, in the site green, `size` px square. */
+function drawLogo(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(size / 32, size / 32);
+  ctx.strokeStyle = ACCENT;
+  ctx.fillStyle = ACCENT;
+  ctx.lineWidth = 2.6;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(9, 9); ctx.lineTo(23, 23);
+  ctx.moveTo(23, 9); ctx.lineTo(9, 23);
+  for (const [px, py] of [[7, 7], [25, 7], [7, 25], [25, 25]]) {
+    ctx.moveTo(px + 4.5, py);
+    ctx.arc(px, py, 4.5, 0, 2 * Math.PI);
+  }
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.roundRect(12.5, 12.5, 7, 7, 2);
+  ctx.fill();
   ctx.restore();
 }
 

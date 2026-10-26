@@ -273,7 +273,9 @@ transparent HUD video to put on a track above your footage in Premiere Pro or Af
   with stepped corners. The sticks' **Backdrop** slider sets their boxes' opacity apart from the other panels;
 - a Betaflight-style **stats screen** at the end (a 0.1 s blank, then TOTAL ARM, MAX SPEED, MIN BATTERY, ...);
 - a **title** in two colours (your channel name, say) and your **craft name**, in Impact with an outer stroke like a
-  Premiere title, or no box at all. They start on in vertical and off in 16:9; their toggles are under **Show**.
+  Premiere title, or no box at all. They start on in vertical and off in 16:9; their toggles are under **Show**;
+- a small **OSD by lovelyosd.com** credit at the end, under the stats screen (or over the last 3 seconds when the stats
+  are off), so pilots who see your video can find the editor. It's on by default; untick **Credit lovelyosd.com** under **Show** to leave it off.
 
 It can draw the HUD with your goggles' Betaflight OSD font, including Betaflight's own icons: WTFOS msp-osd's `.png` fonts
 (`font_btfl.png` / `font_btfl_hd.png`, since msp-osd 0.12, and Walksnail's `_36` / `_24` files, the same format) or the older
@@ -296,7 +298,7 @@ where the sound is; hover one (or Tab to it) for what it is. Click a track (or a
 the **Track** panel shows its settings: sync, colour and framing for the footage, picture and framing for the stick
 cam, gain and sync for the sound, and gain, start and fades for the music. Options holds
 the rest in three boxes, **Sources** (the backdrop, footage, sound track, music and OSD font), **Show** (one icon toggle per HUD
-element, the title and craft name, the stats length and the panel background) and **Output** (format, resolution and
+element, the title and craft name, the stats length, the panel background and the credit) and **Output** (format, resolution and
 frame rate), with a full-width **Export** row under them for the two render buttons.
 Small buttons are icons; hover any of them for what it does. Positions are stored as fractions of the frame, so a layout
 looks the same at every resolution, and it's remembered in your browser. Elements always stay fully inside the frame.

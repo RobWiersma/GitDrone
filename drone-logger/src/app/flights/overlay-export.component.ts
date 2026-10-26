@@ -89,11 +89,14 @@ const FOOTAGE_DEFAULTS = { zoom: 100 };
 
 const PREFS_KEY = 'gitdrone-editor-prefs';
 /** The Show toggles and panel background, which each format keeps its own of. */
-type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats' | 'showTitle' | 'showCraft' | 'panelOpacity'>;
-/** What each format starts with: vertical leaves out what doesn't fit a narrow frame, and has the title and craft name. */
+type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats' | 'showTitle' | 'showCraft' | 'panelOpacity' | 'showCredit'>;
+/**
+ * What each format starts with: vertical leaves out what doesn't fit a narrow frame, and has the title and craft name.
+ * The lovelyosd.com credit starts on in both.
+ */
 const showDefaults = (vertical: boolean): ShowState => ({
   showSpeed: !vertical, showBattery: true, showSticks: true, showMap: !vertical, showRssi: !vertical, showStats: true,
-  showTitle: vertical, showCraft: vertical, panelOpacity: vertical ? 0 : 0.35,
+  showTitle: vertical, showCraft: vertical, panelOpacity: vertical ? 0 : 0.35, showCredit: true,
 });
 const formatOf = (vertical: boolean) => (vertical ? 'vertical' : 'landscape');
 
@@ -1082,6 +1085,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                        (ngModelChange)="set('panelOpacity', +$event)" [disabled]="busy()" />
                 <span class="mono">{{ (opts().panelOpacity * 100).toFixed(0) }}%</span>
               </div>
+              <label class="credit" title="A small “OSD by lovelyosd.com” at the end (under the stats screen, or over the last 3 seconds without it), so pilots who see your video can find the editor. Thanks for leaving it on!">
+                <input type="checkbox" [ngModel]="opts().showCredit" (ngModelChange)="set('showCredit', $event)" [disabled]="busy()" />
+                Credit lovelyosd.com
+              </label>
             </div>
             <!-- What gets made, for both exports: shape (icons), size and frame rate (chips, since numbers say it better than any
                  icon). Hover any button for the details. -->
@@ -1332,6 +1339,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .label-row input[type=text] { flex: 1; min-width: 0; }
     .footage-box.selected, .pip.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
     .grade { display: grid; grid-template-columns: auto 1fr 3.2rem; align-items: center; gap: .35rem .6rem; margin: .4rem 0 .1rem; font-size: .92rem; }
+    .credit { display: flex; align-items: center; gap: .4rem; margin-top: .3rem; font-size: .92rem; cursor: pointer; }
+    .credit input { width: auto; margin: 0; }
     .grade input[type=range] { width: 100%; min-width: 0; }
     .grade .mono { text-align: right; font-size: .82rem; }
     .sources .source-row { flex-wrap: nowrap; align-items: center; }
@@ -2769,11 +2778,13 @@ export class OverlayExportComponent {
    * The post-flight stats in the finished video: they come up where the flight ends, or at the end of the render range
    * if that's sooner (as when you disarm), and the last footage frame holds for as long as they run past the footage.
    * `after` is in log time; `hold` is the seconds added after the range. No stats if the log hasn't started by then.
+   * Without the stats, `after` is still where the video's flight ends, for the credit over its last seconds.
    */
   renderStats = computed(() => {
     const offset = this.videoOffset();
     const at = Math.min(offset + this.seconds(), this.renderEnd());
-    if (!this.opts().showStats || at < offset || at < this.renderStart()) return { after: this.seconds(), hold: 0, end: this.seconds() };
+    if (at < offset || at < this.renderStart()) return { after: this.seconds(), hold: 0, end: this.seconds() };
+    if (!this.opts().showStats) return { after: at - offset, hold: 0, end: this.seconds() };
     const tail = this.tail();
     return { after: at - offset, hold: Math.max(0, at + tail - this.renderEnd()), end: at - offset + tail };
   });
