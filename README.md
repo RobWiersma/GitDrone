@@ -267,9 +267,10 @@ transparent HUD video to put on a track above your footage in Premiere Pro or Af
 - a **speed panel**: speed, G-force, current and power;
 - a **battery panel**: per-cell and pack voltage, flight time (always shown) and mAh used;
 - a **mini map** with an **RSSI panel** under it: satellites, RSSI, distance from home and height (GPS or barometer);
-- both **sticks** in Blackbox Explorer style (modes 1–4), each stick an empty white ring in chunky pixels like the OSD
-  font, with motion trails, or **Retro**: Betaflight's own OSD stick
-  overlay, a 7 × 5 grid of characters drawn from your OSD font (chunky pixels without one);
+- both **sticks** in Blackbox Explorer style (modes 1–4) with motion trails; or **Pixel**, the same in chunky pixels like
+  the OSD font (a pixel-art box with stepped corners, each stick an empty white ring); or **Retro**: Betaflight's own OSD stick
+  overlay, a 7 × 5 grid of characters drawn from your OSD font (chunky pixels without one), on a pixel-art backdrop
+  with stepped corners. The sticks' **Backdrop** slider sets their boxes' opacity apart from the other panels;
 - a Betaflight-style **stats screen** at the end (a 0.1 s blank, then TOTAL ARM, MAX SPEED, MIN BATTERY, ...);
 - a **title** in two colours (your channel name, say) and your **craft name**, in Impact with an outer stroke like a
   Premiere title, or no box at all. They start on in vertical and off in 16:9; their toggles are under **Show**.

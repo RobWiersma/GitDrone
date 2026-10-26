@@ -70,10 +70,13 @@ export interface OverlayOptions {
   /** Blurred, fading streak behind each stick dot, like a long exposure. */
   stickTrails: boolean;
   /**
-   * How the sticks look: 'smooth' (Blackbox Explorer: boxes, crosshairs, a dot) or 'retro' (Betaflight's own OSD stick
-   * overlay, drawn in characters from the OSD font). Smooth when missing.
+   * How the sticks look: 'smooth' (Blackbox Explorer: boxes, crosshairs, a dot), 'pixel' (the same in chunky pixels like
+   * the OSD font: a pixel-art box and an empty ring) or 'retro' (Betaflight's own OSD stick overlay, drawn in characters
+   * from the OSD font). Smooth when missing.
    */
-  stickStyle?: 'smooth' | 'retro';
+  stickStyle?: 'smooth' | 'pixel' | 'retro';
+  /** The Pixel look's ring colour (#rrggbb). */
+  stickRingColor: string;
   /** Mini map colours (#rrggbb): the path just flown, and what it darkens to as it ages. */
   pathRecentColor: string;
   pathOldColor: string;
@@ -82,6 +85,11 @@ export interface OverlayOptions {
   stickTrailColor: string;
   /** Trail opacity multiplier: 1 is the default look, 0.25 faint, 2 strong. */
   stickTrailIntensity: number;
+  /**
+   * The stick boxes' own opacity, 0..1, apart from the panels': Pixel and Retro draw their box at exactly this (none at 0),
+   * Smooth keeps Blackbox Explorer's darker box, a little more opaque than this.
+   */
+  stickBoxOpacity: number;
   /** Stick box fill and crosshair (#rrggbb); their transparency stays fixed. */
   stickBoxColor: string;
   stickCrossColor: string;
@@ -582,13 +590,20 @@ export class OverlayRenderer {
 
     const box = hexToRgb(o.stickBoxColor, [28, 28, 28]);
     const cross = hexToRgb(o.stickCrossColor, [255, 255, 255]);
+    const pixel = o.stickStyle === 'pixel';
     for (const g of sides) {
       ctx.save();
-      // The box keeps its own dark fill (like Blackbox Explorer); the panel slider only fades it further.
-      ctx.fillStyle = `rgba(${box.join(', ')}, ${Math.max(0.55, o.panelOpacity + 0.4)})`;
-      ctx.beginPath();
-      ctx.roundRect(g.left, top, size, size, 14 * u);
-      ctx.fill();
+      // The box keeps its own dark fill (like Blackbox Explorer); the sticks' backdrop slider only fades it further.
+      const boxAlpha = Math.max(0.55, o.stickBoxOpacity + 0.4);
+      if (pixel) {
+        // As see-through as the Retro (Betaflight) backdrop: just the sticks' backdrop slider, and gone at 0.
+        if (o.stickBoxOpacity > 0) pixelBackdrop(ctx, g.left, top, size, box, o.stickBoxOpacity);
+      } else {
+        ctx.fillStyle = `rgba(${box.join(', ')}, ${boxAlpha})`;
+        ctx.beginPath();
+        ctx.roundRect(g.left, top, size, size, 14 * u);
+        ctx.fill();
+      }
       ctx.strokeStyle = `rgba(${cross.join(', ')}, .35)`;
       ctx.lineWidth = Math.max(1, 2 * u);
       ctx.beginPath();
@@ -598,9 +613,15 @@ export class OverlayRenderer {
       const r = size / 2 - dot - 3 * u;
       const at = (a: ReturnType<typeof stickAxes>) => [g.left + size / 2 + a[g.ax] * r, top + size / 2 - a[g.ay] * r] as const;
       const [kx, ky] = at(now);
-      if (o.stickTrails) this.drawTrail(ctx, t, at, g.left, top, size, dot, u, safeColor(o.stickTrailColor, '#86a858'), o.stickTrailIntensity ?? 1);
-      // The stick as an empty ring in chunky pixels, like the OSD font, so the crosshair and footage show through it.
-      pixelRing(ctx, kx, ky, dot + 1.5 * u, 2 * u, safeColor(o.stickDotColor, '#ffffff'));
+      const ring = pixel ? ringRadius(dot, u) : 0;
+      if (o.stickTrails) this.drawTrail(ctx, t, at, g.left, top, size, dot, u, safeColor(o.stickTrailColor, '#86a858'), o.stickTrailIntensity ?? 1, ring);
+      if (pixel) {
+        // An empty ring in chunky pixels, like the OSD font, so the crosshair and footage show through it.
+        pixelRing(ctx, kx, ky, ring, 2 * u, safeColor(o.stickRingColor, '#ffffff'));
+      } else {
+        ctx.fillStyle = safeColor(o.stickDotColor, '#e086b0');
+        ctx.beginPath(); ctx.arc(kx, ky, dot, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.restore();
     }
   }
@@ -619,10 +640,7 @@ export class OverlayRenderer {
     const ch = size / ROWS, cw = ch * (glyphs ? glyphs.glyphW / glyphs.glyphH : 2 / 3);
     const box = hexToRgb(o.stickBoxColor, [28, 28, 28]);
     for (const [left, ax, ay] of [[x, lx, ly], [x + size + gap, rx, ry]] as const) {
-      if (o.panelOpacity > 0) {
-        ctx.fillStyle = `rgba(${box.join(', ')}, ${o.panelOpacity})`;
-        ctx.fillRect(left, top, size, size);
-      }
+      if (o.stickBoxOpacity > 0) pixelBackdrop(ctx, left, top, size, box, o.stickBoxOpacity);
       const x0 = left + (size - COLS * cw) / 2;
       // Like Betaflight: the stick's range split evenly over the columns, and over the rows' thirds, top = stick up.
       const col = Math.round((Math.max(-1, Math.min(1, now[ax])) + 1) / 2 * (COLS - 1));
@@ -654,7 +672,7 @@ export class OverlayRenderer {
    * with age, softened with a blur filter. Clipped to the stick box so the blur never bleeds past its edge.
    */
   private drawTrail(ctx: CanvasRenderingContext2D, t: number, at: (a: ReturnType<typeof stickAxes>) => readonly [number, number],
-                    left: number, top: number, size: number, dot: number, u: number, color: string, intensity: number) {
+                    left: number, top: number, size: number, dot: number, u: number, color: string, intensity: number, hole = 0) {
     const TRAIL_S = 0.35, STEPS = 21; // 60 steps a second, so fast flicks still draw a smooth curve
     const pts: (readonly [number, number])[] = [];
     for (let k = STEPS; k >= 0; k--) pts.push(at(stickAxes(sampleSticks(this.data.sticks!, Math.max(0, t - (TRAIL_S * k) / STEPS)))));
@@ -662,12 +680,14 @@ export class OverlayRenderer {
     ctx.beginPath();
     ctx.roundRect(left, top, size, size, 14 * u);
     ctx.clip();
-    // Nothing inside the stick's ring either, so it stays an empty circle with the trail leading up to it.
-    const [nx, ny] = pts[pts.length - 1];
-    ctx.beginPath();
-    ctx.rect(left, top, size, size);
-    ctx.arc(nx, ny, dot + 1.5 * u, 0, Math.PI * 2);
-    ctx.clip('evenodd');
+    if (hole) {
+      // Nothing inside the Pixel look's ring, so it stays an empty circle with the trail leading up to it.
+      const [nx, ny] = pts[pts.length - 1];
+      ctx.beginPath();
+      ctx.rect(left, top, size, size);
+      ctx.arc(nx, ny, hole, 0, Math.PI * 2);
+      ctx.clip('evenodd');
+    }
     ctx.filter = `blur(${Math.max(1, 2.5 * u)}px)`;
     ctx.strokeStyle = color;
     ctx.lineCap = 'round';
@@ -824,6 +844,44 @@ const glyphCodes = (s: string) => [...s].map(c => {
   const upper = c >= 'a' && c <= 'z' ? c.toUpperCase().charCodeAt(0) : code;
   return upper > 255 ? 63 : upper;
 });
+
+/**
+ * The Pixel and Retro sticks' backdrop in chunky pixels, like the OSD font: a square on a 30 x 30 grid with stepped round corners and
+ * a one-pixel lighter frame. Each row is drawn as runs, so a frame costs a few dozen rectangles, not hundreds.
+ */
+function pixelBackdrop(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, rgb: number[], alpha: number) {
+  const N = 30, R = 5, px = size / N;
+  const inside = (i: number, j: number) => {
+    if (i < 0 || j < 0 || i >= N || j >= N) return false;
+    const dx = Math.max(0, R - i - 0.5, i + 0.5 - (N - R)), dy = Math.max(0, R - j - 0.5, j + 0.5 - (N - R));
+    return dx * dx + dy * dy <= R * R;
+  };
+  // Diagonal neighbours count too, so the frame steps around the corners without gaps.
+  const frame = (i: number, j: number) => [-1, 0, 1].some(a => [-1, 0, 1].some(b => !inside(i + a, j + b)));
+  const fill = `rgba(${rgb.join(', ')}, ${alpha})`;
+  const light = `rgba(${rgb.map(c => Math.round(c + (255 - c) * 0.35)).join(', ')}, ${Math.min(1, alpha + 0.25)})`;
+  ctx.save();
+  for (let j = 0; j < N; j++) {
+    // Runs of the same kind along the row: outside, fill or frame.
+    let i = 0;
+    while (i < N) {
+      const kind = !inside(i, j) ? 0 : frame(i, j) ? 2 : 1;
+      let end = i + 1;
+      while (end < N && (!inside(end, j) ? 0 : frame(end, j) ? 2 : 1) === kind) end++;
+      if (kind) {
+        ctx.fillStyle = kind === 2 ? light : fill;
+        // Whole device pixels, so neighbouring runs meet without seams.
+        const x0 = Math.round(x + i * px), x1 = Math.round(x + end * px);
+        ctx.fillRect(x0, Math.round(y + j * px), x1 - x0, Math.round(y + (j + 1) * px) - Math.round(y + j * px));
+      }
+      i = end;
+    }
+  }
+  ctx.restore();
+}
+
+/** The stick ring's radius: three quarters of the old dot's (plus its edge), small enough to sit neatly on the crosshair. */
+const ringRadius = (dot: number, u: number) => (dot + 1.5 * u) * 0.75;
 
 /**
  * An empty ring of radius `r` drawn from square pixels of size `px`, like the OSD font's glyphs: the ring's pixels with a

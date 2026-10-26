@@ -164,7 +164,7 @@ function readVertical(): boolean {
 const FPS = [24, 25, 30, 50, 60];
 
 const DEFAULT_PATH_COLORS = { pathRecentColor: '#9be564', pathOldColor: '#2c4a1f' };
-const DEFAULT_STICK_COLORS = { stickDotColor: '#ffffff', stickTrailColor: '#86a858', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
+const DEFAULT_STICK_COLORS = { stickDotColor: '#e086b0', stickRingColor: '#ffffff', stickTrailColor: '#86a858', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
 const DEFAULT_COLORS = { ...DEFAULT_PATH_COLORS, ...DEFAULT_STICK_COLORS };
 type ColorKey = keyof typeof DEFAULT_COLORS;
 const COLORS_KEY = 'gitdrone-overlay-path-colors';
@@ -185,9 +185,24 @@ function readColors(): typeof DEFAULT_COLORS {
 const TRAIL_KEY = 'gitdrone-overlay-trail-intensity';
 const STICK_STYLE_KEY = 'gitdrone-overlay-stick-style';
 
+type StickStyle = 'smooth' | 'pixel' | 'retro';
+const isStickStyle = (v: unknown): v is StickStyle => v === 'smooth' || v === 'pixel' || v === 'retro';
+
+const STICK_BOX_KEY = 'gitdrone-overlay-stick-box-opacity';
+
+/** The sticks' backdrop opacity: 35% until changed, like the panels start. */
+function readStickBoxOpacity(): number {
+  try {
+    const saved = localStorage.getItem(STICK_BOX_KEY);
+    const v = saved === null ? NaN : Number(saved);
+    if (v >= 0 && v <= 1) return v;
+  } catch { /* default */ }
+  return 0.35;
+}
+
 /** The sticks' look: smooth until changed. */
-function readStickStyle(): 'smooth' | 'retro' {
-  try { return localStorage.getItem(STICK_STYLE_KEY) === 'retro' ? 'retro' : 'smooth'; } catch { return 'smooth'; }
+function readStickStyle(): StickStyle {
+  try { const v = localStorage.getItem(STICK_STYLE_KEY); return isStickStyle(v) ? v : 'smooth'; } catch { return 'smooth'; }
 }
 
 function readTrailIntensity(): number {
@@ -561,13 +576,22 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                               @for (m of [1, 2, 3, 4]; track m) { <option [value]="m">Mode {{ m }}</option> }
                             </select>
                           </div>
-                          <!-- Retro is Betaflight's own OSD stick overlay, in the OSD font: no trails or dot colours there. -->
+                          <!-- Pixel is the smooth look in chunky pixels with an empty ring; Retro is Betaflight's own OSD stick
+                               overlay, in the OSD font, with no trails or dot colours. -->
                           <div class="label-row">
                             <label for="stick-style">Look</label>
                             <select id="stick-style" [ngModel]="opts().stickStyle" (ngModelChange)="setStickStyle($event)">
                               <option value="smooth">Smooth (Blackbox Explorer)</option>
+                              <option value="pixel">Pixel (rings on a pixel box)</option>
                               <option value="retro">Retro (Betaflight OSD)</option>
                             </select>
+                          </div>
+                          <!-- The sticks' own backdrop, apart from the Panels slider for everything else. -->
+                          <div class="grade">
+                            <label for="stick-box">Backdrop</label>
+                            <input id="stick-box" type="range" min="0" max="1" step="0.05" [ngModel]="opts().stickBoxOpacity"
+                                   (ngModelChange)="setStickBoxOpacity(+$event)" />
+                            <span class="mono">{{ (opts().stickBoxOpacity * 100).toFixed(0) }}%</span>
                           </div>
                           <label class="check"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" [disabled]="retroSticks()" /> Trails (motion blur)</label>
                           <div class="grade">
@@ -580,7 +604,11 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         <fieldset class="item-sizes">
                           <legend>Colours</legend>
                           <div class="colors">
-                            <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)" [disabled]="retroSticks()" /> Ring</label>
+                            @if (opts().stickStyle === 'pixel') {
+                              <label class="color"><input type="color" [ngModel]="opts().stickRingColor" (ngModelChange)="setColor('stickRingColor', $event)" /> Ring</label>
+                            } @else {
+                              <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)" [disabled]="retroSticks()" /> Dot</label>
+                            }
                             <label class="color"><input type="color" [ngModel]="opts().stickTrailColor" (ngModelChange)="setColor('stickTrailColor', $event)"
                                    [disabled]="!opts().stickTrails || retroSticks()" /> Trail</label>
                             <label class="color"><input type="color" [ngModel]="opts().stickBoxColor" (ngModelChange)="setColor('stickBoxColor', $event)" /> Background</label>
@@ -1341,7 +1369,7 @@ export class OverlayExportComponent {
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    stickTrails: true, stickStyle: readStickStyle(), altSource: 'gps', statsAfter: 0, flightSeconds: 0, ...savedShow(this.vertical()),
+    stickTrails: true, stickStyle: readStickStyle(), stickBoxOpacity: readStickBoxOpacity(), altSource: 'gps', statsAfter: 0, flightSeconds: 0, ...savedShow(this.vertical()),
     ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
   });
@@ -2163,8 +2191,13 @@ export class OverlayExportComponent {
 
   retroSticks = computed(() => this.opts().stickStyle === 'retro');
 
+  setStickBoxOpacity(value: number) {
+    this.set('stickBoxOpacity', Math.min(1, Math.max(0, value)));
+    try { localStorage.setItem(STICK_BOX_KEY, String(this.opts().stickBoxOpacity)); } catch { /* not remembered */ }
+  }
+
   setStickStyle(v: string) {
-    const style = v === 'retro' ? 'retro' : 'smooth';
+    const style = isStickStyle(v) ? v : 'smooth';
     this.set('stickStyle', style);
     try { localStorage.setItem(STICK_STYLE_KEY, style); } catch { /* not remembered */ }
   }
