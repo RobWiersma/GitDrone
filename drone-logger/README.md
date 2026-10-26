@@ -38,7 +38,8 @@ src/app/
 │   ├── file-handles, session-store  Keeping picked files' handles; saved LovelyOSD sessions in IndexedDB
 │   ├── overlay-export.component    The overlay editor (preview, Components and Track panels, Options, sync, both exports)
 │   ├── track-timeline.component    The editor's Premiere-style timeline: tracks, markers, playhead, render range
-│   ├── overlay-renderer            Draws one HUD frame on a canvas (panels, sticks, map, stats, title, craft name)
+│   ├── overlay-renderer            Draws one HUD frame on a canvas (panels, sticks in Smooth, Pixel or Retro, map,
+│   │                               stats, title, craft name)
 │   ├── mov-writer                  The transparent overlay: PNG frames in a QuickTime .mov
 │   ├── video-render                The finished .mp4: decode, composite and encode with Mediabunny (WebCodecs)
 │   ├── grade                       The footage's Lumetri-style colour, a WebGL shader for the preview and the render

@@ -59,7 +59,7 @@ fade out at the end, with Betaflight's post-flight stats as the last frame holds
 (100 or 120 fps footage comes out at 60).
 
 <p align="center">
-  <img src="docs/screenshots/shorts.png" alt="The editor in vertical 9:16: the Title settings and the A2 Music track's settings (graph, gain, peak, song start, fades) on the left; a tall preview with the O4 footage on top, the stick cam below, big sticks and the battery over it, and the title and craft name; the timeline under it with the OSD, footage, stick cam, sound and music tracks, locked; and Options with Sources, Show and Output, then the Export row" width="860">
+  <img src="docs/screenshots/shorts.png" alt="The editor in vertical 9:16: the Title settings and the A2 Music track's settings (graph, gain, peak, song start, fades) on the left; a tall preview with the O4 footage on top, the stick cam below, big Pixel sticks (white rings on pixel-art boxes) and the battery over it, and the title and craft name; the timeline under it with the OSD, footage, stick cam, sound and music tracks, locked; and Options with Sources, Show and Output, then the Export row" width="860">
 </p>
 
 ### 🔌 Logs straight off the quad
@@ -69,7 +69,7 @@ the same as the Configurator's button, then opens its drive and loads the newest
 (Chrome or Edge).
 
 <p align="center">
-  <img src="docs/screenshots/overlay.png" alt="The overlay editor in 16:9: the Sticks settings and the V1 Flight footage's settings (sync, the Lumetri-style Color and Light sliders, zoom) on the left; a preview of real FPV footage with speed, battery, sticks and the mini map in a Betaflight OSD font; under it the Premiere-style timeline with the OSD, footage, sound and music tracks, the sound's waveform with its arming and clap markers, and the Render range; and Options along the bottom in three boxes, Sources, Show and Output (with the Max, High, Smaller and Upload quality buttons), then the Export row and its Overlay .mov and Video .mp4 buttons" width="860">
+  <img src="docs/screenshots/overlay.png" alt="The overlay editor in 16:9: the Sticks settings (stick mode, the Pixel look, its Backdrop, trails and colours) and the V1 Flight footage's settings (sync, the Lumetri-style Color and Light sliders, zoom) on the left; a preview of real FPV footage with speed, battery, the Pixel sticks and the mini map in a Betaflight OSD font; under it the Premiere-style timeline with the OSD, footage, sound and music tracks, the sound's waveform with its arming and clap markers, and the Render range; and Options along the bottom in three boxes, Sources, Show and Output (with the Max, High, Smaller and Upload quality buttons), then the Export row and its Overlay .mov and Video .mp4 buttons" width="860">
 </p>
 
 <table>
@@ -110,7 +110,7 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 ### 🏠 And a front page to show it off
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="The home page, leading with LovelyOSD Editor: the headline Your FPV footage with its OSD, ready to upload, Open the editor and How it works buttons, a looping clip of a real flight rendered with its OSD, four feature cards about the editor, a video-in-three-steps section, and the free, private, open source promises" width="860">
+  <img src="docs/screenshots/home.png" alt="The home page, leading with LovelyOSD Editor: the headline Your FPV footage with its OSD, ready to upload, Open the editor and How it works buttons, a Try a sample flight link, a looping clip of a real flight rendered with its OSD, four feature cards about the editor, a video-in-three-steps section, and the free, private, open source promises" width="860">
 </p>
 
 ## Tech stack
@@ -413,7 +413,7 @@ in the format, resolution and frame rate set under Output (`flights/video-render
 ## LovelyOSD Editor
 
 The **LovelyOSD Editor** tab (`/osd`), first in the nav and what the home page is about, is the quick route: pick a blackbox log, see the same stats, map, playback
-and charts as a flight page, and export the overlay video, without adding anything to the hangar. The API reads the
+and charts as a flight page (folded away under the editor until you open **Flight stats**), and export the overlay video, without adding anything to the hangar. The API reads the
 file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
 page, so leaving it clears them, unless you save the session. A file with several armed sessions gets a session picker.
 

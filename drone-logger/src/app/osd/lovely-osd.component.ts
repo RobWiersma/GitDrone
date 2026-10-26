@@ -188,11 +188,18 @@ interface Opening {
             <app-overlay-export [data]="overlayData()!" [seconds]="s.flight.durationMs / 1000" [fileStem]="fileStem()" [(video)]="video" [(sound)]="sound" />
           </section>
 
-          <section aria-labelledby="osd-stats-heading">
-            <h2 id="osd-stats-heading">Flight stats</h2>
-            <app-flight-view [flight]="s.flight" [track]="s.track" [sticks]="s.sticks?.points ?? null" [battery]="s.battery?.points ?? null"
-                             [telemetry]="s.telemetry?.points ?? null" />
-          </section>
+          <!-- The flight's stats, map, charts and playback, folded away under the editor until wanted. Drawn only once
+               opened, so the map sizes itself to a visible box. -->
+          <details class="flight-data" [open]="statsOpen()" (toggle)="statsOpen.set($any($event.target).open)">
+            <summary>
+              <h2 id="osd-stats-heading">Flight stats</h2>
+              <span class="hint">Stats, map, charts and stick playback</span>
+            </summary>
+            @if (statsOpen()) {
+              <app-flight-view [flight]="s.flight" [track]="s.track" [sticks]="s.sticks?.points ?? null" [battery]="s.battery?.points ?? null"
+                               [telemetry]="s.telemetry?.points ?? null" />
+            }
+          </details>
         }
     </div>
   `,
@@ -205,7 +212,12 @@ interface Opening {
     .pick p { margin: 0; }
     .session-title { margin: 1.5rem 0 .75rem; }
     section h2 { margin: 1.5rem 0 .25rem; }
-    #osd-stats-heading { margin-top: 2.5rem; margin-bottom: .75rem; }
+    .flight-data { margin-top: 2.5rem; }
+    .flight-data summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; margin-bottom: .75rem; }
+    .flight-data summary::before { content: '▸'; color: var(--accent); }
+    .flight-data[open] summary::before { content: '▾'; }
+    .flight-data summary::-webkit-details-marker { display: none; }
+    #osd-stats-heading { margin: 0; display: inline; }
     section .hint { margin: 0; }
     .small { padding: .3rem .75rem; font-size: .88rem; }
     .link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
@@ -332,6 +344,8 @@ export class LovelyOsdComponent {
   // ---- the sample flight ----
   /** The sample is in: shows the tip on lining it up. */
   sample = signal(false);
+  /** The flight stats under the editor: folded away until opened. */
+  statsOpen = signal(false);
   sampleLoading = signal(false);
 
   /**
