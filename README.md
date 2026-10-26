@@ -278,7 +278,8 @@ transparent HUD video to put on a track above your footage in Premiere Pro or Af
 It can draw the HUD with your goggles' Betaflight OSD font, including Betaflight's own icons: WTFOS msp-osd's `.png` fonts
 (`font_btfl.png` / `font_btfl_hd.png`, since msp-osd 0.12, and Walksnail's `_36` / `_24` files, the same format) or the older
 `.bin` (`font_bf.bin` / `font_bf_hd.bin`). **Get a font**, next to the font under Sources, links to
-[WTFOS's .bin fonts](https://github.com/fpv-wtf/msp-osd/tree/v0.11.1/fonts) (msp-osd 0.11.1, the last release with them). The title and craft name keep their own display font.
+[WTFOS's .bin fonts](https://github.com/fpv-wtf/msp-osd/tree/v0.11.1/fonts) (msp-osd 0.11.1, the last release with them). The title and craft name use a display font (Impact) by default; each has a **Font** setting to
+draw it in the OSD font instead, tinted in its colours.
 
 **The editor.** It's laid out like Premiere: a **Components** panel and a **Track** panel on the left of the preview, a
 **timeline** under it, and **Options** along the bottom. Click an OSD element in the preview (or the title or craft

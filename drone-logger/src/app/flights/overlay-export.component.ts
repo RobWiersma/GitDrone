@@ -281,6 +281,8 @@ const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const DEFAULT_LABELS = {
   titleText: '', titleColor: '#dc8bad', titleAccentText: '', titleAccentColor: '#8aa860', titleStrokeColor: '#000000', titleBgColor: '',
   craftText: '', craftColor: '#afa0a9', craftStrokeColor: '#330a0a',
+  // 'display' (Impact, as on a real Short) or 'osd' (the OSD font).
+  titleFont: 'display', craftFont: 'display',
 };
 type LabelKey = keyof typeof DEFAULT_LABELS;
 const LABELS_KEY = 'gitdrone-overlay-labels';
@@ -509,8 +511,16 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         <input type="color" aria-label="Second part colour" [ngModel]="opts().titleAccentColor" (ngModelChange)="setLabel('titleAccentColor', $event)" />
                       </div>
                       <div class="label-row">
+                        <label for="title-font">Font</label>
+                        <select id="title-font" [ngModel]="opts().titleFont" (ngModelChange)="setLabel('titleFont', $event)">
+                          <option value="display">Display (Impact)</option>
+                          <option value="osd">OSD font</option>
+                        </select>
+                      </div>
+                      <div class="label-row">
                         <span>Outline</span>
-                        <input type="color" aria-label="Title outline colour" [ngModel]="opts().titleStrokeColor" (ngModelChange)="setLabel('titleStrokeColor', $event)" />
+                        <input type="color" aria-label="Title outline colour" [ngModel]="opts().titleStrokeColor" (ngModelChange)="setLabel('titleStrokeColor', $event)"
+                               [disabled]="opts().titleFont === 'osd'" title="The outline colour for the display font; the OSD font has its own outline" />
                         <label class="check"><input type="checkbox" [ngModel]="!!opts().titleBgColor"
                                (ngModelChange)="setLabel('titleBgColor', $event ? '#000000' : '')" /> Box behind it</label>
                         @if (opts().titleBgColor) {
@@ -529,9 +539,17 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         <input type="color" aria-label="Craft name colour" [ngModel]="opts().craftColor" (ngModelChange)="setLabel('craftColor', $event)" />
                       </div>
                       <div class="label-row">
+                        <label for="craft-font">Font</label>
+                        <select id="craft-font" [ngModel]="opts().craftFont" (ngModelChange)="setLabel('craftFont', $event)">
+                          <option value="display">Display (Impact)</option>
+                          <option value="osd">OSD font</option>
+                        </select>
+                      </div>
+                      <div class="label-row">
                         <span>Outline</span>
                         <input type="color" aria-label="Craft name outline colour" [ngModel]="opts().craftStrokeColor"
-                               (ngModelChange)="setLabel('craftStrokeColor', $event)" />
+                               (ngModelChange)="setLabel('craftStrokeColor', $event)" [disabled]="opts().craftFont === 'osd'"
+                               title="The outline colour for the display font; the OSD font has its own outline" />
                       </div>
                     </fieldset>
                   }

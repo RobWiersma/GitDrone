@@ -116,6 +116,12 @@ export interface OverlayOptions {
   craftText: string;
   craftColor: string;
   craftStrokeColor: string;
+  /**
+   * Which font the title and the craft name are drawn in: 'osd' is the loaded OSD font (or the built-in one), its own
+   * outline baked in and the text colours tinting it; anything else is the display font, Impact with an outer stroke.
+   */
+  titleFont: string;
+  craftFont: string;
   layout: OverlayLayout;
   /** Text size multipliers for items inside panels; missing means 100%. */
   itemScale: Partial<Record<ItemKey, number>>;
@@ -160,6 +166,20 @@ const MAP_SIZE = 300;
 const DISPLAY_FONT = 'Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif';
 const TITLE_SIZE = 77, TITLE_PAD_X = 13, TITLE_H = 84, TITLE_STROKE = 8;
 const CRAFT_SIZE = 47, CRAFT_H = 60, CRAFT_STROKE = 7;
+
+/** OSD-font sizes for the title and craft name: glyph cells that fill their boxes' height, like the display font does. */
+const OSD_TITLE_SIZE = 53, OSD_CRAFT_SIZE = 38;
+const osdLabel = (font: string | undefined) => font === 'osd';
+
+/** Width of OSD-font text at `size` (1080p px): the loaded font's cells, or the built-in font. */
+function osdWidth(s: string, size: number) {
+  measureCtx ??= document.createElement('canvas').getContext('2d')!;
+  return measure(measureCtx, s, size, 800);
+}
+
+/** The title's and craft name's widths in whichever font each is drawn in (1080p px at 100%, without padding). */
+const titleWidth = (s: string, o: OverlayOptions) => (osdLabel(o.titleFont) ? osdWidth(s, OSD_TITLE_SIZE) : displayWidth(s, TITLE_SIZE));
+const craftWidth = (s: string, o: OverlayOptions) => (osdLabel(o.craftFont) ? osdWidth(s, OSD_CRAFT_SIZE) : displayWidth(s, CRAFT_SIZE));
 
 /** Width of display-font text at `size` (1080p px). */
 function displayWidth(s: string, size: number) {
@@ -309,8 +329,8 @@ export class OverlayRenderer {
     // Title and craft name. Landscape: stacked in the top-left corner. Vertical, as on a real Short: the title boxed in
     // the top-right corner, and the craft name at the top-left of the stick cam half, just under the split.
     const title = (o.titleText ?? '') + (o.titleAccentText ?? '');
-    const titleW = o.showTitle && title.trim() ? displayWidth(title, TITLE_SIZE) + 2 * TITLE_PAD_X : 0;
-    const craftW = o.showCraft && o.craftText?.trim() ? displayWidth(o.craftText, CRAFT_SIZE) + 2 * CRAFT_STROKE : 0;
+    const titleW = o.showTitle && title.trim() ? titleWidth(title, o) + 2 * TITLE_PAD_X : 0;
+    const craftW = o.showCraft && o.craftText?.trim() ? craftWidth(o.craftText, o) + 2 * CRAFT_STROKE : 0;
     if (vertical) {
       const ts = 1.15; // a touch bigger than the measured Short, set by eye
       add('title', titleW > 0, titleW, TITLE_H, Math.min(W - titleW * u * ts, 0.8 * W - (titleW * u * ts) / 2), 0.039 * H - (TITLE_H * u * ts) / 2, ts);
@@ -933,7 +953,7 @@ function retroPixels(ctx: CanvasRenderingContext2D, cells: [number, number, numb
   ctx.restore();
 }
 
-let tintCanvas: HTMLCanvasElement | null = null;
+let tintCanvas: HTMLCanvasElement | null = null, maskCanvas: HTMLCanvasElement | null = null;
 
 /** Draws a string from the OSD font sheet. Outlines are baked into the glyphs, so no stroke is needed. */
 function glyphText(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, size: number,
@@ -965,14 +985,19 @@ function glyphText(ctx: CanvasRenderingContext2D, s: string, x: number, y: numbe
   });
   target.restore();
   if (tinted) {
+    // The glyphs' shapes, kept aside: destination-in has to use them in one draw, since each draw clears everything
+    // outside itself and drawing glyph by glyph would leave none.
+    maskCanvas ??= document.createElement('canvas');
+    maskCanvas.width = tintCanvas!.width;
+    maskCanvas.height = tintCanvas!.height;
+    maskCanvas.getContext('2d')!.drawImage(tintCanvas!, 0, 0);
     // Multiply keeps the dark outline dark and turns the white fill into the tint colour.
     target.save();
     target.globalCompositeOperation = 'multiply';
     target.fillStyle = color;
     target.fillRect(0, 0, tintCanvas!.width, tintCanvas!.height);
     target.globalCompositeOperation = 'destination-in';
-    codes.forEach((code, k) => target.drawImage(f.atlas, (code % 16) * f.glyphW, Math.floor(code / 16) * f.glyphH,
-      f.glyphW, f.glyphH, k * cellW, 0, cellW, cellH));
+    target.drawImage(maskCanvas, 0, 0);
     target.restore();
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -1001,11 +1026,23 @@ function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, si
 
 /** The title: its two parts side by side in their colours with an outer stroke, on the background box when it has one. */
 function drawTitle(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, o: OverlayOptions) {
-  const size = TITLE_SIZE * s, w = (displayWidth(o.titleText + o.titleAccentText, TITLE_SIZE) + 2 * TITLE_PAD_X) * s;
+  const size = TITLE_SIZE * s, w = (titleWidth(o.titleText + o.titleAccentText, o) + 2 * TITLE_PAD_X) * s;
   ctx.save();
   if (o.titleBgColor) {
     ctx.fillStyle = o.titleBgColor;
     ctx.fillRect(x, y, w, TITLE_H * s);
+  }
+  if (osdLabel(o.titleFont)) {
+    // In the OSD font, each part tinted its colour; the glyphs carry their own outline.
+    let tx = x + TITLE_PAD_X * s;
+    const ty = osdBaseline(y, TITLE_H * s, OSD_TITLE_SIZE * s);
+    for (const [part, color] of [[o.titleText, o.titleColor], [o.titleAccentText, o.titleAccentColor]]) {
+      if (!part) continue;
+      text(ctx, part, tx, ty, OSD_TITLE_SIZE * s, 'left', 800, 1, color);
+      tx += osdWidth(part, OSD_TITLE_SIZE) * s;
+    }
+    ctx.restore();
+    return;
   }
   ctx.font = `${size}px ${DISPLAY_FONT}`;
   ctx.textBaseline = 'middle';
@@ -1023,6 +1060,10 @@ function drawTitle(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
 
 /** The craft name: Impact, a flat fill and a dark outer stroke, as set up in Premiere for a real Short. */
 function drawCraft(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, o: OverlayOptions) {
+  if (osdLabel(o.craftFont)) {
+    text(ctx, o.craftText, x + CRAFT_STROKE * s, osdBaseline(y, CRAFT_H * s, OSD_CRAFT_SIZE * s), OSD_CRAFT_SIZE * s, 'left', 800, 1, o.craftColor);
+    return;
+  }
   const size = CRAFT_SIZE * s;
   ctx.save();
   ctx.font = `${size}px ${DISPLAY_FONT}`;
@@ -1033,6 +1074,12 @@ function drawCraft(ctx: CanvasRenderingContext2D, x: number, y: number, s: numbe
   ctx.fillStyle = o.craftColor;
   ctx.fillText(o.craftText, tx, ty);
   ctx.restore();
+}
+
+/** Where OSD text's baseline goes to sit centred in a box `h` tall from `top`: its glyph cell, or the built-in font's caps. */
+function osdBaseline(top: number, h: number, size: number) {
+  if (glyphs) { const cell = size * GLYPH_CELL; return top + (h - cell) / 2 + cell * GLYPH_BASELINE; }
+  return top + h / 2 + size * 0.36;
 }
 
 /**
