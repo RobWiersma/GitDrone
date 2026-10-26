@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ELEMENT_ITEMS, ELEMENT_LABELS, ElementKey, ElementPlacement, ITEM_SCALE_MAX, ITEM_SCALE_MIN, ItemKey, OverlayData, OverlayLayout,
   OverlayOptions, OverlayRenderer, STATS_GAP_S } from './overlay-renderer';
 import { MovWriter, canSaveToDisk, diskMovWriter, memoryMovWriter } from './mov-writer';
-import { GlyphFont, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font';
+import { GlyphFont, WTFOS_FONTS_URL, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font';
 import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
@@ -974,16 +974,17 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               </div>
 
               <div class="source-row">
-                <span title="OSD font: your goggles' Betaflight font (font_bf.bin is sharpest) for the real OSD look; the built-in font otherwise"><app-icon name="font" /></span>
+                <span title="OSD font: your goggles' Betaflight font (font_btfl.png or font_bf.bin) for the real OSD look; the built-in font otherwise"><app-icon name="font" /></span>
                 <span class="sr-only">OSD font:</span>
                 @if (font(); as fnt) {
                   <span class="mono" [title]="fnt.name + ', ' + fnt.glyphW + '×' + fnt.glyphH + ' glyphs'">{{ fnt.name }}</span>
                 } @else {
-                  <span class="mono" title="The built-in font. Load your goggles' Betaflight font (font_bf.bin) for the real OSD look.">Built-in font</span>
+                  <span class="mono" title="The built-in font. Load your goggles' Betaflight font (font_btfl.png or font_bf.bin) for the real OSD look.">Built-in font</span>
+                  <a class="font-get" [href]="fontsUrl" target="_blank" rel="noopener" title="WTFOS's .bin fonts on GitHub (msp-osd 0.11.1): download font_bf_hd.bin (or font.bin), then load it here">Get a font</a>
                 }
-                <label class="btn small step" [title]="font() ? 'Change the OSD font' : 'Load the Betaflight font from your goggles (.bin)'">
+                <label class="btn small step" [title]="font() ? 'Change the OSD font' : 'Load the Betaflight font from your goggles (.png or .bin)'">
                   <app-icon name="folder" />
-                  <input class="sr-only" type="file" accept=".bin" [attr.aria-label]="font() ? 'Change the OSD font' : 'Load an OSD font'" (change)="onFont($event)" [disabled]="busy()" />
+                  <input class="sr-only" type="file" accept=".bin,.png" [attr.aria-label]="font() ? 'Change the OSD font' : 'Load an OSD font'" (change)="onFont($event)" [disabled]="busy()" />
                 </label>
                 @if (font()) {
                   <button class="btn small step" type="button" (click)="clearFont()" [disabled]="busy()" aria-label="Remove the font" title="Remove the font: back to the built-in one"><app-icon name="trash" /></button>
@@ -1274,6 +1275,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .grade input[type=range] { width: 100%; min-width: 0; }
     .grade .mono { text-align: right; font-size: .82rem; }
     .sources .source-row { flex-wrap: nowrap; align-items: center; }
+    .font-get { font-size: .82rem; white-space: nowrap; }
     .source-row .mono { font-size: .82rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .small { padding: .3rem .75rem; font-size: .88rem; justify-self: start; }
     .link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
@@ -2043,6 +2045,8 @@ export class OverlayExportComponent {
     this.opts.update(o => ({ ...o, [key]: value }));
   }
 
+  readonly fontsUrl = WTFOS_FONTS_URL;
+
   async onFont(e: Event) {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -2051,7 +2055,7 @@ export class OverlayExportComponent {
     this.fontError.set('');
     try {
       const buffer = await file.arrayBuffer();
-      this.font.set(parseGlyphFont(file.name, buffer));
+      this.font.set(await parseGlyphFont(file.name, buffer));
       await saveFont(file.name, buffer);
     } catch (err) {
       this.fontError.set(err instanceof Error ? err.message : 'Could not read that font file.');

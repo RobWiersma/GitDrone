@@ -58,7 +58,7 @@ const DESCRIPTION = 'DJI O4 footage comes off the air unit without your Betaflig
           <li><strong>Your O4 footage</strong>, copied off the air unit as you normally would.</li>
           <li><strong>The flight's blackbox log</strong> (<code>.bbl</code> or <code>.bfl</code>) from the flight controller's flash or SD card.</li>
           <li><strong>A computer with Chrome or Edge.</strong> The video renders on your graphics card, right in the browser.</li>
-          <li><em>Optional:</em> your goggles' OSD font (<code>font_bf.bin</code>), a phone or stick cam recording for sound, and music.</li>
+          <li><em>Optional:</em> your goggles' OSD font (<code>font_btfl.png</code>, or the older <code>font_bf.bin</code>), a phone or stick cam recording for sound, and music.</li>
         </ul>
       </section>
 
@@ -102,7 +102,9 @@ const DESCRIPTION = 'DJI O4 footage comes off the air unit without your Betaflig
 
         <h3>5. Make it look like your goggles</h3>
         <p>
-          Load your <code>font_bf.bin</code> to draw the OSD in your goggles' own Betaflight font. Click anything in the preview to
+          Load your goggles' Betaflight font (<code>font_btfl.png</code> or <code>font_bf.bin</code>) to draw the OSD the way your goggles do.
+          No font file? WTFOS's <a href="https://github.com/fpv-wtf/msp-osd/tree/v0.11.1/fonts" target="_blank" rel="noopener">.bin fonts are on GitHub</a> (<code>font_bf_hd.bin</code>),
+          and Walksnail fonts work too. Click anything in the preview to
           move it, resize it or change its colours, and turn parts on or off. O4 footage is often flat, so the footage has
           Lumetri-style colour controls (exposure, contrast, saturation and more) too.
         </p>

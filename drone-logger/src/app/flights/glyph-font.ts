@@ -1,6 +1,7 @@
 /**
- * Betaflight OSD fonts in the DJI goggles (WTFOS msp-osd) .bin format: 256 glyphs stored one after another,
- * each width*height RGBA pixels. Outlines and colours are baked into the glyphs, so they draw as-is.
+ * Betaflight OSD fonts for the DJI goggles (WTFOS msp-osd), in either of its formats: the older .bin (256 glyphs stored
+ * one after another, each width*height RGBA pixels) or the .png msp-osd uses since 0.12 (four pages of glyphs side by
+ * side, one glyph per row). Outlines and colours are baked into the glyphs, so they draw as-is.
  */
 export interface GlyphFont {
   name: string;
@@ -16,11 +17,48 @@ const SIZES: Record<number, [number, number]> = {
   [24 * 36 * 4]: [24, 36], // font_bf_hd.bin (HD grid)
 };
 
-export function parseGlyphFont(name: string, buffer: ArrayBuffer): GlyphFont {
+/**
+ * Where to get .bin fonts: msp-osd 0.11.1, the last release that shipped them (font_bf_hd.bin, and font.bin / font_hd.bin,
+ * its generic ones), and the third-party packs its README lists.
+ */
+export const WTFOS_FONTS_URL = 'https://github.com/fpv-wtf/msp-osd/tree/v0.11.1/fonts';
+export const WTFOS_FONT_PACKS_URL = 'https://github.com/fpv-wtf/msp-osd/tree/v0.11.1#suggested-third-party-fonts';
+
+const isPng = (buffer: ArrayBuffer) => {
+  const b = new Uint8Array(buffer, 0, Math.min(8, buffer.byteLength));
+  return b.length === 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+};
+
+export async function parseGlyphFont(name: string, buffer: ArrayBuffer): Promise<GlyphFont> {
+  return isPng(buffer) ? parsePngFont(name, buffer) : parseBinFont(name, buffer);
+}
+
+/**
+ * A msp-osd .png font (font_btfl.png, font_btfl_hd.png), or a Walksnail one (its _36 and _24 files are the same format): up
+ * to 4 pages side by side, 256 glyphs down each. Betaflight's glyphs are the first page, the same ones the .bin holds.
+ */
+async function parsePngFont(name: string, buffer: ArrayBuffer): Promise<GlyphFont> {
+  const image = await createImageBitmap(new Blob([buffer], { type: 'image/png' }));
+  const size = Object.values(SIZES).find(([w, h]) => [1, 2, 3, 4].some(pages => image.width === w * pages) && image.height === h * 256);
+  if (!size) {
+    image.close();
+    throw new Error('Not a WTFOS OSD font. Use font_btfl.png or font_btfl_hd.png, or font_bf.bin from the goggles font folder.');
+  }
+  const [w, h] = size;
+  const atlas = document.createElement('canvas');
+  atlas.width = w * 16;
+  atlas.height = h * 16;
+  const ctx = atlas.getContext('2d')!;
+  for (let g = 0; g < 256; g++) ctx.drawImage(image, 0, g * h, w, h, (g % 16) * w, Math.floor(g / 16) * h, w, h);
+  image.close();
+  return { name, glyphW: w, glyphH: h, atlas };
+}
+
+function parseBinFont(name: string, buffer: ArrayBuffer): GlyphFont {
   const perGlyph = buffer.byteLength / 256;
   const size = SIZES[perGlyph];
   if (!Number.isInteger(perGlyph) || !size) {
-    throw new Error('Not a DJI OSD font file. Use font_bf.bin or font_bf_hd.bin from the goggles font folder.');
+    throw new Error('Not a WTFOS OSD font. Use font_btfl.png or font_btfl_hd.png, or font_bf.bin from the goggles font folder.');
   }
   const [w, h] = size;
   const bytes = new Uint8ClampedArray(buffer);
@@ -89,7 +127,7 @@ export async function loadSavedFont(): Promise<GlyphFont | null> {
       req.onsuccess = () => ok(req.result);
       req.onerror = () => fail(req.error);
     });
-    return saved ? parseGlyphFont(saved.name, saved.buffer) : null;
+    return saved ? await parseGlyphFont(saved.name, saved.buffer) : null;
   } catch {
     return null;
   }

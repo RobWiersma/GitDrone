@@ -44,7 +44,7 @@ src/app/
 │   ├── grade                       The footage's Lumetri-style colour, a WebGL shader for the preview and the render
 │   ├── range-window.component      The two-handle slider for the render range, on the timeline
 │   ├── clap                        Sound analysis: arming, launch, claps, motor-sound sync and sample peaks
-│   └── glyph-font, stick-math      Betaflight OSD fonts and stick modes
+│   └── glyph-font, stick-math      Betaflight OSD fonts (WTFOS .png and .bin) and stick modes
 ├── osd/           LovelyOSD Editor: the no-account video and overlay tool (/osd)
 ├── tunes/         Import, timeline, compare
 ├── home/ · stats/ Front page and visitor stats

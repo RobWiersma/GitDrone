@@ -1,4 +1,5 @@
 import { Component, input } from '@angular/core';
+import { WTFOS_FONTS_URL, WTFOS_FONT_PACKS_URL } from './glyph-font';
 
 /**
  * How to set up Betaflight's Blackbox so a log has everything the overlay shows. Shared by LovelyOSD and the
@@ -58,7 +59,11 @@ save</code></pre>
 
       <h3>5. Your OSD font (optional)</h3>
       <p>
-        For the real goggles look, load <code>font_bf.bin</code> from your DJI goggles' WTFOS font folder (<code>font_bf_hd.bin</code> also works).
+        For the real goggles look, load your goggles' WTFOS Betaflight font: <code>font_btfl.png</code> (or <code>_hd</code>), or the older
+        <code>font_bf.bin</code>. Don't have one? Get <code>font_bf_hd.bin</code> (or <code>font.bin</code>) from <a [href]="fontsUrl" target="_blank" rel="noopener">WTFOS's
+        .bin fonts on GitHub</a> (open the file, then the download button), or a pack like SNEAKY_FPV's from its
+        <a [href]="packsUrl" target="_blank" rel="noopener">third-party font list</a>.
+        Walksnail fonts work too: their <code>_36</code> and <code>_24</code> files.
         It stays in your browser and is never uploaded.
       </p>
     </details>
@@ -79,4 +84,6 @@ save</code></pre>
 })
 export class BlackboxTipsComponent {
   open = input(false);
+  readonly fontsUrl = WTFOS_FONTS_URL;
+  readonly packsUrl = WTFOS_FONT_PACKS_URL;
 }

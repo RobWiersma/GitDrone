@@ -41,7 +41,7 @@ your tune history.
 Free, no install, no account, at `/osd`. Drop in a blackbox log and your footage for a finished video (below), or
 export a transparent `.mov` for Premiere Pro or After Effects: speed, battery,
 sticks, a mini map, RSSI and a Betaflight-style stats screen at the end. Drag, resize and recolour every element,
-draw it all in your goggles' `font_bf.bin`, and preview it full screen, playing over your own footage with sound,
+draw it all in your goggles' WTFOS font, and preview it full screen, playing over your own footage with sound,
 synced to your takeoff automatically from the motor sound, the arming beep or a clap. A Premiere-style timeline shows
 the footage, OSD, sound and music as tracks, locked together once they're synced, with waveforms that turn red where
 they clip. Free, no account, and nothing is uploaded: the video is rendered in your browser. No files handy?
@@ -272,8 +272,10 @@ transparent HUD video to put on a track above your footage in Premiere Pro or Af
 - a **title** in two colours (your channel name, say) and your **craft name**, in Impact with an outer stroke like a
   Premiere title, or no box at all. They start on in vertical and off in 16:9; their toggles are under **Show**.
 
-It can draw the HUD with your goggles' Betaflight OSD font (`font_bf.bin` / `font_bf_hd.bin`, DJI WTFOS format),
-including Betaflight's own icons; the title and craft name keep their own display font.
+It can draw the HUD with your goggles' Betaflight OSD font, including Betaflight's own icons: WTFOS msp-osd's `.png` fonts
+(`font_btfl.png` / `font_btfl_hd.png`, since msp-osd 0.12, and Walksnail's `_36` / `_24` files, the same format) or the older
+`.bin` (`font_bf.bin` / `font_bf_hd.bin`). **Get a font**, next to the font under Sources, links to
+[WTFOS's .bin fonts](https://github.com/fpv-wtf/msp-osd/tree/v0.11.1/fonts) (msp-osd 0.11.1, the last release with them). The title and craft name keep their own display font.
 
 **The editor.** It's laid out like Premiere: a **Components** panel and a **Track** panel on the left of the preview, a
 **timeline** under it, and **Options** along the bottom. Click an OSD element in the preview (or the title or craft
