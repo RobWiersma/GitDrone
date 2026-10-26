@@ -69,10 +69,15 @@ export interface OverlayOptions {
   flightSeconds: number;
   /** Blurred, fading streak behind each stick dot, like a long exposure. */
   stickTrails: boolean;
+  /**
+   * How the sticks look: 'smooth' (Blackbox Explorer: boxes, crosshairs, a dot) or 'retro' (Betaflight's own OSD stick
+   * overlay, drawn in characters from the OSD font). Smooth when missing.
+   */
+  stickStyle?: 'smooth' | 'retro';
   /** Mini map colours (#rrggbb): the path just flown, and what it darkens to as it ages. */
   pathRecentColor: string;
   pathOldColor: string;
-  /** Stick colours (#rrggbb): the position dot and its motion-blur trail. */
+  /** Stick colours (#rrggbb): the position ring and its motion-blur trail. */
   stickDotColor: string;
   stickTrailColor: string;
   /** Trail opacity multiplier: 1 is the default look, 0.25 faint, 2 strong. */
@@ -565,6 +570,7 @@ export class OverlayRenderer {
 
   /** Blackbox Explorer style: dark squares, thin crosshairs, a red dot, raw rcCommand values around the pair. */
   private drawSticks(ctx: CanvasRenderingContext2D, t: number, x: number, top: number, u: number, o: OverlayOptions) {
+    if (o.stickStyle === 'retro') { this.drawRetroSticks(ctx, t, x, top, u, o); return; }
     const size = 150 * u, gap = 30 * u, dot = 10 * u;
     const raw = sampleSticks(this.data.sticks!, t);
     const now = stickAxes(raw);
@@ -593,9 +599,53 @@ export class OverlayRenderer {
       const at = (a: ReturnType<typeof stickAxes>) => [g.left + size / 2 + a[g.ax] * r, top + size / 2 - a[g.ay] * r] as const;
       const [kx, ky] = at(now);
       if (o.stickTrails) this.drawTrail(ctx, t, at, g.left, top, size, dot, u, safeColor(o.stickTrailColor, '#86a858'), o.stickTrailIntensity ?? 1);
-      ctx.fillStyle = safeColor(o.stickDotColor, '#e086b0');
-      ctx.beginPath(); ctx.arc(kx, ky, dot, 0, Math.PI * 2); ctx.fill();
+      // The stick as an empty ring in chunky pixels, like the OSD font, so the crosshair and footage show through it.
+      pixelRing(ctx, kx, ky, dot + 1.5 * u, 2 * u, safeColor(o.stickDotColor, '#ffffff'));
       ctx.restore();
+    }
+  }
+
+  /**
+   * Betaflight's own OSD stick overlay (osdElementStickOverlay): per stick a 7 x 5 grid of characters, a cross of line
+   * characters through the middle, and a cursor that moves a whole character sideways and a third of one up and down
+   * (its three dot heights are three glyphs). Drawn from the OSD font when one is loaded, in chunky pixels otherwise.
+   * Same footprint as the smooth sticks, so a layout carries over.
+   */
+  private drawRetroSticks(ctx: CanvasRenderingContext2D, t: number, x: number, top: number, u: number, o: OverlayOptions) {
+    const size = 150 * u, gap = 30 * u;
+    const COLS = 7, ROWS = 5, STEPS = 3, MID_C = 3, MID_R = 2;
+    const now = stickAxes(sampleSticks(this.data.sticks!, t));
+    const [lx, ly, rx, ry] = MODES[o.stickMode];
+    const ch = size / ROWS, cw = ch * (glyphs ? glyphs.glyphW / glyphs.glyphH : 2 / 3);
+    const box = hexToRgb(o.stickBoxColor, [28, 28, 28]);
+    for (const [left, ax, ay] of [[x, lx, ly], [x + size + gap, rx, ry]] as const) {
+      if (o.panelOpacity > 0) {
+        ctx.fillStyle = `rgba(${box.join(', ')}, ${o.panelOpacity})`;
+        ctx.fillRect(left, top, size, size);
+      }
+      const x0 = left + (size - COLS * cw) / 2;
+      // Like Betaflight: the stick's range split evenly over the columns, and over the rows' thirds, top = stick up.
+      const col = Math.round((Math.max(-1, Math.min(1, now[ax])) + 1) / 2 * (COLS - 1));
+      const step = Math.round((1 - Math.max(-1, Math.min(1, now[ay]))) / 2 * (ROWS * STEPS - 1));
+      const cells: [number, number, number][] = [];
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          let code = r === MID_R && c === MID_C ? RETRO.center : r === MID_R ? RETRO.horizontal : c === MID_C ? RETRO.vertical : -1;
+          if (c === col && r === Math.floor(step / STEPS)) code = RETRO.cursor + (step % STEPS);
+          if (code >= 0) cells.push([code, x0 + c * cw, top + r * ch]);
+        }
+      }
+      if (glyphs) {
+        const f = glyphs;
+        ctx.save();
+        ctx.imageSmoothingQuality = 'high';
+        for (const [code, cx, cy] of cells) {
+          ctx.drawImage(f.atlas, (code % 16) * f.glyphW, Math.floor(code / 16) * f.glyphH, f.glyphW, f.glyphH, cx, cy, cw, ch);
+        }
+        ctx.restore();
+      } else {
+        retroPixels(ctx, cells, cw, ch);
+      }
     }
   }
 
@@ -612,6 +662,12 @@ export class OverlayRenderer {
     ctx.beginPath();
     ctx.roundRect(left, top, size, size, 14 * u);
     ctx.clip();
+    // Nothing inside the stick's ring either, so it stays an empty circle with the trail leading up to it.
+    const [nx, ny] = pts[pts.length - 1];
+    ctx.beginPath();
+    ctx.rect(left, top, size, size);
+    ctx.arc(nx, ny, dot + 1.5 * u, 0, Math.PI * 2);
+    ctx.clip('evenodd');
     ctx.filter = `blur(${Math.max(1, 2.5 * u)}px)`;
     ctx.strokeStyle = color;
     ctx.lineCap = 'round';
@@ -768,6 +824,56 @@ const glyphCodes = (s: string) => [...s].map(c => {
   const upper = c >= 'a' && c <= 'z' ? c.toUpperCase().charCodeAt(0) : code;
   return upper > 255 ? 63 : upper;
 });
+
+/**
+ * An empty ring of radius `r` drawn from square pixels of size `px`, like the OSD font's glyphs: the ring's pixels with a
+ * one-pixel dark edge around the outside only, so the middle stays open.
+ */
+function pixelRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, px: number, color: string) {
+  const n = Math.ceil(r / px) + 2;
+  const ring: [number, number][] = [], edge: [number, number][] = [];
+  for (let j = -n; j <= n; j++) {
+    for (let i = -n; i <= n; i++) {
+      const d = Math.hypot(i, j) * px;
+      if (d >= r - px * 0.9 && d < r + px * 0.6) ring.push([i, j]);
+      else if (d >= r + px * 0.6 && d < r + px * 1.6) edge.push([i, j]);
+    }
+  }
+  const at = (i: number, j: number) => [Math.round(cx + (i - 0.5) * px), Math.round(cy + (j - 0.5) * px)] as const;
+  const p = Math.round(px);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, .85)';
+  for (const [i, j] of edge) { const [x, y] = at(i, j); ctx.fillRect(x, y, p, p); }
+  ctx.fillStyle = color;
+  for (const [i, j] of ring) { const [x, y] = at(i, j); ctx.fillRect(x, y, p, p); }
+  ctx.restore();
+}
+
+/** Betaflight's stick overlay characters (osd_symbols.h): the cursor's three heights start at 0x08. */
+const RETRO = { cursor: 0x08, center: 0x0b, vertical: 0x16, horizontal: 0x17 };
+
+/**
+ * The stick overlay without an OSD font: the same characters as blocky white pixels with a black outline, on a 12 x 18
+ * pixel cell like the goggles' font. All outlines go first, so lines that meet across cells join cleanly.
+ */
+function retroPixels(ctx: CanvasRenderingContext2D, cells: [number, number, number][], cw: number, ch: number) {
+  const px = ch / 18;
+  const rects: [number, number, number, number][] = [];
+  for (const [code, x, y] of cells) {
+    const hBar = () => rects.push([x, y + ch / 2 - px, cw, 2 * px]);
+    const vBar = () => rects.push([x + cw / 2 - px, y, 2 * px, ch]);
+    if (code === RETRO.horizontal) hBar();
+    else if (code === RETRO.vertical) vBar();
+    else if (code === RETRO.center) { hBar(); vBar(); }
+    else rects.push([x + cw / 2 - 2 * px, y + ch * ((code - RETRO.cursor) * 2 + 1) / 6 - 2 * px, 4 * px, 4 * px]);
+  }
+  ctx.save();
+  ctx.fillStyle = '#000000';
+  for (const [x, y, w, h] of rects) ctx.fillRect(Math.round(x - px), Math.round(y - px), Math.round(w + 2 * px), Math.round(h + 2 * px));
+  ctx.fillStyle = '#ffffff';
+  for (const [x, y, w, h] of rects) ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+  ctx.restore();
+}
 
 let tintCanvas: HTMLCanvasElement | null = null;
 

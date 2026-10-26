@@ -164,7 +164,7 @@ function readVertical(): boolean {
 const FPS = [24, 25, 30, 50, 60];
 
 const DEFAULT_PATH_COLORS = { pathRecentColor: '#9be564', pathOldColor: '#2c4a1f' };
-const DEFAULT_STICK_COLORS = { stickDotColor: '#e086b0', stickTrailColor: '#86a858', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
+const DEFAULT_STICK_COLORS = { stickDotColor: '#ffffff', stickTrailColor: '#86a858', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
 const DEFAULT_COLORS = { ...DEFAULT_PATH_COLORS, ...DEFAULT_STICK_COLORS };
 type ColorKey = keyof typeof DEFAULT_COLORS;
 const COLORS_KEY = 'gitdrone-overlay-path-colors';
@@ -183,6 +183,12 @@ function readColors(): typeof DEFAULT_COLORS {
 }
 
 const TRAIL_KEY = 'gitdrone-overlay-trail-intensity';
+const STICK_STYLE_KEY = 'gitdrone-overlay-stick-style';
+
+/** The sticks' look: smooth until changed. */
+function readStickStyle(): 'smooth' | 'retro' {
+  try { return localStorage.getItem(STICK_STYLE_KEY) === 'retro' ? 'retro' : 'smooth'; } catch { return 'smooth'; }
+}
 
 function readTrailIntensity(): number {
   try {
@@ -555,22 +561,30 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                               @for (m of [1, 2, 3, 4]; track m) { <option [value]="m">Mode {{ m }}</option> }
                             </select>
                           </div>
-                          <label class="check"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" /> Trails (motion blur)</label>
+                          <!-- Retro is Betaflight's own OSD stick overlay, in the OSD font: no trails or dot colours there. -->
+                          <div class="label-row">
+                            <label for="stick-style">Look</label>
+                            <select id="stick-style" [ngModel]="opts().stickStyle" (ngModelChange)="setStickStyle($event)">
+                              <option value="smooth">Smooth (Blackbox Explorer)</option>
+                              <option value="retro">Retro (Betaflight OSD)</option>
+                            </select>
+                          </div>
+                          <label class="check"><input type="checkbox" [ngModel]="opts().stickTrails" (ngModelChange)="set('stickTrails', $event)" [disabled]="retroSticks()" /> Trails (motion blur)</label>
                           <div class="grade">
                             <label for="trail-intensity">Trail strength</label>
                             <input id="trail-intensity" type="range" min="0.25" max="2" step="0.05" [ngModel]="opts().stickTrailIntensity"
-                                   (ngModelChange)="setTrailIntensity(+$event)" [disabled]="!opts().stickTrails" />
+                                   (ngModelChange)="setTrailIntensity(+$event)" [disabled]="!opts().stickTrails || retroSticks()" />
                             <span class="mono">{{ (opts().stickTrailIntensity * 100).toFixed(0) }}%</span>
                           </div>
                         </fieldset>
                         <fieldset class="item-sizes">
                           <legend>Colours</legend>
                           <div class="colors">
-                            <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)" /> Dot</label>
+                            <label class="color"><input type="color" [ngModel]="opts().stickDotColor" (ngModelChange)="setColor('stickDotColor', $event)" [disabled]="retroSticks()" /> Ring</label>
                             <label class="color"><input type="color" [ngModel]="opts().stickTrailColor" (ngModelChange)="setColor('stickTrailColor', $event)"
-                                   [disabled]="!opts().stickTrails" /> Trail</label>
+                                   [disabled]="!opts().stickTrails || retroSticks()" /> Trail</label>
                             <label class="color"><input type="color" [ngModel]="opts().stickBoxColor" (ngModelChange)="setColor('stickBoxColor', $event)" /> Background</label>
-                            <label class="color"><input type="color" [ngModel]="opts().stickCrossColor" (ngModelChange)="setColor('stickCrossColor', $event)" /> Crosshair</label>
+                            <label class="color"><input type="color" [ngModel]="opts().stickCrossColor" (ngModelChange)="setColor('stickCrossColor', $event)" [disabled]="retroSticks()" /> Crosshair</label>
                             <button class="btn small step" type="button" (click)="resetColors(stickColors)" aria-label="Reset the stick colours" title="Reset the stick colours"><app-icon name="reset" /></button>
                           </div>
                         </fieldset>
@@ -1327,7 +1341,7 @@ export class OverlayExportComponent {
   start = linkedSignal({ source: this.range, computation: () => 0 });
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
-    stickTrails: true, altSource: 'gps', statsAfter: 0, flightSeconds: 0, ...savedShow(this.vertical()),
+    stickTrails: true, stickStyle: readStickStyle(), altSource: 'gps', statsAfter: 0, flightSeconds: 0, ...savedShow(this.vertical()),
     ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
   });
@@ -2145,6 +2159,14 @@ export class OverlayExportComponent {
   resetColors(defaults: Partial<typeof DEFAULT_COLORS>) {
     this.opts.update(o => ({ ...o, ...defaults }));
     saveColors(this.opts());
+  }
+
+  retroSticks = computed(() => this.opts().stickStyle === 'retro');
+
+  setStickStyle(v: string) {
+    const style = v === 'retro' ? 'retro' : 'smooth';
+    this.set('stickStyle', style);
+    try { localStorage.setItem(STICK_STYLE_KEY, style); } catch { /* not remembered */ }
   }
 
   setStickMode(v: number) {
