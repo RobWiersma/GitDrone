@@ -7,15 +7,15 @@ export interface OverlayData {
   track: { home: [number, number] | null; points: TrackPoint[] } | null;
   sticks: StickPoint[] | null;
   battery: { cells: number; points: BatteryPoint[] } | null;
-  /** RSSI and barometer height; null for logs without rssi / baroAlt. */
+  /** RSSI, barometer height and link quality; null for logs with none of them. */
   telemetry: TelemetryPoint[] | null;
 }
 
-export type ElementKey = 'rssi' | 'map' | 'speed' | 'battery' | 'sticks' | 'title' | 'craft';
+export type ElementKey = 'rssi' | 'map' | 'speed' | 'battery' | 'sticks' | 'title' | 'craft' | 'link';
 
 export const ELEMENT_LABELS: Record<ElementKey, string> = {
   rssi: 'RSSI panel', map: 'Mini map', speed: 'Speed panel', battery: 'Battery panel', sticks: 'Sticks',
-  title: 'Title', craft: 'Craft name',
+  title: 'Title', craft: 'Craft name', link: 'LQ and cell panel',
 };
 
 /**
@@ -32,13 +32,15 @@ export interface PlacedElement { key: ElementKey; x: number; y: number; w: numbe
 
 /** Text items inside the panels that can be sized on their own. */
 export type ItemKey =
-  | 'rssi.sats' | 'rssi.value' | 'rssi.home' | 'rssi.alt'
+  | 'rssi.sats' | 'rssi.value' | 'rssi.dbm' | 'rssi.lq' | 'rssi.home' | 'rssi.alt'
   | 'speed.value' | 'speed.accel' | 'speed.amps' | 'speed.watts'
-  | 'battery.cell' | 'battery.time' | 'battery.volts' | 'battery.mah';
+  | 'battery.cell' | 'battery.time' | 'battery.volts' | 'battery.mah'
+  | 'link.lq' | 'link.cell';
 
 export const ELEMENT_ITEMS: Partial<Record<ElementKey, { key: ItemKey; label: string }[]>> = {
   rssi: [
-    { key: 'rssi.sats', label: 'Satellites' }, { key: 'rssi.value', label: 'RSSI' },
+    { key: 'rssi.sats', label: 'Satellites' }, { key: 'rssi.value', label: 'RSSI' }, { key: 'rssi.dbm', label: 'RSSI (dBm)' },
+    { key: 'rssi.lq', label: 'Link quality' },
     { key: 'rssi.home', label: 'Distance from home' }, { key: 'rssi.alt', label: 'Height' },
   ],
   speed: [
@@ -49,6 +51,7 @@ export const ELEMENT_ITEMS: Partial<Record<ElementKey, { key: ItemKey; label: st
     { key: 'battery.cell', label: 'Per-cell voltage' }, { key: 'battery.time', label: 'Flight time' },
     { key: 'battery.volts', label: 'Pack voltage' }, { key: 'battery.mah', label: 'mAh used' },
   ],
+  link: [{ key: 'link.cell', label: 'Per-cell voltage' }, { key: 'link.lq', label: 'Link quality' }],
 };
 
 export const ITEM_SCALE_MIN = 0.5, ITEM_SCALE_MAX = 2;
@@ -60,6 +63,8 @@ export interface OverlayOptions {
   showMap: boolean;
   /** The panel under the mini map: satellites and RSSI, then distance from home and height. */
   showRssi: boolean;
+  /** Per-cell voltage and link quality at the battery panel's headline size, by default just above the sticks (logs with LQ). */
+  showLink: boolean;
   /** Where the speed panel's altitude comes from. Barometer falls back to GPS when the log has none. */
   altSource: 'gps' | 'baro';
   /** Betaflight-style "--- STATS ---" screen in place of the HUD from `statsAfter` (seconds since log start) on. */
@@ -130,6 +135,8 @@ export interface OverlayOptions {
   layout: OverlayLayout;
   /** Text size multipliers for items inside panels; missing means 100%. */
   itemScale: Partial<Record<ItemKey, number>>;
+  /** Panel readings switched off (the RSSI panel's); missing means shown. */
+  itemHidden?: Partial<Record<ItemKey, boolean>>;
 }
 
 /** One piece of text in a panel row; `w` replaces measuring for drawn shapes (the built-in battery icon). */
@@ -203,6 +210,12 @@ export const STATS_GAP_S = 0.1;
 const satText = (n: number) => (glyphs ? `${SYM.sat}${n}` : `${n} SAT`);
 /** RSSI: after Betaflight's antenna icon with an OSD font, or "53% RSSI" in the built-in font, like "24 SAT". */
 const rssiText = (n: number) => (glyphs ? `${SYM.rssi}${n}` : `${n}% RSSI`);
+/** Link quality: after Betaflight's LQ icon with an OSD font, or "100% LQ" in the built-in font. */
+const lqText = (n: number) => (glyphs ? `${SYM.lq}${n}` : `${n}% LQ`);
+/** Signal strength in dBm: "-72DBM" in an OSD font (it has no dBm symbol), "-72 dBm" in the built-in font. */
+const dbmText = (n: number) => (glyphs ? `${n}DBM` : `${n} dBm`);
+/** Betaflight's default link quality alarm (osd_link_quality_alarm), %: below it the number turns amber. */
+const LQ_ALARM = 80;
 
 /** Betaflight battery icon for a per-cell voltage (3.3 V empty .. 4.2 V full). */
 const batteryIcon = (cell: number) => SYM.batt[6 - Math.max(0, Math.min(6, Math.round(((cell - 3.3) / 0.9) * 6)))];
@@ -217,6 +230,9 @@ export class OverlayRenderer {
   private batteryTimes: number[];
   private telemetryTimes: number[];
   private hasRssi: boolean;
+  /** Link quality arrives with the CRSF link stats debug mode. */
+  private hasLq: boolean;
+  private hasDbm: boolean;
   private hasBaro: boolean;
   /** The battery panel is shorter without a current sensor; fixed per flight so the box doesn't jump. */
   private hasCurrent: boolean;
@@ -237,6 +253,8 @@ export class OverlayRenderer {
     this.batteryTimes = data.battery?.points.map(p => p[0]) ?? [];
     this.telemetryTimes = data.telemetry?.map(p => p[0]) ?? [];
     this.hasRssi = data.telemetry?.some(p => p[1] !== null) ?? false;
+    this.hasLq = data.telemetry?.some(p => p[3] != null) ?? false;
+    this.hasDbm = data.telemetry?.some(p => p[4] != null) ?? false;
     this.hasBaro = data.telemetry?.some(p => p[2] !== null) ?? false;
     this.hasCurrent = data.battery?.points[0]?.[2] != null;
     this.hasSats = data.track?.points[0]?.[5] !== undefined;
@@ -288,6 +306,7 @@ export class OverlayRenderer {
         case 'map': this.drawMap(ctx, t, p.x, p.y, s, o); break;
         case 'speed': this.drawSpeed(ctx, t, p.x, p.y, s, o); break;
         case 'battery': this.drawBattery(ctx, t, p.x, p.y, s, o); break;
+        case 'link': this.drawLink(ctx, t, p.x, p.y, s, o); break;
         case 'sticks': this.drawSticks(ctx, t, p.x, p.y, s, o); break;
         case 'title': drawTitle(ctx, p.x, p.y, s, o); break;
         case 'craft': drawCraft(ctx, p.x, p.y, s, o); break;
@@ -330,8 +349,9 @@ export class OverlayRenderer {
     // Breakout under the map: right-aligned with wherever the map is, or in the corner when the map is hidden.
     const rssi = this.geometry('rssi', o);
     const mapBox = out.find(e => e.key === 'map');
+    const rssiEmpty = rssi.baselines.length === 0; // every reading switched off
     const rw = rssi.w * u;
-    add('rssi', o.showRssi && (this.hasRssi || this.trackTimes.length > 0), rssi.w, rssi.h,
+    add('rssi', o.showRssi && !rssiEmpty && (this.hasRssi || this.hasLq || this.trackTimes.length > 0), rssi.w, rssi.h,
         mapBox ? Math.max(0, mapBox.x + mapBox.w - rw) : W - m - rw,
         mapBox ? Math.min(H - rssi.h * u, mapBox.y + mapBox.h + 12 * u) : top);
 
@@ -352,12 +372,16 @@ export class OverlayRenderer {
     const showSpeed = o.showSpeed && this.trackTimes.length > 0;
     const showBattery = o.showBattery && this.batteryTimes.length > 0;
     const showSticks = o.showSticks && !!this.data.sticks?.length;
+    // The link panel: centred just above where the sticks sit by default.
+    const showLink = o.showLink && this.hasLq;
+    const link = this.geometry('link', o);
 
     if (!vertical) {
       const bottom = H - m;
       add('speed', showSpeed, speed.w, speed.h, m, bottom - speed.h * u);
       add('battery', showBattery, battery.w, battery.h, W - m - battery.w * u, bottom - battery.h * u);
       add('sticks', showSticks, 330, 150, W / 2 - 165 * u, bottom - 150 * u);
+      add('link', showLink, link.w, link.h, W / 2 - (link.w * u) / 2, bottom - (150 + 12 + link.h) * u);
       return out;
     }
 
@@ -368,6 +392,9 @@ export class OverlayRenderer {
     const gap = 16 * u, rowCy = 0.79 * H;
     const row = [showSpeed && speed, showBattery && battery].filter((g): g is Geometry => !!g);
     const rowScale = Math.min(2, (W * 0.94 - gap * Math.max(0, row.length - 1)) / (row.reduce((sum, g) => sum + g.w, 0) * u || 1));
+    // The link panel at the row's scale, so its cell voltage matches the battery panel's.
+    add('link', showLink, link.w, link.h, W / 2 - (link.w * u * rowScale) / 2,
+        sticksCy - 75 * u * sticksScale - 12 * u - link.h * u * rowScale, rowScale);
     let x = (W - (row.reduce((sum, g) => sum + g.w * u * rowScale, 0) + gap * Math.max(0, row.length - 1))) / 2;
     for (const [key, g] of [['speed', showSpeed && speed], ['battery', showBattery && battery]] as const) {
       if (!g) continue;
@@ -395,6 +422,8 @@ export class OverlayRenderer {
     for (let k = 1; k < tp.length; k++) dist += haversine(tp[k - 1][1], tp[k - 1][2], tp[k][1], tp[k][2]);
     const baro = o.altSource === 'baro' && this.hasBaro;
     const rssi = tl.map(p => p[1]).filter((v): v is number => v !== null);
+    const lq = tl.map(p => p[3]).filter((v): v is number => v != null);
+    const dbm = tl.map(p => p[4]).filter((v): v is number => v != null);
     const amps = bp.map(p => p[2]).filter((v): v is number => v !== null);
     const accel = tp.map(p => p[6]).filter((v): v is number => v !== undefined);
     return {
@@ -407,6 +436,8 @@ export class OverlayRenderer {
       minV,
       endV: bp.length ? bp[bp.length - 1][1] : null,
       minRssi: rssi.length ? Math.min(...rssi) : null,
+      minLq: lq.length ? Math.min(...lq) : null,
+      minDbm: dbm.length ? Math.min(...dbm) : null,
       maxA: amps.length ? Math.max(...amps) : null,
       mah: amps.length ? this.mahAt[this.mahAt.length - 1] : null,
     };
@@ -430,6 +461,8 @@ export class OverlayRenderer {
     add('MIN BATTERY', s.minV, v => `${v.toFixed(2)}${G ? SYM.volt : ' V'}`);
     add('END BATTERY', s.endV, v => `${v.toFixed(2)}${G ? SYM.volt : ' V'}`);
     add('MIN RSSI', s.minRssi, v => `${Math.round(v)}%`);
+    add('MIN LINK', s.minLq, v => `${Math.round(v)}%`); // Betaflight's own labels for the lowest LQ and dBm
+    add('MIN RSSI DBM', s.minDbm, v => dbmText(Math.round(v)));
     add('MAX CURRENT', s.maxA, v => `${v.toFixed(0)}${G ? SYM.amp : ' A'}`);
     add('USED MAH', s.mah, v => `${Math.round(v)}${G ? SYM.mah : ' mAh'}`);
 
@@ -457,19 +490,23 @@ export class OverlayRenderer {
    * height of the rows above it (and most of its own), and the panel widens when a row's widest-case text no longer
    * fits, so nothing overlaps. With every item at 100% this is exactly the original layout.
    */
-  private geometry(key: 'rssi' | 'speed' | 'battery', o: OverlayOptions): Geometry {
+  private geometry(key: 'rssi' | 'speed' | 'battery' | 'link', o: OverlayOptions): Geometry {
     const k = (item: ItemKey) => Math.min(ITEM_SCALE_MAX, Math.max(ITEM_SCALE_MIN, o.itemScale?.[item] ?? 1));
     const U = units();
     switch (key) {
       case 'rssi': {
-        // Satellites and RSSI on top, distance from home and height below; each only when the log has it.
+        // Satellites, RSSI (% and dBm) and link quality on top, distance from home and height below; each only when the
+        // log has it and it isn't switched off.
         const gps = this.trackTimes.length > 0;
         const top: Row['items'] = [], bottom: Row['items'] = [];
+        const shown = (i: Row['items'][number]) => !o.itemHidden?.[i.key!];
         if (gps && this.hasSats) top.push({ key: 'rssi.sats', parts: [{ s: satText(88), size: SMALL, weight: 700 }] });
         if (this.hasRssi) top.push({ key: 'rssi.value', parts: [{ s: rssiText(99), size: SMALL, weight: 700 }] });
+        if (this.hasDbm) top.push({ key: 'rssi.dbm', parts: [{ s: dbmText(-100), size: SMALL, weight: 700 }] });
+        if (this.hasLq) top.push({ key: 'rssi.lq', parts: [{ s: lqText(100), size: SMALL, weight: 700 }] });
         if (gps) bottom.push({ key: 'rssi.home', parts: [{ s: `${U.home}888${U.m}`, size: SMALL, weight: 700 }] },
                              { key: 'rssi.alt', parts: [{ s: `${U.alt}88${U.m}`, size: SMALL, weight: 700 }] });
-        const rows = [top, bottom].filter(r => r.length);
+        const rows = [top.filter(shown), bottom.filter(shown)].filter(r => r.length);
         // As wide as the map above it, or wider if the font needs it.
         return fit(MAP_SIZE, rows.length > 1 ? 94 : 58, 22, k,
                    rows.map((items, n) => ({ baseline: n ? 76 : 40, items })), true);
@@ -490,6 +527,17 @@ export class OverlayRenderer {
           : [{ baseline: ROW1, items: [speed, accel] }];
         return fit(400, this.hasCurrent ? TWO_ROW_H : ONE_ROW_H, 26, k, rows);
       }
+      case 'link': {
+        // One row, both at the battery panel's headline size: the battery icon and per-cell voltage on the left, link
+        // quality on the right.
+        const items: Row['items'] = [];
+        if (this.batteryTimes.length) {
+          const icon: Part = glyphs ? { s: SYM.batt[0], size: BIG, weight: 700 } : { s: '', size: BIG, weight: 700, w: 26 };
+          items.push({ key: 'link.cell', parts: [icon, { s: '4.20', size: BIG, weight: 800 }, { s: glyphs ? U.volt : 'V', size: unitSize(), weight: 600 }] });
+        }
+        if (this.hasLq) items.push({ key: 'link.lq', parts: [{ s: lqText(100), size: BIG, weight: 700 }] });
+        return fit(280, 82, 26, k, [{ baseline: 58, items }], true);
+      }
       case 'battery': {
         const icon: Part = glyphs ? { s: SYM.batt[0], size: BIG, weight: 700 } : { s: '', size: BIG, weight: 700, w: 26 };
         // Per-cell average and flight time on top; pack voltage and mAh used below.
@@ -504,7 +552,11 @@ export class OverlayRenderer {
     }
   }
 
-  /** The breakout under the map. RSSI is 0..99 like Betaflight's element, amber below its default 20% alarm. */
+  /**
+   * The breakout under the map. RSSI is 0..99 like Betaflight's element, amber below its default 20% alarm; link quality
+   * 0..100, amber below its default 80% alarm. Each row's readings (those not switched off) spread across the panel:
+   * first at the left edge, last at the right, the ones between evenly spaced.
+   */
   private drawRssi(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, u: number, o: OverlayOptions) {
     const g = this.geometry('rssi', o);
     const w = g.w * u;
@@ -517,20 +569,34 @@ export class OverlayRenderer {
     const tl = this.data.telemetry?.length ? this.data.telemetry[nearest(this.telemetryTimes, t)] : null;
 
     const sats = i >= 0 && this.hasSats ? tp![i][5] : undefined;
-    if (sats !== undefined || this.hasRssi) {
-      const line = y + g.baselines[row++] * u;
-      if (sats !== undefined) text(ctx, satText(sats), left, line, SMALL * g.k('rssi.sats') * u, 'left', 700);
-      if (this.hasRssi && tl?.[1] != null) {
-        const value = Math.min(99, Math.round(tl[1]));
-        text(ctx, rssiText(value), sats !== undefined ? right : left, line, SMALL * g.k('rssi.value') * u,
-             sats !== undefined ? 'right' : 'left', 700, 1, value < 20 ? '#ffb340' : undefined);
-      }
+    type Reading = { key: ItemKey; s: string | null; warn?: boolean };
+    const top: Reading[] = [], bottom: Reading[] = [];
+    if (sats !== undefined) top.push({ key: 'rssi.sats', s: satText(sats) });
+    if (this.hasRssi) {
+      const value = tl?.[1] == null ? null : Math.min(99, Math.round(tl[1]));
+      top.push({ key: 'rssi.value', s: value === null ? null : rssiText(value), warn: value !== null && value < 20 });
+    }
+    if (this.hasDbm) top.push({ key: 'rssi.dbm', s: tl?.[4] == null ? null : dbmText(Math.round(tl[4])) });
+    if (this.hasLq) {
+      const value = tl?.[3] == null ? null : Math.round(tl[3]);
+      top.push({ key: 'rssi.lq', s: value === null ? null : lqText(value), warn: value !== null && value < LQ_ALARM });
     }
     if (i >= 0) {
-      const line = y + g.baselines[row] * u;
       const alt = (o.altSource === 'baro' && this.hasBaro ? tl?.[2] : null) ?? tp![i][3];
-      text(ctx, `${U.home}${this.homeDist[i].toFixed(0)}${U.m}`, left, line, SMALL * g.k('rssi.home') * u, 'left', 700);
-      text(ctx, `${U.alt}${alt.toFixed(0)}${U.m}`, right, line, SMALL * g.k('rssi.alt') * u, 'right', 700);
+      bottom.push({ key: 'rssi.home', s: `${U.home}${this.homeDist[i].toFixed(0)}${U.m}` },
+                  { key: 'rssi.alt', s: `${U.alt}${alt.toFixed(0)}${U.m}` });
+    }
+    for (const readings of [top, bottom]) {
+      const shown = readings.filter(r => !o.itemHidden?.[r.key]);
+      if (!shown.length) continue;
+      const line = y + g.baselines[row++] * u;
+      shown.forEach((item, n) => {
+        if (item.s === null) return;
+        const last = n === shown.length - 1;
+        const [tx, align]: [number, CanvasTextAlign] = n === 0 ? [left, 'left'] : last ? [right, 'right']
+          : [left + ((right - left) * n) / (shown.length - 1), 'center'];
+        text(ctx, item.s, tx, line, SMALL * g.k(item.key) * u, align, 700, 1, item.warn ? '#ffb340' : undefined);
+      });
     }
   }
 
@@ -604,6 +670,41 @@ export class OverlayRenderer {
     const line2 = y + g.baselines[1] * u;
     text(ctx, `${v.toFixed(1)}${glyphs ? U.volt : ' V'}`, x + 26 * u, line2, SMALL * g.k('battery.volts') * u, 'left', 600, 0.9, warn);
     if (a !== null) text(ctx, `${Math.round(this.mahAt[i])}${U.mah}`, x + w - 26 * u, line2, SMALL * g.k('battery.mah') * u, 'right', 700);
+  }
+
+  /**
+   * The per-cell voltage (amber below 3.5 V) on the left, drawn like the battery panel's headline, and link quality
+   * (amber below Betaflight's 80% alarm) on the right, at the same size.
+   */
+  private drawLink(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, u: number, o: OverlayOptions) {
+    const g = this.geometry('link', o);
+    const w = g.w * u;
+    panel(ctx, x, y, w, g.h * u, 22 * u, o.panelOpacity);
+    const line = y + g.baselines[0] * u;
+    const left = x + 26 * u, right = x + w - 26 * u;
+    const bat = this.data.battery;
+    if (bat?.points.length) {
+      const cell = bat.points[nearest(this.batteryTimes, t)][1] / bat.cells;
+      const warn = cell < 3.5 ? '#ffb340' : undefined;
+      const kc = g.k('link.cell');
+      let vx = left;
+      if (glyphs) {
+        text(ctx, batteryIcon(cell), vx, line, BIG * kc * u, 'left', 700);
+        vx += measure(ctx, batteryIcon(cell), BIG * kc * u, 700) + 6 * kc * u;
+      } else {
+        drawBatteryIcon(ctx, vx, line - 32 * kc * u, 18 * kc * u, 34 * kc * u, cell, warn);
+        vx += 32 * kc * u;
+      }
+      const perCell = cell.toFixed(2);
+      text(ctx, perCell, vx, line, BIG * kc * u, 'left', 800, 1, warn);
+      text(ctx, glyphs ? units().volt : 'V', vx + measure(ctx, perCell, BIG * kc * u, 800) + 8 * kc * u, line,
+           unitSize() * kc * u, 'left', 600, 0.85, warn);
+    }
+    const tl = this.data.telemetry?.length ? this.data.telemetry[nearest(this.telemetryTimes, t)] : null;
+    if (tl?.[3] != null) {
+      const lq = Math.round(tl[3]);
+      text(ctx, lqText(lq), right, line, BIG * g.k('link.lq') * u, 'right', 700, 1, lq < LQ_ALARM ? '#ffb340' : undefined);
+    }
   }
 
   /** Blackbox Explorer style: dark squares, thin crosshairs, a red dot, raw rcCommand values around the pair. */

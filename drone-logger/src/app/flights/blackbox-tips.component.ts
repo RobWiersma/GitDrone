@@ -21,11 +21,13 @@ import { WTFOS_FONTS_URL, WTFOS_FONT_PACKS_URL } from './glyph-font';
           <tr><td>GPS</td><td>Mini map, speed, G-force, distance from home, satellites, height</td></tr>
           <tr><td>RSSI</td><td>RSSI reading and the lowest RSSI stat</td></tr>
           <tr><td>Altitude (barometer)</td><td>Smoother height, if your flight controller has a baro</td></tr>
+          <tr><td>Debug, with debug mode <code>CRSF_LINK_STATISTICS_UPLINK</code></td><td>Link quality (LQ) and RSSI in dBm, for Crossfire and ELRS receivers</td></tr>
         </tbody>
       </table>
       <p class="hint">
-        Gyro, accelerometer, PID, setpoint, motor and debug fields aren't used by the overlay. Turn them off to fit longer flights
-        on the flash chip, or keep them if you also tune with Blackbox Explorer.
+        Gyro, accelerometer, PID, setpoint and motor fields aren't used by the overlay. Turn them off to fit longer flights
+        on the flash chip, or keep them if you also tune with Blackbox Explorer. Betaflight doesn't log link quality on its
+        own; the debug mode above puts it in the debug fields (only one debug mode logs at a time, so it replaces any tuning one).
       </p>
       <p>Prefer the CLI? <code>get blackbox</code> lists the settings (Betaflight 4.4 and newer). Then for example:</p>
       <pre><code>set blackbox_disable_rc = OFF
@@ -33,6 +35,8 @@ set blackbox_disable_bat = OFF
 set blackbox_disable_gps = OFF
 set blackbox_disable_rssi = OFF
 set blackbox_disable_alt = OFF
+set blackbox_disable_debug = OFF
+set debug_mode = CRSF_LINK_STATISTICS_UPLINK
 save</code></pre>
 
       <h3>2. Pick a logging rate</h3>

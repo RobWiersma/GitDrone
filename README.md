@@ -255,7 +255,11 @@ plus a map (Leaflet + OpenStreetMap tiles) with the path coloured by speed. `POS
 re-reads the stored log file, e.g. after a decoder change. `GET /api/flights/{id}/track` returns the path.
 
 Logs with `rssi` get a lowest-RSSI stat, an RSSI chart and an RSSI element on the overlay. This is the signal
-strength Betaflight logs (shown 0–100% like its OSD), not link quality, which Betaflight doesn't write to the blackbox.
+strength Betaflight logs (shown 0–100% like its OSD), not link quality, which Betaflight doesn't write to the blackbox
+on its own. With Crossfire or ELRS, set `debug_mode = CRSF_LINK_STATISTICS_UPLINK` and log the debug fields: Betaflight
+then logs the receiver's uplink RSSI in dBm (each antenna) in `debug[0]` and `debug[1]`, and **link quality** in
+`debug[2]`. Those logs also get a lowest-LQ stat, LQ and dBm charts, LQ and dBm in the overlay's RSSI panel (LQ amber
+below Betaflight's 80% alarm) and MIN LINK and MIN RSSI DBM on the stats screen.
 Logs with `baroAlt` get the barometer height drawn dashed on the height chart next to GPS, and the overlay can take
 its altitude from either.
 
@@ -266,7 +270,10 @@ transparent HUD video to put on a track above your footage in Premiere Pro or Af
 
 - a **speed panel**: speed, G-force, current and power;
 - a **battery panel**: per-cell and pack voltage, flight time (always shown) and mAh used;
-- a **mini map** with an **RSSI panel** under it: satellites, RSSI, distance from home and height (GPS or barometer);
+- an **LQ and cell panel** for logs with link quality: the per-cell voltage and LQ at the battery panel's headline
+  size, centred just above the sticks (off until you turn it on under Show);
+- a **mini map** with an **RSSI panel** under it: satellites, RSSI (and link quality and dBm when logged), distance
+  from home and height (GPS or barometer);
 - both **sticks** in Blackbox Explorer style (modes 1–4) with motion trails; or **Pixel**, the same in chunky pixels like
   the OSD font (a pixel-art box with stepped corners, each stick an empty white ring); or **Retro**: Betaflight's own OSD stick
   overlay, a 7 × 5 grid of characters drawn from your OSD font (chunky pixels without one), on a pixel-art backdrop
@@ -286,8 +293,9 @@ draw it in the OSD font instead, tinted in its colours.
 **The editor.** It's laid out like Premiere: a **Components** panel and a **Track** panel on the left of the preview, a
 **timeline** under it, and **Options** along the bottom. Click an OSD element in the preview (or the title or craft
 name) and Components shows everything about it, grouped: text and colours, position and size (50–300%), the size of
-each reading inside a panel (speed, G-force, satellites, pack voltage, mAh, ...), stick mode, trails and colours. With
-nothing picked, it lists every element to choose from, so it all works from the keyboard too.
+each reading inside a panel (speed, G-force, satellites, pack voltage, mAh, ...), stick mode, trails and colours. The
+RSSI panel's readings (satellites, RSSI, dBm, link quality, distance and height; those the log has) each have a
+checkbox to switch them off, and the panel shrinks to what's left; one always stays on. With nothing picked, it lists every element to choose from, so it all works from the keyboard too.
 
 **The timeline** shows every file as a track where its sync puts it, like Premiere's: V2 the OSD over V1 the footage
 (and the stick cam under them in vertical), then A1 the sound (the sound track, or the footage's own) and A2 the music,

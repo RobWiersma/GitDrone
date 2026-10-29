@@ -38,7 +38,9 @@ export interface Flight {
 }
 
 /** [seconds since log start, RSSI % or null, barometer height above takeoff (m) or null], 10 Hz. */
-export type TelemetryPoint = [number, number | null, number | null];
+/** [t, RSSI %, barometer height (m), link quality %, RSSI dBm]; LQ and dBm only when the log has them (CRSF link stats
+ *  debug mode), and missing on flights stored before they were read. */
+export type TelemetryPoint = [number, number | null, number | null, (number | null)?, (number | null)?];
 
 export interface FlightTelemetry {
   points: TelemetryPoint[];

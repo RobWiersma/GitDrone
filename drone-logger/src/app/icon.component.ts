@@ -2,7 +2,7 @@ import { Component, input } from '@angular/core';
 
 export type IconName =
   | 'play' | 'pause' | 'volume' | 'mute' | 'prev' | 'next' | 'close' | 'reset' | 'sliders' | 'folder' | 'trash'
-  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait' | 'title' | 'craft' | 'music' | 'fade-in' | 'lock' | 'unlock';
+  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait' | 'title' | 'craft' | 'music' | 'fade-in' | 'lock' | 'unlock' | 'link';
 
 /**
  * A small outline icon in the app's style (24x24, current text colour). Decorative: the button around it carries the
@@ -31,6 +31,7 @@ export type IconName =
         @case ('sticks') { <rect x="2" y="6" width="9" height="12" rx="2" /><rect x="13" y="6" width="9" height="12" rx="2" /><circle fill="currentColor" cx="6.5" cy="13" r="1.2" /><circle fill="currentColor" cx="17.5" cy="10" r="1.2" /> }
         @case ('map') { <path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14" /> }
         @case ('signal') { <path d="M5 20v-3M10 20v-7M15 20v-11M20 20V4" /> }
+        @case ('link') { <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /> }
         @case ('layers') { <path d="M12 3l9 5-9 5-9-5 9-5z" /><path d="M3 13l9 5 9-5" /> }
         @case ('film') { <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" /> }
         @case ('lock') { <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /> }

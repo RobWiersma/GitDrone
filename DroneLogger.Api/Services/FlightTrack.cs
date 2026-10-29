@@ -170,17 +170,36 @@ public static class FlightTrack
         return (summary, sb.ToString());
     }
 
+    /// <summary>Betaflight's debug_mode for CRSF uplink link statistics (the same number since 4.4, still in 2025.12).</summary>
+    private const string DebugCrsfLinkStatsUplink = "52";
+
     /// <summary>
-    /// Link and barometer series from rssi (0..1023, Betaflight's scale) and baroAlt (cm), on a 10 Hz grid.
-    /// JSON: {"points":[[t,rssi % | null,baro height above takeoff (m) | null],...]}. Null when the log has neither field.
+    /// Link and barometer series from rssi (0..1023, Betaflight's scale) and baroAlt (cm), on a 10 Hz grid, plus the
+    /// CRSF/ELRS link stats when the log has them: with debug_mode = CRSF_LINK_STATISTICS_UPLINK and debug fields logged,
+    /// Betaflight logs each antenna's uplink RSSI in debug[0] and debug[1] (dBm, without the minus; 0 for a missing
+    /// antenna), link quality (0..100 %) in debug[2] and the RF mode in debug[3].
+    /// JSON: {"points":[[t,rssi % | null,baro height above takeoff (m) | null,LQ % | null,RSSI dBm (the stronger
+    /// antenna) | null],...]}. Null when the log has none of these.
     /// </summary>
     public static (TelemetrySummary Summary, string Json)? BuildTelemetry(BlackboxLog log)
     {
         var fields = log.MainFields.ToList();
         var ri = fields.IndexOf("rssi");
         var bi = fields.IndexOf("baroAlt");
+        var linkStats = log.Headers.TryGetValue("debug_mode", out var dm) && dm.Trim() == DebugCrsfLinkStatsUplink
+                        && log.Headers.TryGetValue("Firmware type", out var fw) && fw.Contains("Betaflight", StringComparison.OrdinalIgnoreCase);
+        var li = linkStats ? fields.IndexOf("debug[2]") : -1;
+        int a1 = linkStats ? fields.IndexOf("debug[0]") : -1, a2 = linkStats ? fields.IndexOf("debug[1]") : -1;
         var samples = log.Samples;
-        if ((ri < 0 && bi < 0) || samples.Count < 10) return null;
+        if ((ri < 0 && bi < 0 && li < 0) || samples.Count < 10) return null;
+        double Lq(int k) => Math.Clamp(samples[k].Values[li], 0, 100);
+        // The stronger antenna (the smaller number, as dBm is stored without its minus); null when neither reports.
+        double? Dbm(int k)
+        {
+            int v1 = a1 >= 0 ? samples[k].Values[a1] : 0, v2 = a2 >= 0 ? samples[k].Values[a2] : 0;
+            var best = v1 > 0 && v2 > 0 ? Math.Min(v1, v2) : Math.Max(v1, v2);
+            return best > 0 ? -best : null;
+        }
 
         // Same scale as the OSD's RSSI element: 0..1023 shown as a percentage.
         double Rssi(int k) => samples[k].Values[ri] / 10.23;
@@ -217,7 +236,9 @@ public static class FlightTrack
             first = false;
             sb.Append('[').Append(F((samples[k].TimeUs - log.FirstTimeUs) / 1e6, 1)).Append(',')
               .Append(ri >= 0 ? F(Rssi(k), 0) : "null").Append(',')
-              .Append(bi >= 0 ? F(Baro(k), 1) : "null").Append(']');
+              .Append(bi >= 0 ? F(Baro(k), 1) : "null").Append(',')
+              .Append(li >= 0 ? F(Lq(k), 0) : "null").Append(',')
+              .Append(Dbm(k) is { } dbm ? F(dbm, 0) : "null").Append(']');
         }
         sb.Append("]}");
         return (new TelemetrySummary(minRssi, maxBaro), sb.ToString());

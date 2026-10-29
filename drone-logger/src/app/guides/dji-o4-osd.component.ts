@@ -70,6 +70,8 @@ const DESCRIPTION = 'DJI O4 footage comes off the air unit without your Betaflig
           In Betaflight Configurator's <strong>Blackbox</strong> tab, make sure <strong>RC commands</strong> (sticks),
           <strong>Battery</strong>, <strong>GPS</strong> and <strong>RSSI</strong> are logged. A logging rate of 250–500 Hz is
           plenty. Erase the flash so the flight fits, and wait for a GPS fix before you arm, since home is set at arming.
+          On ELRS or Crossfire, set the debug mode to <code>CRSF_LINK_STATISTICS_UPLINK</code> and log <strong>Debug</strong>
+          too, and the OSD gets your link quality (LQ) and RSSI in dBm.
           The full checklist, CLI commands included, is under <strong>Getting a good log</strong> in the editor.
         </p>
 

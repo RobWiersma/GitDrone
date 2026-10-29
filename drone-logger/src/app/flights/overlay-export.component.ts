@@ -89,14 +89,14 @@ const FOOTAGE_DEFAULTS = { zoom: 100 };
 
 const PREFS_KEY = 'gitdrone-editor-prefs';
 /** The Show toggles and panel background, which each format keeps its own of. */
-type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats' | 'showTitle' | 'showCraft' | 'panelOpacity' | 'showCredit'>;
+type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showLink' | 'showStats' | 'showTitle' | 'showCraft' | 'panelOpacity' | 'showCredit'>;
 /**
  * What each format starts with: vertical leaves out what doesn't fit a narrow frame, and has the title and craft name.
- * The lovelyosd.com credit starts on in both.
+ * The lovelyosd.com credit starts on in both, the LQ and cell panel off.
  */
 const showDefaults = (vertical: boolean): ShowState => ({
   showSpeed: !vertical, showBattery: true, showSticks: true, showMap: !vertical, showRssi: !vertical, showStats: true,
-  showTitle: vertical, showCraft: vertical, panelOpacity: vertical ? 0 : 0.35, showCredit: true,
+  showTitle: vertical, showCraft: vertical, panelOpacity: vertical ? 0 : 0.35, showCredit: true, showLink: false,
 });
 const formatOf = (vertical: boolean) => (vertical ? 'vertical' : 'landscape');
 
@@ -259,9 +259,26 @@ function saveItemScales(scales: ItemScales) {
   try { localStorage.setItem(ITEMS_KEY, JSON.stringify(scales)); } catch { /* not remembered */ }
 }
 
+const HIDDEN_ITEMS_KEY = 'gitdrone-overlay-hidden-items';
+type HiddenItems = Partial<Record<ItemKey, boolean>>;
+
+/** Panel readings switched off, remembered in this browser. Unknown keys are dropped. */
+function readHiddenItems(): HiddenItems {
+  const out: HiddenItems = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(HIDDEN_ITEMS_KEY) ?? 'null');
+    for (const item of Object.values(ELEMENT_ITEMS).flat()) if (saved?.[item.key] === true) out[item.key] = true;
+  } catch { /* defaults */ }
+  return out;
+}
+
+function saveHiddenItems(hidden: HiddenItems) {
+  try { localStorage.setItem(HIDDEN_ITEMS_KEY, JSON.stringify(hidden)); } catch { /* not remembered */ }
+}
+
 type Backdrop = 'checker' | 'sky' | 'video';
 /** The Show toggles' switches. */
-type ShowKey = 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showStats' | 'showTitle' | 'showCraft';
+type ShowKey = 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showLink' | 'showStats' | 'showTitle' | 'showCraft';
 const BACKDROP_KEY = 'gitdrone-overlay-backdrop';
 
 function readBackdrop(): Backdrop {
@@ -575,13 +592,24 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                           <span class="mono">{{ (c.y * 100).toFixed(0) }}%</span>
                         </div>
                       </fieldset>
-                      @if (items[c.key]; as list) {
+                      @if (itemsFor(c.key); as list) {
                         <fieldset class="item-sizes">
-                          <legend>Text sizes</legend>
+                          <legend>{{ c.key === 'rssi' ? 'Readings' : 'Text sizes' }}</legend>
                           <div class="grade">
                             @for (it of list; track it.key) {
-                              <label [for]="'item-' + it.key">{{ it.label }}</label>
+                              @if (c.key === 'rssi') {
+                                <!-- Each RSSI panel reading switches on and off; the panel shrinks to what's left. -->
+                                <span class="item-show">
+                                  <input type="checkbox" [id]="'show-' + it.key" [checked]="!itemHidden(it.key)"
+                                         [disabled]="lastShown(list, it.key)" [title]="lastShown(list, it.key) ? 'At least one reading stays on' : ''"
+                                         (change)="setItemHidden(it.key, !$any($event.target).checked)" />
+                                  <label [for]="'show-' + it.key">{{ it.label }}</label>
+                                </span>
+                              } @else {
+                                <label [for]="'item-' + it.key">{{ it.label }}</label>
+                              }
                               <input [id]="'item-' + it.key" type="range" [min]="itemMin" [max]="itemMax" step="0.05"
+                                     [attr.aria-label]="it.label + ' text size'" [disabled]="itemHidden(it.key)"
                                      [ngModel]="itemScale(it.key)" (ngModelChange)="setItemScale(it.key, +$event)" />
                               <span class="mono">{{ (itemScale(it.key) * 100).toFixed(0) }}%</span>
                             }
@@ -1341,6 +1369,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .grade { display: grid; grid-template-columns: auto 1fr 3.2rem; align-items: center; gap: .35rem .6rem; margin: .4rem 0 .1rem; font-size: .92rem; }
     .credit { display: flex; align-items: center; gap: .4rem; margin-top: .3rem; font-size: .92rem; cursor: pointer; }
     .credit input { width: auto; margin: 0; }
+    .item-show { display: flex; align-items: center; gap: .4rem; }
+    .item-show input { width: auto; margin: 0; }
     .grade input[type=range] { width: 100%; min-width: 0; }
     .grade .mono { text-align: right; font-size: .82rem; }
     .sources .source-row { flex-wrap: nowrap; align-items: center; }
@@ -1382,6 +1412,9 @@ export class OverlayExportComponent {
   private renderer = computed(() => new OverlayRenderer(this.data()));
   hasRssi = computed(() => this.data().telemetry?.some(p => p[1] !== null) ?? false);
   hasBaro = computed(() => this.data().telemetry?.some(p => p[2] !== null) ?? false);
+  hasLq = computed(() => this.data().telemetry?.some(p => p[3] != null) ?? false);
+  hasDbm = computed(() => this.data().telemetry?.some(p => p[4] != null) ?? false);
+  hasSats = computed(() => this.data().track?.points[0]?.[5] !== undefined);
 
   /** New data (another flight or session) resets the range to the whole flight. */
   private range = computed(() => ({ data: this.data(), seconds: this.seconds() }));
@@ -1399,6 +1432,7 @@ export class OverlayExportComponent {
     stickTrails: true, stickStyle: readStickStyle(), stickBoxOpacity: readStickBoxOpacity(), altSource: 'gps', statsAfter: 0, flightSeconds: 0, ...savedShow(this.vertical()),
     ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
     stickMode: readStickMode(), font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
+    itemHidden: readHiddenItems(),
   });
   private units = inject(UnitsService);
   /** Counts what visitors do here (loads, renders), for the owner's Visitors page; names only. */
@@ -1415,8 +1449,8 @@ export class OverlayExportComponent {
   hoverKey = signal<ElementKey | null>(null);
   dragging = signal(false);
   private drag: { key: ElementKey; dx: number; dy: number } | null = null;
-  hasCustomLayout = computed(() => Object.keys(this.opts().layout).length > 0 || Object.keys(this.opts().itemScale).length > 0);
-  readonly items = ELEMENT_ITEMS;
+  hasCustomLayout = computed(() => Object.keys(this.opts().layout).length > 0 || Object.keys(this.opts().itemScale).length > 0
+    || Object.keys(this.opts().itemHidden ?? {}).length > 0);
   readonly itemMin = ITEM_SCALE_MIN;
   readonly itemMax = ITEM_SCALE_MAX;
   /** The element the controls edit, as centre fractions and scale. */
@@ -2175,7 +2209,8 @@ export class OverlayExportComponent {
       { key: 'showBattery', icon: 'battery', label: 'Battery panel, with the flight time', available: !!d.battery },
       { key: 'showSticks', icon: 'sticks', label: 'Sticks', available: !!d.sticks },
       { key: 'showMap', icon: 'map', label: 'Mini map', available: !!d.track },
-      { key: 'showRssi', icon: 'signal', label: 'RSSI panel: satellites, RSSI, distance and height', available: this.hasRssi() || !!d.track },
+      { key: 'showRssi', icon: 'signal', label: 'RSSI panel: satellites, RSSI (% and dBm), link quality, distance and height', available: this.hasRssi() || this.hasLq() || !!d.track },
+      { key: 'showLink', icon: 'link', label: 'LQ and cell panel: per-cell voltage and link quality, above the sticks', available: this.hasLq() },
       { key: 'showStats', icon: 'stats', label: 'End-of-flight stats screen', available: true },
       { key: 'showTitle', icon: 'title', label: this.hasTitle() ? 'Title' : 'Title (turn on to add one)', available: true },
       { key: 'showCraft', icon: 'craft', label: this.hasCraft() ? 'Craft name' : 'Craft name (turn on to add one)', available: true },
@@ -2258,22 +2293,54 @@ export class OverlayExportComponent {
     saveItemScales(this.opts().itemScale);
   }
 
-  /** True when the element is moved, resized, or has resized text. */
-  isCustom(key: ElementKey) {
-    const o = this.opts();
-    return !!o.layout[key] || (ELEMENT_ITEMS[key] ?? []).some(i => o.itemScale[i.key] !== undefined);
+  /** An element's sizable readings; for the RSSI panel only those this log has. Null when it has none. */
+  itemsFor(key: ElementKey) {
+    const list = ELEMENT_ITEMS[key];
+    if (!list || key !== 'rssi') return list ?? null;
+    const gps = !!this.data().track?.points.length;
+    const has: Partial<Record<ItemKey, boolean>> = {
+      'rssi.sats': gps && this.hasSats(), 'rssi.value': this.hasRssi(), 'rssi.dbm': this.hasDbm(), 'rssi.lq': this.hasLq(),
+      'rssi.home': gps, 'rssi.alt': gps,
+    };
+    return list.filter(i => has[i.key]);
   }
 
-  /** Back to its default spot, size and text sizes. */
+  /** True for the only reading still shown in a list, which stays on so the panel can't vanish. */
+  lastShown(list: { key: ItemKey }[], key: ItemKey) {
+    return !this.itemHidden(key) && list.filter(i => !this.itemHidden(i.key)).length === 1;
+  }
+
+  itemHidden(key: ItemKey) {
+    return !!this.opts().itemHidden?.[key];
+  }
+
+  setItemHidden(key: ItemKey, hidden: boolean) {
+    this.opts.update(o => {
+      const next: HiddenItems = { ...o.itemHidden };
+      if (hidden) next[key] = true; else delete next[key];
+      return { ...o, itemHidden: next };
+    });
+    saveHiddenItems(this.opts().itemHidden ?? {});
+  }
+
+  /** True when the element is moved, resized, or has resized or hidden readings. */
+  isCustom(key: ElementKey) {
+    const o = this.opts();
+    return !!o.layout[key] || (ELEMENT_ITEMS[key] ?? []).some(i => o.itemScale[i.key] !== undefined || o.itemHidden?.[i.key]);
+  }
+
+  /** Back to its default spot, size, text sizes and readings. */
   resetElement(key: ElementKey) {
     const itemKeys = new Set<string>((ELEMENT_ITEMS[key] ?? []).map(i => i.key));
     this.opts.update(o => ({
       ...o,
       layout: Object.fromEntries(Object.entries(o.layout).filter(([k]) => k !== key)),
       itemScale: Object.fromEntries(Object.entries(o.itemScale).filter(([k]) => !itemKeys.has(k))),
+      itemHidden: Object.fromEntries(Object.entries(o.itemHidden ?? {}).filter(([k]) => !itemKeys.has(k))),
     }));
     saveLayout(this.opts().layout, this.vertical());
     saveItemScales(this.opts().itemScale);
+    saveHiddenItems(this.opts().itemHidden ?? {});
   }
 
   /**
@@ -2290,9 +2357,10 @@ export class OverlayExportComponent {
   }
 
   resetLayout() {
-    this.opts.update(o => ({ ...o, layout: {}, itemScale: {} }));
+    this.opts.update(o => ({ ...o, layout: {}, itemScale: {}, itemHidden: {} }));
     saveLayout({}, this.vertical());
     saveItemScales({});
+    saveHiddenItems({});
   }
 
   /** Pointer position in preview canvas pixels. */

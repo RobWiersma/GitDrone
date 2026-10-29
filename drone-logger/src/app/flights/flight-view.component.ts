@@ -39,6 +39,13 @@ import { UnitsService } from '../units.service';
           <span class="sub">Signal strength, not link quality</span>
         </li>
       }
+      @if (minLq(); as lq) {
+        <li>
+          <span class="lbl">Lowest link quality</span>
+          <span class="num" [class.low]="lq.value < 80">{{ lq.value | number: '1.0-0' }}<small>%</small></span>
+          <span class="sub">Packets getting through (LQ)</span>
+        </li>
+      }
       @if (f.battery; as b) {
         @if (b.mahUsed !== null) {
           <li class="battery"><span class="lbl">Used</span><span class="num">{{ b.mahUsed | number: '1.0-0' }}<small>mAh</small></span></li>
@@ -203,6 +210,13 @@ export class FlightViewComponent {
   private telemetryTimes = computed(() => this.telemetry()?.map(p => p[0]) ?? []);
   private hasRssi = computed(() => this.telemetry()?.some(p => p[1] !== null) ?? false);
   private hasBaro = computed(() => this.telemetry()?.some(p => p[2] !== null) ?? false);
+  private hasLq = computed(() => this.telemetry()?.some(p => p[3] != null) ?? false);
+  private hasDbm = computed(() => this.telemetry()?.some(p => p[4] != null) ?? false);
+  /** Lowest link quality (%), when the log has it; wrapped so a 0 still shows. */
+  minLq = computed(() => {
+    const lq = (this.telemetry() ?? []).map(p => p[3]).filter((v): v is number => v != null);
+    return lq.length ? { value: Math.min(...lq) } : null;
+  });
 
   /** Track point nearest the cursor, for the map marker. */
   mapIndex = computed(() => (this.trackTimes().length ? nearest(this.trackTimes(), this.cursorTime()) : null));
@@ -251,6 +265,12 @@ export class FlightViewComponent {
     else if (baro) out.push({ key: 'height', title: 'Height above takeoff (barometer)', unit: 'm', times: baro.times, values: baro.values });
     if (this.hasRssi()) {
       out.push({ key: 'rssi', title: 'RSSI', unit: '%', times: this.telemetryTimes(), values: tl.map(p => p[1] ?? 0) });
+    }
+    if (this.hasLq()) {
+      out.push({ key: 'lq', title: 'Link quality', unit: '%', times: this.telemetryTimes(), values: tl.map(p => p[3] ?? 0) });
+    }
+    if (this.hasDbm()) {
+      out.push({ key: 'dbm', title: 'RSSI', unit: 'dBm', times: this.telemetryTimes(), values: tl.map(p => p[4] ?? -130), fromZero: false });
     }
     const bp = this.battery();
     if (bp?.length) {

@@ -83,6 +83,8 @@ export const glyph = (code: number) => String.fromCharCode(0xe000 + code);
 export const SYM = {
   volt: '\x06', mah: '\x07', m: '\x0C', home: '\x11', thr: '\x04', alt: '\x7F',
   amp: '\x9A', fly: '\x9C', kph: '\x9E', mph: '\x9D', watt: 'W', rssi: '\x01',
+  /** SYM_LINK_QUALITY, before the LQ number. */
+  lq: '\x7B',
   /** SYM_SPEED is 0x70, the same code as "p", so it's marked as a raw glyph or text drawing would capitalise it. */
   speed: glyph(0x70),
   km: '\x7D', mi: '\x7E',
