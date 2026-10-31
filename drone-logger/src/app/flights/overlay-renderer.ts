@@ -243,8 +243,13 @@ export const STATS_GAP_S = 0.1;
 const satText = (n: number) => (glyphs ? `${SYM.sat}${n}` : `${n} SAT`);
 /** RSSI: after Betaflight's antenna icon with an OSD font, or "53% RSSI" in the built-in font, like "24 SAT". */
 const rssiText = (n: number) => (glyphs ? `${SYM.rssi}${n}` : `${n}% RSSI`);
-/** Link quality: after Betaflight's LQ icon with an OSD font, or "100% LQ" in the built-in font. */
-const lqText = (n: number) => (glyphs ? `${SYM.lq}${n}` : `${n}% LQ`);
+/**
+ * Link quality, with the RF mode in front when the log has it, as Betaflight's CRSF element prints it ("7:95"): after
+ * the LQ icon with an OSD font, or "7:95 LQ" ("100% LQ" without the mode) in the built-in font.
+ */
+const lqText = (n: number, mode?: number | null) =>
+  glyphs ? `${SYM.lq}${lqValue(n, mode)}` : mode == null ? `${n}% LQ` : `${lqValue(n, mode)} LQ`;
+const lqValue = (n: number, mode?: number | null) => (mode == null ? String(n) : `${mode % 10}:${n}`);
 /** Signal strength in dBm: "-72DBM" in an OSD font (it has no dBm symbol), "-72 dBm" in the built-in font. */
 const dbmText = (n: number) => (glyphs ? `${n}DBM` : `${n} dBm`);
 /** Betaflight's default link quality alarm (osd_link_quality_alarm), %: below it the number turns amber. */
@@ -266,6 +271,8 @@ export class OverlayRenderer {
   /** Link quality arrives with the CRSF link stats debug mode. */
   private hasLq: boolean;
   private hasDbm: boolean;
+  /** Whether link quality comes with the RF mode (stored flights from data version 7). */
+  private hasRfMode: boolean;
   private hasBaro: boolean;
   /** The battery panel is shorter without a current sensor; fixed per flight so the box doesn't jump. */
   private hasCurrent: boolean;
@@ -295,6 +302,7 @@ export class OverlayRenderer {
     this.hasRssi = data.telemetry?.some(p => p[1] !== null) ?? false;
     this.hasLq = data.telemetry?.some(p => p[3] != null) ?? false;
     this.hasDbm = data.telemetry?.some(p => p[4] != null) ?? false;
+    this.hasRfMode = data.telemetry?.some(p => p[5] != null) ?? false;
     this.hasBaro = data.telemetry?.some(p => p[2] !== null) ?? false;
     this.hasCurrent = data.battery?.points[0]?.[2] != null;
     this.hasSats = data.track?.points[0]?.[5] !== undefined;
@@ -745,7 +753,7 @@ export class OverlayRenderer {
         if (gps && this.hasSats) top.push({ key: 'rssi.sats', parts: [{ s: satText(88), size: SMALL, weight: 700 }] });
         if (this.hasRssi) top.push({ key: 'rssi.value', parts: [{ s: rssiText(99), size: SMALL, weight: 700 }] });
         if (this.hasDbm) top.push({ key: 'rssi.dbm', parts: [{ s: dbmText(-100), size: SMALL, weight: 700 }] });
-        if (this.hasLq) top.push({ key: 'rssi.lq', parts: [{ s: lqText(100), size: SMALL, weight: 700 }] });
+        if (this.hasLq) top.push({ key: 'rssi.lq', parts: [{ s: lqText(100, this.hasRfMode ? 9 : null), size: SMALL, weight: 700 }] });
         if (gps) bottom.push({ key: 'rssi.home', parts: [{ s: `${U.home}888${U.m}`, size: SMALL, weight: 700 }] },
                              { key: 'rssi.alt', parts: [{ s: `${U.alt}88${U.m}`, size: SMALL, weight: 700 }] });
         const rows = [top.filter(shown), bottom.filter(shown)].filter(r => r.length);
@@ -770,15 +778,19 @@ export class OverlayRenderer {
         return fit(400, this.hasCurrent ? TWO_ROW_H : ONE_ROW_H, 26, k, rows);
       }
       case 'link': {
-        // One row, both at the battery panel's headline size: the battery icon and per-cell voltage on the left, link
-        // quality on the right.
-        const items: Row['items'] = [];
+        // Like Betaflight's OSD: the battery icon and per-cell voltage, and under it link quality, its icon in the
+        // battery icon's column. Both at the battery panel's headline size.
+        const rows: Row[] = [];
         if (this.batteryTimes.length) {
-          const icon: Part = glyphs ? { s: SYM.batt[0], size: BIG, weight: 700 } : { s: '', size: BIG, weight: 700, w: 26 };
-          items.push({ key: 'link.cell', parts: [icon, { s: '4.20', size: BIG, weight: 800 }, { s: glyphs ? U.volt : 'V', size: unitSize(), weight: 600 }] });
+          const icon: Part = glyphs ? { s: SYM.batt[0], size: BIG, weight: 700 } : { s: '', size: BIG, weight: 700, w: 32 };
+          rows.push({ baseline: 58, items: [{ key: 'link.cell',
+            parts: [icon, { s: '4.20', size: BIG, weight: 800 }, { s: glyphs ? U.volt : 'V', size: unitSize(), weight: 600 }] }] });
         }
-        if (this.hasLq) items.push({ key: 'link.lq', parts: [{ s: lqText(100), size: BIG, weight: 700 }] });
-        return fit(280, 82, 26, k, [{ baseline: 58, items }], true);
+        const mode = this.hasRfMode ? 9 : null;
+        rows.push({ baseline: rows.length ? 106 : 58, items: [{ key: 'link.lq', parts: glyphs
+          ? [{ s: lqText(100, mode), size: BIG, weight: 700 }]
+          : [{ s: '', size: BIG, weight: 700, w: 32 }, { s: lqValue(100, mode), size: BIG, weight: 800 }] }] });
+        return fit(200, rows.length > 1 ? 130 : 82, 26, k, rows, true);
       }
       case 'battery': {
         const icon: Part = glyphs ? { s: SYM.batt[0], size: BIG, weight: 700 } : { s: '', size: BIG, weight: 700, w: 26 };
@@ -821,7 +833,7 @@ export class OverlayRenderer {
     if (this.hasDbm) top.push({ key: 'rssi.dbm', s: tl?.[4] == null ? null : dbmText(Math.round(tl[4])) });
     if (this.hasLq) {
       const value = tl?.[3] == null ? null : Math.round(tl[3]);
-      top.push({ key: 'rssi.lq', s: value === null ? null : lqText(value), warn: value !== null && value < LQ_ALARM });
+      top.push({ key: 'rssi.lq', s: value === null ? null : lqText(value, tl?.[5]), warn: value !== null && value < LQ_ALARM });
     }
     if (i >= 0) {
       const alt = (o.altSource === 'baro' && this.hasBaro ? tl?.[2] : null) ?? tp![i][3];
@@ -915,17 +927,17 @@ export class OverlayRenderer {
   }
 
   /**
-   * The per-cell voltage (amber below 3.5 V) on the left, drawn like the battery panel's headline, and link quality
-   * (amber below Betaflight's 80% alarm) on the right, at the same size.
+   * The per-cell voltage (amber below 3.5 V), drawn like the battery panel's headline, and under it link quality (amber
+   * below Betaflight's 80% alarm) as Betaflight prints it, RF mode first ("7:95"), its icon under the battery icon.
    */
   private drawLink(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, u: number, o: OverlayOptions) {
     const g = this.geometry('link', o);
-    const w = g.w * u;
-    panel(ctx, x, y, w, g.h * u, 22 * u, o.panelOpacity);
-    const line = y + g.baselines[0] * u;
-    const left = x + 26 * u, right = x + w - 26 * u;
+    panel(ctx, x, y, g.w * u, g.h * u, 22 * u, o.panelOpacity);
+    const left = x + 26 * u;
+    let row = 0;
     const bat = this.data.battery;
-    if (bat?.points.length) {
+    if (this.batteryTimes.length && bat) {
+      const line = y + g.baselines[row++] * u;
       const cell = bat.points[nearest(this.batteryTimes, t)][1] / bat.cells;
       const warn = cell < 3.5 ? '#ffb340' : undefined;
       const kc = g.k('link.cell');
@@ -944,8 +956,15 @@ export class OverlayRenderer {
     }
     const tl = this.data.telemetry?.length ? this.data.telemetry[nearest(this.telemetryTimes, t)] : null;
     if (tl?.[3] != null) {
+      const line = y + g.baselines[row] * u, kq = g.k('link.lq');
       const lq = Math.round(tl[3]);
-      text(ctx, lqText(lq), right, line, BIG * g.k('link.lq') * u, 'right', 700, 1, lq < LQ_ALARM ? '#ffb340' : undefined);
+      const warn = lq < LQ_ALARM ? '#ffb340' : undefined;
+      if (glyphs) text(ctx, lqText(lq, tl[5]), left, line, BIG * kq * u, 'left', 700, 1, warn);
+      else {
+        // The built-in font has no LQ icon: its label sits in the icon column instead.
+        text(ctx, 'LQ', left, line, unitSize() * kq * u, 'left', 700, 0.85, warn);
+        text(ctx, lqValue(lq, tl[5]), left + 32 * kq * u, line, BIG * kq * u, 'left', 800, 1, warn);
+      }
     }
   }
 
