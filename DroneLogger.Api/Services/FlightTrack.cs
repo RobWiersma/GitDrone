@@ -179,7 +179,7 @@ public static class FlightTrack
     /// Betaflight logs each antenna's uplink RSSI in debug[0] and debug[1] (dBm, without the minus; 0 for a missing
     /// antenna), link quality (0..100 %) in debug[2] and the RF mode in debug[3].
     /// JSON: {"points":[[t,rssi % | null,baro height above takeoff (m) | null,LQ % | null,RSSI dBm (the stronger
-    /// antenna) | null],...]}. Null when the log has none of these.
+    /// antenna) | null,RF mode | null],...]}. Null when the log has none of these.
     /// </summary>
     public static (TelemetrySummary Summary, string Json)? BuildTelemetry(BlackboxLog log)
     {
@@ -190,6 +190,7 @@ public static class FlightTrack
                         && log.Headers.TryGetValue("Firmware type", out var fw) && fw.Contains("Betaflight", StringComparison.OrdinalIgnoreCase);
         var li = linkStats ? fields.IndexOf("debug[2]") : -1;
         int a1 = linkStats ? fields.IndexOf("debug[0]") : -1, a2 = linkStats ? fields.IndexOf("debug[1]") : -1;
+        var mi = linkStats ? fields.IndexOf("debug[3]") : -1;
         var samples = log.Samples;
         if ((ri < 0 && bi < 0 && li < 0) || samples.Count < 10) return null;
         double Lq(int k) => Math.Clamp(samples[k].Values[li], 0, 100);
@@ -238,7 +239,9 @@ public static class FlightTrack
               .Append(ri >= 0 ? F(Rssi(k), 0) : "null").Append(',')
               .Append(bi >= 0 ? F(Baro(k), 1) : "null").Append(',')
               .Append(li >= 0 ? F(Lq(k), 0) : "null").Append(',')
-              .Append(Dbm(k) is { } dbm ? F(dbm, 0) : "null").Append(']');
+              .Append(Dbm(k) is { } dbm ? F(dbm, 0) : "null").Append(',')
+              // The RF mode, which Betaflight's OSD shows before the LQ ("7:100").
+              .Append(mi >= 0 ? F(samples[k].Values[mi], 0) : "null").Append(']');
         }
         sb.Append("]}");
         return (new TelemetrySummary(minRssi, maxBaro), sb.ToString());

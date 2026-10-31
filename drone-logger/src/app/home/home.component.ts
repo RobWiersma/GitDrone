@@ -76,8 +76,8 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
           <li class="panel">
             <h3><a routerLink="/osd">Your OSD, your way</a></h3>
             <p>
-              Speed, battery, sticks, a mini map, RSSI and link quality, and the stats screen, in your goggles' <code>font_bf.bin</code>. Drag, resize and
-              recolour everything, or export a transparent <strong>.mov</strong> to lay over your footage in Premiere or After Effects.
+              Speed, battery, sticks, a mini map, RSSI and link quality, and the stats screen, in your goggles' <code>font_bf.bin</code>. Or load your Betaflight backup to redraw your own OSD layout.
+              Drag, resize and recolour everything, or export a transparent <strong>.mov</strong> to lay over your footage in Premiere or After Effects.
             </p>
           </li>
           <li class="panel">

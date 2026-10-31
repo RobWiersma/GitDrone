@@ -2,7 +2,7 @@ import { Component, input } from '@angular/core';
 
 export type IconName =
   | 'play' | 'pause' | 'volume' | 'mute' | 'prev' | 'next' | 'close' | 'reset' | 'sliders' | 'folder' | 'trash'
-  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait' | 'title' | 'craft' | 'music' | 'fade-in' | 'lock' | 'unlock' | 'link';
+  | 'mark-in' | 'mark-out' | 'gauge' | 'battery' | 'sticks' | 'map' | 'signal' | 'stats' | 'layers' | 'film' | 'fade' | 'checker' | 'sky' | 'pip' | 'font' | 'landscape' | 'portrait' | 'title' | 'craft' | 'music' | 'fade-in' | 'lock' | 'unlock' | 'link' | 'osd';
 
 /**
  * A small outline icon in the app's style (24x24, current text colour). Decorative: the button around it carries the
@@ -42,6 +42,7 @@ export type IconName =
         @case ('checker') { <rect x="4" y="4" width="16" height="16" rx="1" /><path fill="currentColor" stroke="none" d="M4 4h8v8H4zM12 12h8v8h-8z" /> }
         @case ('sky') { <path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9.5a4.3 4.3 0 0 1-1 8.5z" /> }
         @case ('pip') { <rect x="3" y="5" width="18" height="14" rx="2" /><rect fill="currentColor" stroke="none" x="12" y="11" width="7" height="6" rx="1" /> }
+        @case ('osd') { <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M6 9h3M15 9h3M6 15h4M14 15h4" /> }
         @case ('font') { <path d="M5 20l7-16 7 16M8.5 13h7" /> }
         @case ('landscape') { <rect x="2" y="6" width="20" height="12" rx="2" /> }
         @case ('portrait') { <rect x="7" y="2" width="10" height="20" rx="2" /> }

@@ -106,7 +106,8 @@ const DESCRIPTION = 'DJI O4 footage comes off the air unit without your Betaflig
         <p>
           Load your goggles' Betaflight font (<code>font_btfl.png</code> or <code>font_bf.bin</code>) to draw the OSD the way your goggles do.
           No font file? WTFOS's <a href="https://github.com/fpv-wtf/msp-osd/tree/v0.11.1/fonts" target="_blank" rel="noopener">.bin fonts are on GitHub</a> (<code>font_bf_hd.bin</code>),
-          and Walksnail fonts work too. Click anything in the preview to
+          and Walksnail fonts work too. Load your Betaflight CLI backup (<code>diff all</code>) as well and it redraws the exact OSD
+          layout you set up in the Configurator. Click anything in the preview to
           move it, resize it or change its colours, and turn parts on or off. O4 footage is often flat, so the footage has
           Lumetri-style colour controls (exposure, contrast, saturation and more) too.
         </p>

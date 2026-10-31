@@ -290,6 +290,17 @@ It can draw the HUD with your goggles' Betaflight OSD font, including Betaflight
 [WTFOS's .bin fonts](https://github.com/fpv-wtf/msp-osd/tree/v0.11.1/fonts) (msp-osd 0.11.1, the last release with them). The title and craft name use a display font (Impact) by default; each has a **Font** setting to
 draw it in the OSD font instead, tinted in its colours.
 
+**Your own Betaflight OSD.** Load your Betaflight CLI backup (`diff all`, or the Configurator's CLI **Save to File**)
+under Sources and the overlay redraws the OSD you set up, element for element, at the same positions on Betaflight's
+grid (53 × 20 on HD, 30 × 16 / 30 × 13 on analog) and in Betaflight's own formats: battery and cell voltage with the
+battery icon, current, mAh, power, both timers, throttle, link quality (`rfmode:LQ` on CRSF/ELRS), RSSI and dBm, GPS
+speed, satellites, altitude, distance and arrow home, flight distance, G-force, craft and pilot name, crosshairs, the
+stick overlays, and the warnings a log can tell (LOW BATTERY, LAND NOW, LINK QUALITY, RSSI LOW, OVER CAP, blinking).
+It follows the backup's units, timer settings, cell voltages and alarms, and its active OSD profile. It takes the place
+of the speed, battery, RSSI and LQ panels (turn it off under **Show** to get them back); the sticks, mini map, title and
+craft name still work alongside it. Elements the log has no data for (GPS when GPS wasn't logged, ESC temperature, flight
+mode) are left out, and the page lists them. The backup stays in your browser and is never uploaded.
+
 **The editor.** It's laid out like Premiere: a **Components** panel and a **Track** panel on the left of the preview, a
 **timeline** under it, and **Options** along the bottom. Click an OSD element in the preview (or the title or craft
 name) and Components shows everything about it, grouped: text and colours, position and size (50–300%), the size of

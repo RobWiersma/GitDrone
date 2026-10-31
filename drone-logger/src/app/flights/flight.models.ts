@@ -37,10 +37,10 @@ export interface Flight {
   maxBaroHeightM: number | null;
 }
 
-/** [seconds since log start, RSSI % or null, barometer height above takeoff (m) or null], 10 Hz. */
-/** [t, RSSI %, barometer height (m), link quality %, RSSI dBm]; LQ and dBm only when the log has them (CRSF link stats
- *  debug mode), and missing on flights stored before they were read. */
-export type TelemetryPoint = [number, number | null, number | null, (number | null)?, (number | null)?];
+/** [seconds since log start, RSSI %, barometer height above takeoff (m), link quality %, RSSI dBm, RF mode], 10 Hz, null
+ *  where the log has none. LQ, dBm and RF mode only come with the CRSF link stats debug mode, and are missing on
+ *  flights stored before they were read. */
+export type TelemetryPoint = [number, number | null, number | null, (number | null)?, (number | null)?, (number | null)?];
 
 export interface FlightTelemetry {
   points: TelemetryPoint[];

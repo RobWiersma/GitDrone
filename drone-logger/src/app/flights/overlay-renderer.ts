@@ -2,6 +2,7 @@ import { BatteryPoint, SpeedUnit, StickPoint, TelemetryPoint, TrackPoint, speedF
 import { MODES, StickMode, sampleSticks, stickAxes } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
+import { BfOsdElement, BfOsdId, BfOsdLayout } from './bf-osd';
 
 export interface OverlayData {
   track: { home: [number, number] | null; points: TrackPoint[] } | null;
@@ -132,6 +133,13 @@ export interface OverlayOptions {
    * or without one over the last few seconds before `statsAfter`.
    */
   showCredit: boolean;
+  /**
+   * The pilot's own Betaflight OSD, from their CLI backup: drawn on Betaflight's character grid in place of the speed,
+   * battery, RSSI and LQ panels. Null (or missing) draws the panels.
+   */
+  bfOsd?: BfOsdLayout | null;
+  /** Whether the loaded Betaflight OSD is drawn (off shows the panels again). */
+  showBfOsd?: boolean;
   layout: OverlayLayout;
   /** Text size multipliers for items inside panels; missing means 100%. */
   itemScale: Partial<Record<ItemKey, number>>;
@@ -203,6 +211,31 @@ function displayWidth(s: string, size: number) {
 /** Width of the drawn speed gauge (1080p px at 100%), standing in for Betaflight's speed glyph in the built-in font. */
 const SPEED_ICON_W = 40;
 
+/** The Betaflight OSD to draw: loaded and switched on. */
+export const bfLayout = (o: OverlayOptions) => (o.showBfOsd !== false ? o.bfOsd ?? null : null);
+
+/** Where the footage ends in a vertical frame (the stick cam below it), as a fraction of the height. */
+const FOOTAGE_SPLIT = 0.537;
+
+/** Characters for a Betaflight OSD line: strings as their (capital) letters, numbers as font slots. */
+const bf = (...parts: (string | number)[]) =>
+  parts.flatMap(p => (typeof p === 'number' ? [p] : [...p.toUpperCase()].map(c => c.charCodeAt(0))));
+/** tfp_sprintf's %Nd: right-aligned in N characters. */
+const pad = (n: number, width: number) => String(n).padStart(width, ' ');
+const pad0 = (n: number, width: number) => String(n).padStart(width, '0');
+/** osdPrintFloat without rounding: the decimals cut off, not rounded. */
+const fixedTrunc = (v: number, places: number) => (Math.trunc(v * 10 ** places) / 10 ** places).toFixed(places);
+
+/** Betaflight's stick overlay characters, drawn as pixels without an OSD font. */
+const BF_STICK_CODES = new Set([0x08, 0x09, 0x0a, 0x0b, 0x16, 0x17]);
+/** Betaflight symbols as short text for the built-in font (osd_symbols.h). */
+const BF_FALLBACK: Record<number, string> = {
+  0x01: 'RS', 0x04: 'TH', 0x05: '⌂', 0x06: 'V', 0x07: 'MAH', 0x0c: 'M', 0x0f: 'FT', 0x11: '⌂', 0x1e: 'SA', 0x1f: 'T',
+  0x70: '»', 0x71: 'Σ', 0x72: '-', 0x73: '+', 0x74: '-', 0x7b: 'LQ', 0x7d: 'KM', 0x7e: 'MI', 0x7f: '▲', 0x9a: 'A',
+  0x9b: 'ON', 0x9c: '⏱', 0x9d: 'MPH', 0x9e: 'KMH',
+  ...Object.fromEntries(['↓', '↘', '→', '↗', '↑', '↖', '←', '↙'].flatMap((a, k) => [[0x60 + 2 * k, a], [0x61 + 2 * k, a]])),
+};
+
 /** Blank pause between the end of the log and the stats screen, in seconds. */
 export const STATS_GAP_S = 0.1;
 
@@ -247,6 +280,13 @@ export class OverlayRenderer {
   private mapBounds?: { minX: number; maxX: number; minY: number; maxY: number };
   private mapXY: [number, number][] = [];
   private homeXY: [number, number] | null = null;
+  /** Metres flown up to each track point, for the OSD's flight distance. */
+  private flown: number[] = [];
+  /**
+   * Direction of travel at each track point (degrees from north), standing in for the craft's yaw in the home arrow:
+   * without a compass Betaflight's own heading comes from the GPS course too.
+   */
+  private course: (number | null)[] = [];
 
   constructor(private data: OverlayData) {
     this.trackTimes = data.track?.points.map(p => p[0]) ?? [];
@@ -283,6 +323,17 @@ export class OverlayRenderer {
         minY: Math.min(...all.map(p => p[1])), maxY: Math.max(...all.map(p => p[1])),
       };
       this.homeXY = home ? toXY(home[0], home[1]) : null;
+      let flown = 0, heading: number | null = null;
+      this.mapXY.forEach((p, k) => {
+        if (k > 0) {
+          const dx = p[0] - this.mapXY[k - 1][0], dy = p[1] - this.mapXY[k - 1][1];
+          flown += Math.hypot(dx, dy);
+          // Only while actually moving, so GPS wander on a hover doesn't spin the arrow.
+          if (tp[k][4] > 1.5 && Math.hypot(dx, dy) > 0.3) heading = (Math.atan2(dx, dy) * 180) / Math.PI;
+        }
+        this.flown.push(flown);
+        this.course.push(heading);
+      });
     }
   }
 
@@ -312,6 +363,9 @@ export class OverlayRenderer {
         case 'craft': drawCraft(ctx, p.x, p.y, s, o); break;
       }
     }
+    // The pilot's own OSD over everything else, as in the goggles.
+    const osd = bfLayout(o);
+    if (osd) this.drawBfOsd(ctx, t, W, H, osd);
     // Without a stats screen, the credit comes up over the last few seconds instead: top centre in 16:9, between the
     // title and the mini map, and just above the split in vertical (clear of the Shorts buttons and caption).
     if (o.showCredit && !o.showStats && t >= o.statsAfter - CREDIT_SECONDS && t <= o.statsAfter)
@@ -351,7 +405,8 @@ export class OverlayRenderer {
     const mapBox = out.find(e => e.key === 'map');
     const rssiEmpty = rssi.baselines.length === 0; // every reading switched off
     const rw = rssi.w * u;
-    add('rssi', o.showRssi && !rssiEmpty && (this.hasRssi || this.hasLq || this.trackTimes.length > 0), rssi.w, rssi.h,
+    const bfOn = !!bfLayout(o);
+    add('rssi', o.showRssi && !bfOn && !rssiEmpty && (this.hasRssi || this.hasLq || this.trackTimes.length > 0), rssi.w, rssi.h,
         mapBox ? Math.max(0, mapBox.x + mapBox.w - rw) : W - m - rw,
         mapBox ? Math.min(H - rssi.h * u, mapBox.y + mapBox.h + 12 * u) : top);
 
@@ -369,11 +424,11 @@ export class OverlayRenderer {
       add('craft', craftW > 0, craftW, CRAFT_H, m, m + (titleW > 0 ? (TITLE_H + 8) * u : 0));
     }
 
-    const showSpeed = o.showSpeed && this.trackTimes.length > 0;
-    const showBattery = o.showBattery && this.batteryTimes.length > 0;
+    const showSpeed = o.showSpeed && !bfOn && this.trackTimes.length > 0;
+    const showBattery = o.showBattery && !bfOn && this.batteryTimes.length > 0;
     const showSticks = o.showSticks && !!this.data.sticks?.length;
     // The link panel: centred just above where the sticks sit by default.
-    const showLink = o.showLink && this.hasLq;
+    const showLink = o.showLink && !bfOn && this.hasLq;
     const link = this.geometry('link', o);
 
     if (!vertical) {
@@ -405,6 +460,193 @@ export class OverlayRenderer {
   }
 
   // ---------- elements ----------
+
+  /**
+   * The pilot's Betaflight OSD: every element from their backup at its own character cell, in Betaflight's text and
+   * symbols, from the OSD font (or the built-in one). The grid fills the footage, fitted whole: the 16:9 frame, or
+   * the top part of a vertical one.
+   */
+  private drawBfOsd(ctx: CanvasRenderingContext2D, t: number, W: number, H: number, osd: BfOsdLayout) {
+    const boxW = W, boxH = H > W ? FOOTAGE_SPLIT * H : H;
+    const aspect = glyphs ? glyphs.glyphW / glyphs.glyphH : 2 / 3;
+    const ch = Math.min(boxH / osd.rows, boxW / (osd.cols * aspect)), cw = ch * aspect;
+    const ox = (boxW - osd.cols * cw) / 2, oy = (boxH - osd.rows * ch) / 2;
+    // Characters by cell, so later elements write over earlier ones like on the real OSD.
+    const grid = new Map<number, number>();
+    const put = (x: number, y: number, codes: number[]) => codes.forEach((c, k) => {
+      if (c !== 32 && x + k < osd.cols && y < osd.rows) grid.set(y * 64 + x + k, c);
+    });
+    for (const e of osd.elements) {
+      if (e.id === 'stick_overlay_left' || e.id === 'stick_overlay_right') this.bfSticks(e, t, osd, put);
+      else { const codes = this.bfElement(e, t, osd); if (codes) put(e.x, e.y, codes); }
+    }
+
+    const cells: [number, number, number][] = [...grid].map(([key, code]) => [code, ox + (key % 64) * cw, oy + Math.floor(key / 64) * ch]);
+    if (glyphs) {
+      const f = glyphs;
+      ctx.save();
+      ctx.imageSmoothingQuality = 'high';
+      for (const [code, x, y] of cells) ctx.drawImage(f.atlas, (code % 16) * f.glyphW, Math.floor(code / 16) * f.glyphH, f.glyphW, f.glyphH, x, y, cw, ch);
+      ctx.restore();
+      return;
+    }
+    // The built-in font: letters and numbers as text, the stick overlay in pixels, battery bars as the drawn icon, and
+    // other symbols as short words squeezed into their cell.
+    retroPixels(ctx, cells.filter(([c]) => BF_STICK_CODES.has(c)), cw, ch);
+    for (const [code, x, y] of cells) {
+      if (BF_STICK_CODES.has(code)) continue;
+      if (code >= 0x90 && code <= 0x97) {
+        const cell = code === 0x97 ? 3.3 : 3.3 + ((0x96 - code) / 6) * 0.9;
+        drawBatteryIcon(ctx, x + cw * 0.25, y + ch * 0.18, cw * 0.5, ch * 0.66, cell, code === 0x97 ? '#ffb340' : undefined);
+        continue;
+      }
+      const s = BF_FALLBACK[code] ?? (code >= 0x20 && code < 0x60 ? String.fromCharCode(code) : '');
+      if (!s) continue;
+      let size = ch * 0.72;
+      const w = measure(ctx, s, size, 700);
+      if (w > cw * 1.05) size *= (cw * 1.05) / w;
+      text(ctx, s, x + cw / 2, y + ch * 0.5 + size * 0.36, size, 'center', 700);
+    }
+  }
+
+  /**
+   * Elements of a Betaflight OSD this log has nothing for (no GPS logged, no current sensor...), checked across the
+   * flight. Warnings only show now and then, so they never count as missing.
+   */
+  bfMissing(osd: BfOsdLayout, seconds: number): BfOsdId[] {
+    const times = Array.from({ length: 12 }, (_, k) => (seconds * (k + 0.5)) / 12);
+    return osd.elements.filter(e => {
+      if (e.id === 'warnings') return false;
+      if (e.id === 'stick_overlay_left' || e.id === 'stick_overlay_right') return !this.data.sticks?.length;
+      return times.every(t => this.bfElement(e, t, osd) === null);
+    }).map(e => e.id);
+  }
+
+  /** One element's characters at time t, as Betaflight's osd_elements.c prints them; null when the log can't say. */
+  private bfElement(e: BfOsdElement, t: number, osd: BfOsdLayout): number[] | null {
+    const imperial = osd.units === 'IMPERIAL';
+    const bat = this.data.battery;
+    const b = bat?.points.length ? bat.points[nearest(this.batteryTimes, t)] : null;
+    const cell = b ? b[1] / bat!.cells : null;
+    const tl = this.data.telemetry?.length ? this.data.telemetry[nearest(this.telemetryTimes, t)] : null;
+    const tp = this.data.track?.points;
+    const ti = tp?.length ? nearest(this.trackTimes, t) : -1;
+    const p = ti >= 0 && t >= this.trackTimes[0] - 1 ? tp![ti] : null;
+    const battSym = (c: number) => (c < osd.cellMin ? 0x97 : 0x96 - Math.max(0, Math.min(6, Math.trunc(((c - osd.cellMin) * 8) / (osd.cellMax - osd.cellMin)))));
+    const metres = (m: number) => (imperial ? m * 3.28084 : m);
+    // osdFormatDistanceString: whole metres (feet), then km (miles) with 2 decimals, 1 from 10 up.
+    const distance = (lead: number, m: number) => {
+      const v = metres(m), step = imperial ? 5280 : 1000;
+      if (v < step) return bf(lead, String(Math.trunc(v)), imperial ? 0x0f : 0x0c);
+      const big = v / step;
+      return bf(lead, fixedTrunc(big, big >= 10 ? 1 : 2), imperial ? 0x7e : 0x7d);
+    };
+    switch (e.id) {
+      case 'vbat':
+        if (!b) return null;
+        return bf(battSym(cell!), b[1].toFixed(b[1] >= 10 ? 1 : 2), 0x06);
+      case 'avg_cell_voltage':
+        return cell === null ? null : bf(battSym(cell), fixedTrunc(cell, 2), 0x06);
+      case 'rssi':
+        return tl?.[1] == null ? null : bf(0x01, pad(Math.min(99, Math.floor(tl[1])), 2));
+      case 'link_quality':
+        // Logs without LQ (no link stats debug mode) show RSSI in its place, unless the layout has RSSI already. It's
+        // labelled, so it isn't mistaken for LQ and runs about as wide as the cell voltage usually under it.
+        if (tl?.[3] == null) return this.bfRssiForLq(osd) && tl?.[1] != null ? bf('RSSI ' + Math.min(99, Math.floor(tl[1]))) : null;
+        return tl[5] != null ? bf(0x7b, (Math.round(tl[5]) % 10) + ':' + pad(Math.round(tl[3]), 2)) : bf(0x7b, pad(Math.round(tl[3]), 2));
+      case 'rssi_dbm':
+        return tl?.[4] == null ? null : bf(0x01, pad(Math.round(tl[4]), 3));
+      case 'tim_1': case 'tim_2': {
+        const timer = osd.timers[e.id === 'tim_1' ? 0 : 1];
+        const src = timer & 0x0f, prec = (timer >> 4) & 0x0f;
+        const sec = Math.max(0, t), mm = pad0(Math.floor(sec / 60), 2), ss = pad0(Math.floor(sec % 60), 2);
+        const frac = prec === 1 ? '.' + pad0(Math.floor((sec * 100) % 100), 2) : prec === 2 ? '.' + Math.floor((sec * 10) % 10) : '';
+        return bf(src === 0 ? 0x9b : 0x9c, mm + ':' + ss + frac);
+      }
+      case 'current':
+        if (b?.[2] == null) return null;
+        return bf(pad(Math.trunc(Math.abs(b[2])), 3) + '.' + pad0(Math.trunc((Math.abs(b[2]) * 100) % 100), 2), 0x9a);
+      case 'mah_drawn':
+        return b?.[2] == null ? null : bf(pad(Math.round(this.mahAt[nearest(this.batteryTimes, t)]), 4), 0x07);
+      case 'power':
+        return b?.[2] == null ? null : bf(pad(Math.trunc(Math.abs(b[2]) * b[1]), 4) + 'W');
+      case 'gps_speed': {
+        const unit = osd.units === 'METRIC' ? 0x9e : 0x9d;
+        if (!p) return this.trackTimes.length ? bf(0x70, '-', unit) : null;
+        const cms = Math.trunc(p[4] * 100);
+        return bf(0x70, pad(osd.units === 'METRIC' ? Math.trunc((cms * 36) / 1000) : Math.trunc((cms * 10000) / 5080 / 88), 3), unit);
+      }
+      case 'gps_sats':
+        if (!this.hasSats) return null;
+        return p?.[5] != null ? bf(0x1e, 0x1f, pad(p[5], 2)) : bf(0x1e, 0x1f, 'NC');
+      case 'altitude': {
+        const baro = this.hasBaro && tl?.[2] != null ? tl[2] : null;
+        const m = baro ?? p?.[3] ?? null;
+        if (m === null) return bf(0x7f, '-');
+        return bf(0x7f, metres(m).toFixed(e.type === 1 ? 0 : 1), imperial ? 0x0f : 0x0c);
+      }
+      case 'home_dist':
+        return p ? distance(0x11, this.homeDist[ti]) : this.trackTimes.length ? bf(0x11, '-') : null;
+      case 'flight_dist':
+        return p ? distance(0x71, this.flown[ti] ?? 0) : null;
+      case 'home_dir': {
+        if (!p || !this.homeXY) return this.trackTimes.length ? bf('-') : null;
+        if (Math.trunc(this.homeDist[ti]) <= 0) return [0x05];
+        const [x, y] = this.mapXY[ti];
+        const toHome = (Math.atan2(this.homeXY[0] - x, this.homeXY[1] - y) * 180) / Math.PI;
+        const rel = (((toHome - (this.course[ti] ?? toHome)) % 360) + 360) % 360;
+        const dir = Math.floor((rel * 16 + 180) / 360) % 16; // up 0, right 4, down 8, left 12
+        return [0x60 + ((16 - dir + 8) % 16)]; // the arrow glyphs start at south and turn anticlockwise
+      }
+      case 'throttle': {
+        const sticks = this.data.sticks;
+        if (!sticks?.length) return null;
+        const thr = Math.min(2000, Math.max(1000, sampleSticks(sticks, t)[4]));
+        return bf(0x04, pad(Math.trunc((thr - 1000) / 10), 3));
+      }
+      case 'crosshairs':
+        return [0x72, 0x73, 0x74];
+      case 'g_force': {
+        const g = p?.[6];
+        return g == null ? null : bf((g / 9.81).toFixed(1) + 'G');
+      }
+      case 'craft_name':
+        return bf((osd.craftName || 'CRAFT_NAME').toUpperCase().slice(0, 16));
+      case 'pilot_name':
+        return bf((osd.pilotName || 'PILOT_NAME').toUpperCase().slice(0, 16));
+      case 'warnings': {
+        // The ones a log can tell, in Betaflight's order; warnings blink at 2 Hz.
+        const mah = b?.[2] != null ? this.mahAt[nearest(this.batteryTimes, t)] : null;
+        const w = tl?.[1] != null && tl[1] < osd.rssiAlarm ? 'RSSI LOW'
+          : tl?.[3] != null && tl[3] < osd.lqAlarm ? 'LINK QUALITY'
+          : cell !== null && cell < osd.cellMin ? ' LAND NOW'
+          : cell !== null && cell < osd.cellWarn ? 'LOW BATTERY'
+          : mah !== null && osd.capAlarm > 0 && mah >= osd.capAlarm ? 'OVER CAP' : '';
+        return w && Math.floor(t * 4) % 2 === 0 ? bf(w) : null;
+      }
+      default:
+        return null;
+    }
+  }
+
+  /** Whether the LQ element shows RSSI instead: the log has RSSI but no LQ, and the layout has no RSSI element of its own. */
+  bfRssiForLq(osd: BfOsdLayout) {
+    return !this.hasLq && this.hasRssi && osd.elements.some(e => e.id === 'link_quality') && !osd.elements.some(e => e.id === 'rssi');
+  }
+
+  /** Betaflight's stick overlay: a 7 x 5 cross of line characters and a cursor at a third of a character up and down. */
+  private bfSticks(e: BfOsdElement, t: number, osd: BfOsdLayout, put: (x: number, y: number, codes: number[]) => void) {
+    const sticks = this.data.sticks;
+    if (!sticks?.length) return;
+    for (let r = 0; r < 5; r++) put(e.x + 3, e.y + r, [0x16]);
+    put(e.x, e.y + 2, [0x17, 0x17, 0x17, 0x0b, 0x17, 0x17, 0x17]);
+    const a = stickAxes(sampleSticks(sticks, t));
+    const [lx, ly, rx, ry] = MODES[osd.stickMode];
+    const [h, v] = e.id === 'stick_overlay_left' ? [lx, ly] : [rx, ry];
+    const rc = (axis: number) => Math.min(1999, Math.max(1000, 1500 + 500 * axis));
+    const cx = Math.trunc(((rc(a[h]) - 1000) * 7) / 1000), cy = 14 - Math.trunc(((rc(a[v]) - 1000) * 15) / 1000);
+    put(e.x + cx, e.y + Math.floor(cy / 3), [0x08 + (cy % 3)]);
+  }
 
   /** Whole-flight figures for the stats screen; each is null when the log doesn't have it. */
   private stats(o: OverlayOptions) {

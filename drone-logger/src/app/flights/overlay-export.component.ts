@@ -4,6 +4,7 @@ import { ELEMENT_ITEMS, ELEMENT_LABELS, ElementKey, ElementPlacement, ITEM_SCALE
   OverlayOptions, OverlayRenderer, STATS_GAP_S } from './overlay-renderer';
 import { MovWriter, canSaveToDisk, diskMovWriter, memoryMovWriter } from './mov-writer';
 import { GlyphFont, WTFOS_FONTS_URL, loadSavedFont, parseGlyphFont, saveFont } from './glyph-font';
+import { BfOsdLayout, bfOsdLabel, loadSavedBfOsd, parseBfOsd, saveBfOsd } from './bf-osd';
 import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
@@ -89,7 +90,7 @@ const FOOTAGE_DEFAULTS = { zoom: 100 };
 
 const PREFS_KEY = 'gitdrone-editor-prefs';
 /** The Show toggles and panel background, which each format keeps its own of. */
-type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showLink' | 'showStats' | 'showTitle' | 'showCraft' | 'panelOpacity' | 'showCredit'>;
+type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showLink' | 'showStats' | 'showTitle' | 'showCraft' | 'panelOpacity' | 'showCredit' | 'showBfOsd'>;
 /**
  * What each format starts with: vertical leaves out what doesn't fit a narrow frame, and has the title and craft name.
  * The lovelyosd.com credit starts on in both, the LQ and cell panel off.
@@ -97,6 +98,7 @@ type ShowState = Pick<OverlayOptions, 'showSpeed' | 'showBattery' | 'showSticks'
 const showDefaults = (vertical: boolean): ShowState => ({
   showSpeed: !vertical, showBattery: true, showSticks: true, showMap: !vertical, showRssi: !vertical, showStats: true,
   showTitle: vertical, showCraft: vertical, panelOpacity: vertical ? 0 : 0.35, showCredit: true, showLink: false,
+  showBfOsd: true,
 });
 const formatOf = (vertical: boolean) => (vertical ? 'vertical' : 'landscape');
 
@@ -278,7 +280,7 @@ function saveHiddenItems(hidden: HiddenItems) {
 
 type Backdrop = 'checker' | 'sky' | 'video';
 /** The Show toggles' switches. */
-type ShowKey = 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showLink' | 'showStats' | 'showTitle' | 'showCraft';
+type ShowKey = 'showBfOsd' | 'showSpeed' | 'showBattery' | 'showSticks' | 'showMap' | 'showRssi' | 'showLink' | 'showStats' | 'showTitle' | 'showCraft';
 const BACKDROP_KEY = 'gitdrone-overlay-backdrop';
 
 function readBackdrop(): Backdrop {
@@ -1082,6 +1084,35 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 }
               </div>
               @if (fontError()) { <p class="error">{{ fontError() }}</p> }
+
+              <div class="source-row">
+                <span title="Betaflight backup: your CLI backup (diff all), to redraw your own OSD layout from the log"><app-icon name="osd" /></span>
+                <span class="sr-only">Betaflight backup:</span>
+                @if (bfOsd(); as osd) {
+                  <span class="mono" [title]="osd.name">{{ osd.name }}</span>
+                } @else {
+                  <span class="mono" title="Load your Betaflight CLI backup to redraw your own OSD, element for element">No Betaflight backup</span>
+                }
+                <label class="btn small step" [title]="bfOsd() ? 'Change the Betaflight backup' : 'Load a Betaflight CLI backup (.txt) to redraw your OSD'">
+                  <app-icon name="folder" />
+                  <input class="sr-only" type="file" accept=".txt,text/plain" [attr.aria-label]="bfOsd() ? 'Change the Betaflight backup' : 'Load a Betaflight backup'"
+                         (change)="onBackup($event)" [disabled]="busy()" />
+                </label>
+                @if (bfOsd()) {
+                  <button class="btn small step" type="button" (click)="clearBackup()" [disabled]="busy()" aria-label="Remove the Betaflight backup"
+                          title="Remove the backup: back to the panels"><app-icon name="trash" /></button>
+                }
+              </div>
+              @if (bfOsdError()) { <p class="error">{{ bfOsdError() }}</p> }
+              @if (bfOsd(); as osd) {
+                <p class="hint">
+                  Your OSD: {{ osd.elements.length }} elements on the {{ osd.cols }}×{{ osd.rows }} {{ osd.cols > 30 ? 'HD' : 'SD' }} grid{{ osd.craftName ? ', ' + osd.craftName : '' }}.
+                  @if (rssiForLq()) { This log has no link quality, so RSSI shows in its place. }
+                  @if (missingLabels()) { Not in this log, so left out: {{ missingLabels() }}. }
+                  @if (osd.skipped.length) { Never logged, so left out: {{ skippedLabels() }}. }
+                  @if (!font()) { Load your goggles' font above for the real look. }
+                </p>
+              }
             </div>
             <!-- What's drawn: one icon toggle per part of the HUD, lit when on. Flight time is always in the battery panel. -->
             <div class="panel field" role="group" aria-labelledby="show-label">
@@ -1089,7 +1120,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               <div class="toggles">
                 @for (t of showToggles(); track t.key) {
                   <button class="btn small step" type="button" [class.btn-primary]="opts()[t.key]" [attr.aria-pressed]="opts()[t.key]"
-                          [attr.aria-label]="t.label" [title]="t.label + (t.available ? '' : ' (not in this log)')" [disabled]="busy() || !t.available"
+                          [attr.aria-label]="t.label" [title]="t.label + (t.available ? '' : t.why ?? ' (not in this log)')" [disabled]="busy() || !t.available"
                           (click)="toggleShow(t.key)"><app-icon [name]="t.icon" /></button>
                 }
                 <!-- In vertical, a video sound track (a stick cam) can show its picture too; preview and finished video only. -->
@@ -1409,6 +1440,17 @@ export class OverlayExportComponent {
 
   font = signal<GlyphFont | null>(null);
   fontError = signal('');
+  /** The OSD layout from the pilot's Betaflight backup, remembered in this browser. */
+  bfOsd = signal<BfOsdLayout | null>(loadSavedBfOsd());
+  bfOsdError = signal('');
+  skippedLabels = computed(() => this.bfOsd()?.skipped.map(bfOsdLabel).join(', ') ?? '');
+  /** The LQ element showing RSSI, for a log without link quality. */
+  rssiForLq = computed(() => { const osd = this.bfOsd(); return !!osd && this.renderer().bfRssiForLq(osd); });
+  /** Elements of the backup's OSD this log has no data for, e.g. GPS ones when GPS wasn't logged. */
+  missingLabels = computed(() => {
+    const osd = this.bfOsd();
+    return osd ? this.renderer().bfMissing(osd, this.seconds()).map(bfOsdLabel).join(', ') : '';
+  });
   private renderer = computed(() => new OverlayRenderer(this.data()));
   hasRssi = computed(() => this.data().telemetry?.some(p => p[1] !== null) ?? false);
   hasBaro = computed(() => this.data().telemetry?.some(p => p[2] !== null) ?? false);
@@ -2126,6 +2168,7 @@ export class OverlayExportComponent {
   constructor() {
     loadSavedFont().then(f => this.font.set(f));
     effect(() => { const f = this.font(); this.opts.update(o => ({ ...o, font: f })); });
+    effect(() => { const osd = this.bfOsd(); this.opts.update(o => ({ ...o, bfOsd: osd })); });
     effect(() => { const u = this.units.speed(); this.opts.update(o => ({ ...o, speedUnit: u })); });
     // The stats start where the export ends (or the flight does, in the preview past the end).
     effect(() => { const after = this.end(), flight = this.seconds(); this.opts.update(o => ({ ...o, statsAfter: after, flightSeconds: flight })); });
@@ -2170,6 +2213,32 @@ export class OverlayExportComponent {
     saveFont('', null);
   }
 
+  async onBackup(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.bfOsdError.set('');
+    if (file.size > 1_000_000) {
+      this.bfOsdError.set('That file is over 1 MB. A Betaflight backup is normally a few KB.');
+      return;
+    }
+    try {
+      const text = await file.text();
+      this.bfOsd.set(parseBfOsd(file.name, text));
+      saveBfOsd(file.name, text);
+      this.set('showBfOsd', true);
+    } catch (err) {
+      this.bfOsdError.set(err instanceof Error ? err.message : 'Could not read that backup.');
+    }
+  }
+
+  clearBackup() {
+    this.bfOsd.set(null);
+    this.bfOsdError.set('');
+    saveBfOsd('', null);
+  }
+
   protected readonly pathColors = DEFAULT_PATH_COLORS;
   protected readonly stickColors = DEFAULT_STICK_COLORS;
 
@@ -2204,13 +2273,18 @@ export class OverlayExportComponent {
   /** The Show toggles: what each switches, its icon and hover text, and whether this log has the data for it. */
   showToggles = computed(() => {
     const d = this.data();
-    const list: { key: ShowKey; icon: IconName; label: string; available: boolean }[] = [
-      { key: 'showSpeed', icon: 'gauge', label: 'Speed panel: speed, height and distance', available: !!d.track },
-      { key: 'showBattery', icon: 'battery', label: 'Battery panel, with the flight time', available: !!d.battery },
+    // With the Betaflight OSD on, its elements take the place of the panels that show the same readings.
+    const bf = !!this.bfOsd() && this.opts().showBfOsd !== false;
+    const replaced = ' (your Betaflight OSD shows this instead)';
+    const list: { key: ShowKey; icon: IconName; label: string; available: boolean; why?: string }[] = [
+      ...(this.bfOsd() ? [{ key: 'showBfOsd' as const, icon: 'osd' as const, label: 'Your Betaflight OSD, from your backup', available: true }] : []),
+      { key: 'showSpeed', icon: 'gauge', label: 'Speed panel: speed, height and distance', available: !!d.track && !bf, why: bf ? replaced : undefined },
+      { key: 'showBattery', icon: 'battery', label: 'Battery panel, with the flight time', available: !!d.battery && !bf, why: bf ? replaced : undefined },
       { key: 'showSticks', icon: 'sticks', label: 'Sticks', available: !!d.sticks },
       { key: 'showMap', icon: 'map', label: 'Mini map', available: !!d.track },
-      { key: 'showRssi', icon: 'signal', label: 'RSSI panel: satellites, RSSI (% and dBm), link quality, distance and height', available: this.hasRssi() || this.hasLq() || !!d.track },
-      { key: 'showLink', icon: 'link', label: 'LQ and cell panel: per-cell voltage and link quality, above the sticks', available: this.hasLq() },
+      { key: 'showRssi', icon: 'signal', label: 'RSSI panel: satellites, RSSI (% and dBm), link quality, distance and height',
+        available: (this.hasRssi() || this.hasLq() || !!d.track) && !bf, why: bf ? replaced : undefined },
+      { key: 'showLink', icon: 'link', label: 'LQ and cell panel: per-cell voltage and link quality, above the sticks', available: this.hasLq() && !bf, why: bf ? replaced : undefined },
       { key: 'showStats', icon: 'stats', label: 'End-of-flight stats screen', available: true },
       { key: 'showTitle', icon: 'title', label: this.hasTitle() ? 'Title' : 'Title (turn on to add one)', available: true },
       { key: 'showCraft', icon: 'craft', label: this.hasCraft() ? 'Craft name' : 'Craft name (turn on to add one)', available: true },

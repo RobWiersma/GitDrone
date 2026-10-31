@@ -34,6 +34,12 @@ function pickerTypes(accept: string): PickerType[] {
   return types;
 }
 
+/**
+ * Set once the picker turns out not to work here (some embedded browsers have it but won't open or read files from it):
+ * from then on file inputs open the ordinary dialog.
+ */
+let pickerBroken = false;
+
 /** Remembers the folder per kind of file, as the ordinary dialog does. */
 const pickerId = (accept: string) => (accept.includes('video') ? 'gitdrone-video' : accept.includes('audio') ? 'gitdrone-sound' : 'gitdrone-file');
 
@@ -43,17 +49,29 @@ const pickerId = (accept: string) => (accept.includes('video') ? 'gitdrone-video
 })
 export class KeepFileDirective {
   async pick(event: MouseEvent) {
-    if (!canKeepFiles()) return; // the ordinary dialog opens
+    if (!canKeepFiles() || pickerBroken) return; // the ordinary dialog opens
     event.preventDefault();
     const input = event.target as HTMLInputElement;
     const picker = (window as unknown as { showOpenFilePicker: OpenFilePicker }).showOpenFilePicker;
+    // The ordinary dialog instead, straight away if this click still allows it, or on the next click if not.
+    const fallBack = () => {
+      pickerBroken = true;
+      try { input.showPicker(); } catch { /* needs a fresh click, which now opens it */ }
+    };
     let handle: FileSystemFileHandle;
     try {
       [handle] = await picker({ id: pickerId(input.accept), types: pickerTypes(input.accept), excludeAcceptAllOption: false });
-    } catch {
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) fallBack();
       return; // closed without picking
     }
-    const file = await handle.getFile();
+    let file: File;
+    try {
+      file = await handle.getFile();
+    } catch {
+      fallBack();
+      return;
+    }
     const dt = new DataTransfer();
     dt.items.add(file);
     input.files = dt.files;
