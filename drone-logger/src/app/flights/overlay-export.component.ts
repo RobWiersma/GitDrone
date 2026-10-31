@@ -166,7 +166,8 @@ const gradeFilter = (brightness: number, contrast: number, saturation: number) =
 function readVertical(): boolean {
   try { return localStorage.getItem(FORMAT_KEY) === 'vertical'; } catch { return false; }
 }
-const FPS = [24, 25, 30, 50, 60];
+/** Output frame rates; 100 keeps every frame of 100 fps footage (the O4's high-speed modes), for editing or slow motion. */
+const FPS = [24, 25, 30, 50, 60, 100];
 
 const DEFAULT_PATH_COLORS = { pathRecentColor: '#9be564', pathOldColor: '#2c4a1f' };
 const DEFAULT_STICK_COLORS = { stickDotColor: '#e086b0', stickRingColor: '#ffffff', stickTrailColor: '#86a858', stickBoxColor: '#1c1c1c', stickCrossColor: '#ffffff' };
@@ -1168,7 +1169,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 }
               </div>
               <div class="toggles" role="group" aria-label="Frame rate"
-                   [title]="footageFps() ? 'Your footage is ' + fpsLabel(footageFps()!) + ' fps' + (footageFps()! >= 100 ? ', so 60, as high as YouTube goes' : '') : 'Loading your footage sets this to match it'">
+                   [title]="footageFps() ? 'Your footage is ' + fpsLabel(footageFps()!) + ' fps' + (footageFps()! >= 100 ? ', so 60, as high as YouTube goes (100 keeps every frame, for slow motion)' : '') : 'Loading your footage sets this to match it'">
                 @for (r of fpsOptions(); track r) {
                   <button class="btn small step" type="button" [class.btn-primary]="fps() === r" [attr.aria-pressed]="fps() === r"
                           [attr.aria-label]="fpsLabel(r) + ' fps'" [disabled]="busy()" (click)="fps.set(r)">{{ fpsLabel(r) }}</button>
