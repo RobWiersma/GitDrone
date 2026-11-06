@@ -54,7 +54,7 @@ in, fast and near lossless on your GPU's video encoder, at the resolution your f
 Reels and TikTok, a split screen with your FPV footage on top, the stick cam below, big sticks and the battery over it,
 and the bottom kept clear of the Shorts buttons. Add a **title** in two colours and your **craft name** in Impact with an
 outline, colour your footage like Lumetri's Basic Correction (temperature, tint, saturation, exposure, contrast,
-highlights, shadows, whites, blacks), zoom both videos, add a **music** track, set each sound's gain and fades, pick the part to render, and
+highlights, shadows, whites, blacks), zoom both videos, add a **music** track (and make the OSD and footage **react to it**, like a music visualizer), set each sound's gain and fades, pick the part to render, and
 fade out at the end, with Betaflight's post-flight stats as the last frame holds. The frame rate follows your footage
 (100 or 120 fps footage comes out at 60).
 
@@ -368,6 +368,24 @@ the finished video too, like the music.
 **Music.** Add a song under **Sources** and it plays under the whole finished video, starting where the **Render** range
 does: set **Song starts at** to skip an intro, its own **Music gain** (−30 to +12 dB) and peak, and an optional fade in
 and fade out (2 s by default; type any length). It plays with the footage in the preview, fades included.
+
+**React to the music.** Turn it on in the music's Track panel and the video moves with the song, like a visualizer.
+The song is measured once when it's added (bass, mids and treble 100 times a second, and its hits), so the preview and
+the finished video react identically, frame for frame (`flights/music-react.ts`). Each effect has its own checkbox and
+a 0–200% strength:
+
+- On the OSD: **Pulse** (the HUD punches out from the centre on each hit), **Colour split** (two coloured copies of the
+  text slide apart on each hit; pick both colours) and **Tint** (the white takes on colour with the bass, mids, treble or
+  everything, drifting round the colour wheel or in one colour).
+- On the footage: **Zoom punch**, **Vignette** (the edges darken) and **Saturation** (the colour swells). These fire
+  only on a trigger and leave the footage alone in between. **Footage on** picks the trigger: **Every hit**, **Big
+  hits** (the sharpest quarter, the default) or **Drops** (where the song jumps up after a quieter stretch, landing on the
+  beat, with a longer flash).
+
+**Hits on** picks what counts as a hit: kicks (sudden bass), hats and snares (sudden highs), or both. **Sensitivity**
+sets how readily one counts (and so how many big hits and drops there are), and **Hit length** how long each takes to
+settle. On the timeline, the music's clip shows a pink tick at every footage trigger and a yellow line for the
+vignette's darkness, so you can see where it'll land against the footage. Muting the music turns the reaction off.
 
 It works without footage too: with the Checkerboard or Sky backdrop, **Play** runs the overlay along with the sound.
 Preview only: the exported overlay has no sound; in Premiere, Synchronize → Audio lines the two up. Checkerboard and Sky backdrops are there too; none of them end up in the export.

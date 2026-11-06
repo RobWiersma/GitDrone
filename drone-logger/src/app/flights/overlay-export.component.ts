@@ -35,6 +35,11 @@ const FORMAT_KEY = 'gitdrone-overlay-format';
 
 const FADE_KEY = 'gitdrone-render-fade';
 const QUALITY_KEY = 'gitdrone-render-quality';
+/**
+ * The biggest finished video worth building in memory, bytes. A tab gets about 4 GB, and finishing the file copies it
+ * once more; a 3-minute 4K render (about 3 GB) ran out at 85%.
+ */
+const MEMORY_RENDER_LIMIT = 1.5e9;
 
 /** The finished video's quality choices, as constant-quality quantizers (lower keeps more; every 6 doubles the size). */
 const RENDER_QUALITIES = [
@@ -3157,10 +3162,13 @@ export class OverlayExportComponent {
     this.renderQuality.set(q);
     try { localStorage.setItem(QUALITY_KEY, q); } catch { /* not remembered */ }
   }
-  /** About how big this render comes out at quantizer `qp`, on busy footage. */
-  sizeAt(qp: number) {
+  /** About how big this render comes out at quantizer `qp`, on busy footage, in bytes. */
+  private bytesAt(qp: number) {
     const { w, h } = this.resolutions()[this.resIndex()];
-    const mb = (this.renderLength() * (expectedBitrate(w, h, this.fps(), qp) + AUDIO_BITRATE)) / 8e6;
+    return (this.renderLength() * (expectedBitrate(w, h, this.fps(), qp) + AUDIO_BITRATE)) / 8;
+  }
+  sizeAt(qp: number) {
+    const mb = this.bytesAt(qp) / 1e6;
     return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
   }
   finishedSize = computed(() => this.sizeAt(this.renderQp()));
@@ -3224,8 +3232,17 @@ export class OverlayExportComponent {
       try {
         target = { kind: 'disk', writable: await handle.createWritable() };
       } catch (e) {
-        // Chrome can refuse to write to the chosen place (protected or synced folders, a file open elsewhere). Render
-        // anyway and download the result, rather than stopping.
+        // Chrome can refuse to write to the chosen place (protected or synced folders, a file open elsewhere, or a
+        // browser embedded in another app). A small render can still be made in memory and downloaded; a big one would
+        // run the tab out of memory partway through and lose it all, so stop and say why instead.
+        if (this.bytesAt(this.renderQp()) > MEMORY_RENDER_LIMIT) {
+          console.warn('[render] writing to the chosen file was refused, and it is too big to make in memory', e);
+          this.renderStage.set('');
+          this.renderError.set(`This browser wouldn't let LovelyOSD write to the place you picked, and at about ${this.finishedSize()} `
+            + `the video is too big to build in memory instead (the tab would run out partway through). Try saving to another folder, `
+            + `such as Videos or Downloads, or render a shorter range, a lower resolution or the Smaller quality.`);
+          return;
+        }
         console.warn('[render] writing to the chosen file was refused; downloading instead', e);
         fallbackNote = ` Chrome wouldn't let GitDrone write to the place you picked, so it went to your Downloads folder instead.`;
       }
