@@ -31,7 +31,7 @@ const DECODE_RATE = 48000;
 const decoded = new WeakMap<Blob, Promise<AudioBuffer>>();
 
 /** The recording's sound, decoded once per file however many times it's listened to. */
-function decode(file: Blob): Promise<AudioBuffer> {
+export function decode(file: Blob): Promise<AudioBuffer> {
   let audio = decoded.get(file);
   if (!audio) {
     audio = (async () => {

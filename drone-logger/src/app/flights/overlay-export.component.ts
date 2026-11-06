@@ -8,7 +8,8 @@ import { BfOsdLayout, bfOsdLabel, loadSavedBfOsd, parseBfOsd, saveBfOsd } from '
 import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
-import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
+import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, decode, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
+import { MUSIC_REACT_DEFAULTS, MusicAnalysis, MusicFx, MusicReact, analyzeMusic, readMusicReact } from './music-react';
 import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
@@ -113,6 +114,8 @@ export interface EditorPrefs {
   musicGain: number;
   musicFadeIn: number;
   musicFadeOut: number;
+  /** The HUD reacting to the music; missing in sessions saved before it. */
+  musicReact?: MusicReact;
   statsSeconds: number;
   showPip: boolean;
   show: Partial<Record<'landscape' | 'vertical', ShowState>>;
@@ -997,6 +1000,95 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     </span>
                   }
                 </div>
+                <!-- The OSD reacting to the music: pulsing on the kicks, splitting into colour fringes, tinted by the bass. In
+                     the preview and the finished video alike. -->
+                <div class="playback-row">
+                  <button class="btn small" type="button" [class.btn-primary]="musicReact().on" [attr.aria-pressed]="musicReact().on"
+                          (click)="setMusicReact('on', !musicReact().on)" [disabled]="!musicAnalysis()"
+                          title="Make the OSD react to the music: it pulses and splits into colour fringes on the hits, and takes on colour with the music">
+                    <app-icon name="music" /> {{ musicAnalysis() ? 'React to the music' : 'Finding the beat...' }}
+                  </button>
+                  @if (musicReact().on) {
+                    <span class="offset" title="What the pulse and the split hit on: kick drums (sudden bass), hats and snares (sudden highs), or both">
+                      <label for="hit-by">Hits on</label>
+                      <select id="hit-by" [ngModel]="musicReact().hitBy" (ngModelChange)="setMusicReact('hitBy', $event)">
+                        <option value="bass">Bass (kicks)</option>
+                        <option value="highs">Highs (hats, snares)</option>
+                        <option value="both">Both</option>
+                      </select>
+                    </span>
+                    <button class="btn small" type="button" (click)="resetMusicReact()" title="Every music reaction setting back to its default">Reset reaction</button>
+                  }
+                </div>
+                @if (musicReact().on) {
+                  @for (e of musicFxStrengths; track e.key) {
+                    <div class="video-scrub">
+                      <label [for]="'react-' + e.key" class="scrub-label" [title]="e.title">{{ e.label }}</label>
+                      <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                      <input [id]="'react-' + e.key" type="range" min="0" max="2" step="0.05" [ngModel]="musicReact()[e.key]"
+                             (ngModelChange)="setMusicReact(e.key, +$event)" />
+                      <button class="btn small step" type="button" (click)="setMusicReact(e.key, 1)" [disabled]="musicReact()[e.key] === 1"
+                              [attr.aria-label]="'Reset ' + e.label" [title]="'Reset ' + e.label + ' to 100%'"><app-icon name="reset" /></button>
+                      <span class="mono">{{ musicReact()[e.key] ? (musicReact()[e.key] * 100).toFixed(0) + '%' : 'Off' }}</span>
+                    </div>
+                    @if (e.key === 'split' && musicReact().split > 0) {
+                      <div class="playback-row">
+                        <label class="color"><input type="color" [ngModel]="musicReact().splitColors[0]" (ngModelChange)="setSplitColor(0, $event)" /> Left</label>
+                        <label class="color"><input type="color" [ngModel]="musicReact().splitColors[1]" (ngModelChange)="setSplitColor(1, $event)" /> Right</label>
+                      </div>
+                    }
+                    @if (e.key === 'tint' && musicReact().tint > 0) {
+                      <div class="playback-row">
+                        <span class="offset">
+                          <label for="tint-mode">Colour</label>
+                          <select id="tint-mode" [ngModel]="musicReact().tintMode" (ngModelChange)="setMusicReact('tintMode', $event)">
+                            <option value="drift">Drifting rainbow</option>
+                            <option value="fixed">One colour</option>
+                          </select>
+                        </span>
+                        @if (musicReact().tintMode === 'fixed') {
+                          <input type="color" aria-label="Tint colour" [ngModel]="musicReact().tintColor" (ngModelChange)="setMusicReact('tintColor', $event)" />
+                        } @else {
+                          <span class="offset" title="How fast the colour goes round the wheel">
+                            <label for="tint-speed">Speed</label>
+                            <input id="tint-speed" type="number" min="0" max="180" step="2" [ngModel]="musicReact().tintSpeed"
+                                   (ngModelChange)="setMusicReact('tintSpeed', +$event)" />
+                            <span>°/s</span>
+                          </span>
+                        }
+                        <span class="offset">
+                          <label for="tint-by">Follows</label>
+                          <select id="tint-by" [ngModel]="musicReact().tintBy" (ngModelChange)="setMusicReact('tintBy', $event)">
+                            <option value="bass">Bass</option>
+                            <option value="mid">Mids (vocals, guitars)</option>
+                            <option value="treble">Treble (hats, cymbals)</option>
+                            <option value="all">Everything</option>
+                          </select>
+                        </span>
+                      </div>
+                    }
+                  }
+                  <!-- The hits: how readily one is heard, and how long it lasts (the pulse and the split ride on them). -->
+                  <div class="video-scrub">
+                    <label for="react-sensitivity" class="scrub-label" title="How readily a sudden rise counts as a hit: higher catches softer ones">Sensitivity</label>
+                    <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                    <input id="react-sensitivity" type="range" min="0.5" max="2" step="0.05" [ngModel]="musicReact().sensitivity"
+                           (ngModelChange)="setMusicReact('sensitivity', +$event)" />
+                    <button class="btn small step" type="button" (click)="setMusicReact('sensitivity', 1)" [disabled]="musicReact().sensitivity === 1"
+                            aria-label="Reset the sensitivity" title="Reset the sensitivity to 100%"><app-icon name="reset" /></button>
+                    <span class="mono">{{ (musicReact().sensitivity * 100).toFixed(0) }}%</span>
+                  </div>
+                  <div class="video-scrub">
+                    <label for="react-hit" class="scrub-label" title="How long each hit's pulse and split take to settle">Hit length</label>
+                    <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                    <input id="react-hit" type="range" min="0.05" max="0.5" step="0.01" [ngModel]="musicReact().hitLength"
+                           (ngModelChange)="setMusicReact('hitLength', +$event)" />
+                    <button class="btn small step" type="button" (click)="setMusicReact('hitLength', musicReactDefaults.hitLength)"
+                            [disabled]="musicReact().hitLength === musicReactDefaults.hitLength"
+                            aria-label="Reset the hit length" title="Reset the hit length"><app-icon name="reset" /></button>
+                    <span class="mono">{{ (musicReact().hitLength * 1000).toFixed(0) }} ms</span>
+                  </div>
+                }
               </div>
             }
                 }
@@ -1832,6 +1924,9 @@ export class OverlayExportComponent {
     try {
       const peaks = await soundPeaks(file);
       if (this.musicFile === file) this.musicPeaks.set(peaks);
+      // The beat for the music-reactive HUD: measured once, from the sound already decoded for the peaks.
+      const analysis = await analyzeMusic(await decode(file));
+      if (this.musicFile === file) this.musicAnalysis.set(analysis);
     } catch {
       this.backdropError.set(`Couldn't read the music in ${file.name}. Try an MP3, M4A, WAV or OGG.`);
     }
@@ -1847,8 +1942,53 @@ export class OverlayExportComponent {
     this.musicUrl.set(null);
     this.musicName.set('');
     this.musicPeaks.set(null);
+    this.musicAnalysis.set(null);
     this.musicPlaying.set(false);
   }
+
+  /** The song's measured beat and bands, for the music-reactive HUD; null until measured. */
+  musicAnalysis = signal<MusicAnalysis | null>(null);
+  musicReact = signal<MusicReact>(readMusicReact(readPrefs().musicReact));
+  readonly musicReactDefaults = MUSIC_REACT_DEFAULTS;
+  setMusicReact<K extends keyof MusicReact>(key: K, value: MusicReact[K]) {
+    this.musicReact.update(r => readMusicReact({ ...r, [key]: value }));
+  }
+  setSplitColor(side: 0 | 1, colour: string) {
+    const pair = [...this.musicReact().splitColors] as [string, string];
+    pair[side] = colour;
+    this.setMusicReact('splitColors', pair);
+  }
+  /** Every music reaction setting back to its default, staying switched on. */
+  resetMusicReact() {
+    this.musicReact.set({ ...MUSIC_REACT_DEFAULTS, on: true });
+  }
+  /** The strength sliders: each effect at 0 is off. */
+  readonly musicFxStrengths = [
+    { key: 'pulse', label: 'Pulse', title: 'How far the OSD punches out from the centre on each hit; 0 for none' },
+    { key: 'split', label: 'Colour split', title: 'How far the two coloured copies of the OSD slide apart on each hit; 0 for none' },
+    { key: 'tint', label: 'Tint', title: "How strongly the OSD's white takes on colour with the music; 0 for none" },
+  ] as const;
+  /**
+   * What the renderer reacts to: the song's levels at each log time, where the music plays in the finished video and as
+   * loud as its fades let it be. Null while switched off, muted, or not yet measured.
+   */
+  private musicFx = computed<MusicFx | null>(() => {
+    const analysis = this.musicAnalysis(), { on, ...fx } = this.musicReact();
+    if (!on || !analysis || this.musicMuted()) return null;
+    const offset = this.videoOffset(), start = this.renderStart(), song = this.musicStart(), len = this.renderLength();
+    const fadeIn = this.musicFadeIn(), fadeOut = this.musicFadeOut();
+    return {
+      ...fx,
+      at: t => {
+        const out = t + offset - start; // seconds into the finished video
+        if (out < 0 || out > len) return null;
+        const lv = analysis.at(out + song, fx.hitBy, fx.sensitivity, fx.hitLength), k = fadeLevel(out, len, fadeIn, fadeOut);
+        return { bass: lv.bass * k, mid: lv.mid * k, treble: lv.treble * k, hit: lv.hit * k };
+      },
+    };
+  });
+  /** The HUD's options with the music's effects. */
+  private drawOpts = computed<OverlayOptions>(() => ({ ...this.opts(), music: this.musicFx() }));
 
   setMusicStart(v: number) {
     if (!Number.isFinite(v)) return;
@@ -1898,7 +2038,7 @@ export class OverlayExportComponent {
       cam: { brightness: this.camBrightness(), contrast: this.camContrast(), saturation: this.camSaturation(), zoom: this.camZoom(),
              panX: this.camPanX(), panY: this.camPanY() },
       soundGain: this.soundGain(), soundFadeIn: this.soundFadeIn(), soundFadeOut: this.soundFadeOut(),
-      musicGain: this.musicGain(), musicFadeIn: this.musicFadeIn(), musicFadeOut: this.musicFadeOut(),
+      musicGain: this.musicGain(), musicFadeIn: this.musicFadeIn(), musicFadeOut: this.musicFadeOut(), musicReact: this.musicReact(),
       statsSeconds: this.statsSeconds(), showPip: this.showPip(),
       // This format's toggles as they are, the other's as last left.
       show: { ...readPrefs().show, [formatOf(this.vertical())]: show },
@@ -1945,6 +2085,7 @@ export class OverlayExportComponent {
     this.musicGain.set(state.musicGain);
     this.musicFadeIn.set(state.musicFadeIn);
     this.musicFadeOut.set(state.musicFadeOut);
+    this.musicReact.set(readMusicReact(state.musicReact));
     this.statsSeconds.set(state.statsSeconds);
     this.showPip.set(state.showPip);
     const pending = { state, footage: files.footage?.name ?? null, sound: files.sound?.name ?? null, music: files.music?.name ?? null };
@@ -3050,7 +3191,7 @@ export class OverlayExportComponent {
         file: this.musicFile, start: this.musicStart(), gain: this.musicOut(), fadeIn: this.musicFadeIn(), fadeOut: this.musicFadeOut(),
       } : null,
       hold: stats.hold,
-      overlay: { renderer: this.renderer(), opts: { ...this.opts(), statsAfter: stats.after }, logOffset: this.videoOffset(), logEnd: stats.end },
+      overlay: { renderer: this.renderer(), opts: { ...this.drawOpts(), statsAfter: stats.after }, logOffset: this.videoOffset(), logEnd: stats.end },
       fadeOut: this.fadeOut(),
       quantizer: this.renderQp(),
     };
@@ -3131,7 +3272,7 @@ export class OverlayExportComponent {
     const r = this.renderer();
     const c = this.canvas()?.nativeElement;
     const t = this.previewTime();
-    const o = this.opts();
+    const o = this.drawOpts();
     if (!c) return;
     // Sized here rather than in the template, so the canvas and what's drawn on it change shape together.
     const w = this.previewW(), h = this.previewH();
@@ -3171,7 +3312,7 @@ export class OverlayExportComponent {
     const ctx = canvas.getContext('2d')!;
     const total = this.frameCount();
     const from = this.start();
-    const opts = this.opts();
+    const opts = this.drawOpts();
     const started = performance.now();
 
     this.busy.set(true);

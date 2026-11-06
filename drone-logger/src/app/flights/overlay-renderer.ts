@@ -3,6 +3,7 @@ import { MODES, StickMode, sampleSticks, stickAxes } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
 import { BfOsdElement, BfOsdId, BfOsdLayout } from './bf-osd';
+import { MusicFx, drawReactive } from './music-react';
 
 export interface OverlayData {
   track: { home: [number, number] | null; points: TrackPoint[] } | null;
@@ -145,6 +146,8 @@ export interface OverlayOptions {
   itemScale: Partial<Record<ItemKey, number>>;
   /** Panel readings switched off (the RSSI panel's); missing means shown. */
   itemHidden?: Partial<Record<ItemKey, boolean>>;
+  /** The HUD reacting to the music: pulsing, splitting and tinting with the song under each frame. Null for still. */
+  music?: MusicFx | null;
 }
 
 /** One piece of text in a panel row; `w` replaces measuring for drawn shapes (the built-in battery icon). */
@@ -346,6 +349,12 @@ export class OverlayRenderer {
   }
 
   draw(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {
+    const level = o.music?.at(t);
+    if (!level) return this.drawHud(ctx, t, o);
+    drawReactive(ctx, level, o.music!, t, (layer, panels) => this.drawHud(layer, t, panels ? o : { ...o, panelOpacity: 0, stickBoxOpacity: 0 }));
+  }
+
+  private drawHud(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {
     const { width: W, height: H } = ctx.canvas;
     const u = Math.min(W, H) / 1080;
     ctx.clearRect(0, 0, W, H);
