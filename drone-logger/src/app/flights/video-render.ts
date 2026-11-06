@@ -5,6 +5,7 @@ import {
 import { Grade, GradeRenderer, isNeutral } from './grade';
 import type { AudioCodec, StreamTargetChunk, Target, VideoCodec, WrappedCanvas } from 'mediabunny';
 import { OverlayOptions, OverlayRenderer } from './overlay-renderer';
+import { drawVignette, footagePunch, saturationBoost, vignetteLevel } from './music-react';
 
 /**
  * Renders the finished video: the pilot's footage, the stick cam, the sound and the OSD baked into one H.264/AAC MP4,
@@ -198,10 +199,12 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       const logT = t - plan.overlay.logOffset;
       const showHud = logT >= 0 && logT <= plan.overlay.logEnd;
       if (showHud) plan.overlay.renderer.draw(hudCtx, logT, plan.overlay.opts);
+      const music = plan.overlay.opts.music ?? null, level = music?.at(logT) ?? null;
 
-      // Back to front: the stick cam (vertical only), the footage over it, then the HUD.
+      // Back to front: the stick cam (vertical only), the footage over it (zooming and darkening with the music), then the HUD.
       if (plan.cam) drawCam(ctx, cam, plan, W, H);
-      drawFootage(ctx, foot, plan, W, H, grader);
+      drawFootage(ctx, foot, plan, W, H, grader, footagePunch(level, music), saturationBoost(level, music));
+      drawVignette(ctx, pictureBox(plan, foot, W, H), vignetteLevel(level, music));
       if (showHud) ctx.drawImage(hud, 0, 0);
       // Fade to black over the last few seconds: everything, OSD included, ending on a fully black frame.
       const fade = fadeLevel(i / fps, (total - 1) / fps, plan.fadeOut);
@@ -232,15 +235,26 @@ function fadeLevel(t: number, last: number, fade: number) {
   return Math.max(0, Math.min(1, (last - t) / Math.min(fade, last || fade)));
 }
 
-/** The footage in its box (the whole frame, or the top part in vertical), cover-fitted or whole, zoomed and graded. */
+/** The footage's box: the whole frame, or the top part in vertical. */
+const footageBox = (plan: RenderPlan, W: number, H: number) => (plan.vertical ? { x: 0, y: 0, w: W, h: SPLIT * H } : { x: 0, y: 0, w: W, h: H });
+
+/** Where the footage's picture is: its whole box, or shown whole (4:3 in 16:9), just the picture between the bars. */
+function pictureBox(plan: RenderPlan, frame: WrappedCanvas | null, W: number, H: number) {
+  const box = footageBox(plan, W, H);
+  if (plan.vertical || !plan.footage.fit || !frame) return box;
+  const w = Math.min(box.w, box.h * (frame.canvas.width / frame.canvas.height));
+  return { x: box.x + (box.w - w) / 2, y: box.y, w, h: box.h };
+}
+
+/** The footage in its box, cover-fitted or whole, zoomed (times `punch`, the music's zoom), graded, and saturated by the music. */
 function drawFootage(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null, plan: RenderPlan, W: number, H: number,
-                     grader: GradeRenderer | null) {
+                     grader: GradeRenderer | null, punch: number, saturation = 1) {
   if (!frame) return;
-  const box = plan.vertical ? { x: 0, y: 0, w: W, h: SPLIT * H } : { x: 0, y: 0, w: W, h: H };
   const p = plan.footage.picture;
   // Graded on the GPU first, exactly as the preview shows it.
   const graded = grader?.draw(frame.canvas, frame.canvas.width, frame.canvas.height, plan.footage.grade);
-  draw(ctx, graded ? grader!.canvas : frame.canvas, box, !plan.vertical && plan.footage.fit ? 'contain' : 'cover', p, 0, 0);
+  draw(ctx, graded ? grader!.canvas : frame.canvas, footageBox(plan, W, H), !plan.vertical && plan.footage.fit ? 'contain' : 'cover',
+       { ...p, zoom: p.zoom * punch, saturation: p.saturation * saturation }, 0, 0);
 }
 
 /** The stick cam: the bottom part of the vertical split screen, shown whole. */

@@ -9,7 +9,8 @@ import { UnitsService } from '../units.service';
 import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, decode, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
-import { MUSIC_REACT_DEFAULTS, MusicAnalysis, MusicFx, MusicReact, analyzeMusic, readMusicReact } from './music-react';
+import { MUSIC_EFFECTS, MUSIC_REACT_DEFAULTS, MusicAnalysis, MusicEffect, MusicFx, MusicReact, analyzeMusic, footagePunch, readMusicReact,
+  saturationBoost, vignetteLevel } from './music-react';
 import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
@@ -365,14 +366,17 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <!-- The footage's own box: the whole frame in landscape, the top half in vertical. Zoom stays inside it. -->
                 <div class="footage-box" [class.selected]="mediaSelected() === 'footage'">
                   <video #bgVideo class="bg-video" [class.fit]="footage43() && !vertical()"
-                         [style.transform]="footageZoom() === 100 ? null : 'scale(' + footageZoom() / 100 + ')'"
+                         [style.transform]="footageTransform()" [style.filter]="footageFilter()"
                          [src]="videoUrl()" [muted]="muted() || !!audioUrl()" playsinline preload="auto" aria-hidden="true"
                          (loadedmetadata)="onVideoMeta(); seekVideoToPreview()" (durationchange)="onVideoMeta()"
                          (timeupdate)="onVideoTime()" (seeked)="onVideoTime(); syncAudio(true); drawGraded()" (loadeddata)="drawGraded()"
                          (pause)="videoPlaying.set(false); syncAudio()" (play)="videoPlaying.set(true); syncAudio(true)"></video>
                   <!-- The footage graded on the GPU, over the video and framed like it: what the finished video gets. -->
                   <canvas #gradeCanvas class="bg-video" [class.fit]="footage43() && !vertical()" [hidden]="!footageGraded()" aria-hidden="true"
-                          [style.transform]="footageZoom() === 100 ? null : 'scale(' + footageZoom() / 100 + ')'"></canvas>
+                          [style.transform]="footageTransform()" [style.filter]="footageFilter()"></canvas>
+                  <!-- The music's vignette: the footage's edges darkening with the bass, as the finished video draws it. -->
+                  <div class="beat-vignette" [class.fit]="footage43() && !vertical()" [style.aspect-ratio]="videoAspect()"
+                       [style.opacity]="footageVignette()" aria-hidden="true"></div>
                 </div>
               }
               @if (audioUrl()) {
@@ -1017,27 +1021,44 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         <option value="both">Both</option>
                       </select>
                     </span>
+                    <span class="offset" title="What sets the footage off (zoom punch, vignette, saturation). Between triggers it's left alone. Drops are where the song jumps up after a quieter stretch">
+                      <label for="footage-trigger">Footage on</label>
+                      <select id="footage-trigger" [ngModel]="musicReact().footageTrigger" (ngModelChange)="setMusicReact('footageTrigger', $event)">
+                        <option value="hits">Every hit</option>
+                        <option value="big">Big hits</option>
+                        <option value="drops">Drops</option>
+                      </select>
+                    </span>
                     <button class="btn small" type="button" (click)="resetMusicReact()" title="Every music reaction setting back to its default">Reset reaction</button>
                   }
                 </div>
                 @if (musicReact().on) {
+                  <div class="profile-key">
+                    <span><i class="key react-hit"></i>Footage triggers, on the A2 clip in the timeline</span>
+                    @if (musicReact().enabled.vignette && musicReact().vignette > 0) {
+                      <span><i class="key react-level"></i>Vignette darkness (higher is darker)</span>
+                    }
+                  </div>
                   @for (e of musicFxStrengths; track e.key) {
                     <div class="video-scrub">
-                      <label [for]="'react-' + e.key" class="scrub-label" [title]="e.title">{{ e.label }}</label>
+                      <label class="scrub-label check" [title]="e.title">
+                        <input type="checkbox" [ngModel]="musicReact().enabled[e.key]" (ngModelChange)="setEffectOn(e.key, $event)" /> {{ e.label }}
+                      </label>
                       <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
-                      <input [id]="'react-' + e.key" type="range" min="0" max="2" step="0.05" [ngModel]="musicReact()[e.key]"
-                             (ngModelChange)="setMusicReact(e.key, +$event)" />
-                      <button class="btn small step" type="button" (click)="setMusicReact(e.key, 1)" [disabled]="musicReact()[e.key] === 1"
+                      <input type="range" min="0" max="2" step="0.05" [attr.aria-label]="e.label + ' strength'" [ngModel]="musicReact()[e.key]"
+                             (ngModelChange)="setMusicReact(e.key, +$event)" [disabled]="!musicReact().enabled[e.key]" />
+                      <button class="btn small step" type="button" (click)="setMusicReact(e.key, 1)"
+                              [disabled]="!musicReact().enabled[e.key] || musicReact()[e.key] === 1"
                               [attr.aria-label]="'Reset ' + e.label" [title]="'Reset ' + e.label + ' to 100%'"><app-icon name="reset" /></button>
-                      <span class="mono">{{ musicReact()[e.key] ? (musicReact()[e.key] * 100).toFixed(0) + '%' : 'Off' }}</span>
+                      <span class="mono">{{ musicReact().enabled[e.key] ? (musicReact()[e.key] * 100).toFixed(0) + '%' : 'Off' }}</span>
                     </div>
-                    @if (e.key === 'split' && musicReact().split > 0) {
+                    @if (e.key === 'split' && musicReact().enabled.split) {
                       <div class="playback-row">
                         <label class="color"><input type="color" [ngModel]="musicReact().splitColors[0]" (ngModelChange)="setSplitColor(0, $event)" /> Left</label>
                         <label class="color"><input type="color" [ngModel]="musicReact().splitColors[1]" (ngModelChange)="setSplitColor(1, $event)" /> Right</label>
                       </div>
                     }
-                    @if (e.key === 'tint' && musicReact().tint > 0) {
+                    @if (e.key === 'tint' && musicReact().enabled.tint) {
                       <div class="playback-row">
                         <span class="offset">
                           <label for="tint-mode">Colour</label>
@@ -1068,7 +1089,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                       </div>
                     }
                   }
-                  <!-- The hits: how readily one is heard, and how long it lasts (the pulse and the split ride on them). -->
+                  <!-- The hits: how readily one is heard, and how long it lasts (the pulse, the split and the zoom ride on them). -->
                   <div class="video-scrub">
                     <label for="react-sensitivity" class="scrub-label" title="How readily a sudden rise counts as a hit: higher catches softer ones">Sensitivity</label>
                     <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
@@ -1079,7 +1100,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     <span class="mono">{{ (musicReact().sensitivity * 100).toFixed(0) }}%</span>
                   </div>
                   <div class="video-scrub">
-                    <label for="react-hit" class="scrub-label" title="How long each hit's pulse and split take to settle">Hit length</label>
+                    <label for="react-hit" class="scrub-label" title="How long each hit's pulse, split and zoom take to settle">Hit length</label>
                     <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
                     <input id="react-hit" type="range" min="0.05" max="0.5" step="0.01" [ngModel]="musicReact().hitLength"
                            (ngModelChange)="setMusicReact('hitLength', +$event)" />
@@ -1400,7 +1421,11 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .stage.vertical .frame { aspect-ratio: 9 / 16; }
     .stage.vertical:fullscreen { width: 100%; }
     .stage.vertical:fullscreen .frame { width: min(100vw, calc(100vh * 9 / 16)); }
-    .footage-box { position: absolute; inset: 0; overflow: hidden; background: #000; }
+    .footage-box { position: absolute; inset: 0; overflow: hidden; background: #000; z-index: 0; }
+    /* Same shape as drawVignette in music-react.ts: clear to 25% of the way to the corners, black at them. */
+    .beat-vignette { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: radial-gradient(ellipse, transparent 25%, rgba(0,0,0,.7) 65%, #000); }
+    /* Shown whole (4:3 in 16:9), it covers the picture only, not the black bars beside it. */
+    .beat-vignette.fit { left: 50%; right: auto; width: auto; height: 100%; transform: translateX(-50%); }
     /*
      * Vertical is a split screen in three layers: the stick cam at the back (below the split), the flight footage over
      * it (above), and the HUD on top. The split sits 53.7% down, as on a real Short. Neither video is clipped to its
@@ -1452,6 +1477,9 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .profile-key span { display: inline-flex; align-items: center; gap: .35rem; }
     .key { display: inline-block; width: 0; height: .9rem; border-left: 2px solid; }
     .key.clap { border-left-style: dashed; }
+    /* The music's reaction, as the timeline draws it on the A2 clip. */
+    .key.react-hit { border-color: #ff5fd2; }
+    .key.react-level { width: 1.1rem; height: 0; border-left: 0; border-top: 2px solid #ffd84a; }
     .clips { stroke: var(--danger); border-color: var(--danger); }
     .sync-buttons { display: flex; flex-wrap: wrap; gap: .5rem; }
     canvas { display: block; width: 100%; height: auto; touch-action: none; } /* dragging an element shouldn't scroll the page on touch screens */
@@ -1953,6 +1981,9 @@ export class OverlayExportComponent {
   setMusicReact<K extends keyof MusicReact>(key: K, value: MusicReact[K]) {
     this.musicReact.update(r => readMusicReact({ ...r, [key]: value }));
   }
+  setEffectOn(effect: MusicEffect, on: boolean) {
+    this.setMusicReact('enabled', { ...this.musicReact().enabled, [effect]: on });
+  }
   setSplitColor(side: 0 | 1, colour: string) {
     const pair = [...this.musicReact().splitColors] as [string, string];
     pair[side] = colour;
@@ -1962,19 +1993,24 @@ export class OverlayExportComponent {
   resetMusicReact() {
     this.musicReact.set({ ...MUSIC_REACT_DEFAULTS, on: true });
   }
-  /** The strength sliders: each effect at 0 is off. */
+  /** Each effect's row: an on/off and a strength (the OSD's three, then the footage's two). */
   readonly musicFxStrengths = [
     { key: 'pulse', label: 'Pulse', title: 'How far the OSD punches out from the centre on each hit; 0 for none' },
     { key: 'split', label: 'Colour split', title: 'How far the two coloured copies of the OSD slide apart on each hit; 0 for none' },
     { key: 'tint', label: 'Tint', title: "How strongly the OSD's white takes on colour with the music; 0 for none" },
+    { key: 'zoom', label: 'Zoom punch', title: 'How far the footage zooms in on each trigger; 0 for none' },
+    { key: 'vignette', label: 'Vignette', title: "How dark the footage's edges get on each trigger; 0 for none" },
+    { key: 'saturation', label: 'Saturation', title: "How much the footage's colour swells on each trigger; 0 for none" },
   ] as const;
   /**
    * What the renderer reacts to: the song's levels at each log time, where the music plays in the finished video and as
    * loud as its fades let it be. Null while switched off, muted, or not yet measured.
    */
   private musicFx = computed<MusicFx | null>(() => {
-    const analysis = this.musicAnalysis(), { on, ...fx } = this.musicReact();
+    const analysis = this.musicAnalysis(), { on, enabled, ...settings } = this.musicReact();
     if (!on || !analysis || this.musicMuted()) return null;
+    // A switched-off effect draws at strength 0.
+    const fx = { ...settings, ...Object.fromEntries(MUSIC_EFFECTS.map(k => [k, enabled[k] ? settings[k] : 0])) };
     const offset = this.videoOffset(), start = this.renderStart(), song = this.musicStart(), len = this.renderLength();
     const fadeIn = this.musicFadeIn(), fadeOut = this.musicFadeOut();
     return {
@@ -1982,10 +2018,36 @@ export class OverlayExportComponent {
       at: t => {
         const out = t + offset - start; // seconds into the finished video
         if (out < 0 || out > len) return null;
-        const lv = analysis.at(out + song, fx.hitBy, fx.sensitivity, fx.hitLength), k = fadeLevel(out, len, fadeIn, fadeOut);
-        return { bass: lv.bass * k, mid: lv.mid * k, treble: lv.treble * k, hit: lv.hit * k };
+        const lv = analysis.at(out + song, fx.hitBy, fx.sensitivity, fx.hitLength, fx.footageTrigger), k = fadeLevel(out, len, fadeIn, fadeOut);
+        return { bass: lv.bass * k, mid: lv.mid * k, treble: lv.treble * k, hit: lv.hit * k, punch: lv.punch * k };
       },
     };
+  });
+  /**
+   * Where the reaction lands on the music's `len`-long clip, for the timeline: the vignette's darkness along it (when the
+   * vignette is on) and the hits, as fractions of the way along.
+   */
+  private musicReactTrack(len: number): TimelineTrack['react'] {
+    const fx = this.musicFx(), analysis = this.musicAnalysis();
+    if (!fx || !analysis || len <= 0) return undefined;
+    const song = this.musicStart(), logAt = this.renderStart() - this.videoOffset();
+    const hits = Array.from(analysis.triggers(fx.footageTrigger, fx.hitBy, fx.sensitivity), t => (t - song) / len).filter(f => f >= 0 && f <= 1);
+    if (!(fx.vignette > 0)) return { hits };
+    const n = 600;
+    const level = Float32Array.from({ length: n }, (_, i) => vignetteLevel(fx.at(logAt + ((i + 0.5) / n) * len), fx));
+    return { level, hits };
+  }
+  /** The music at the footage's current moment, for its zoom and vignette in the preview. */
+  private musicNow = computed(() => this.musicFx()?.at(this.videoTime() - this.videoOffset()) ?? null);
+  footageTransform = computed(() => {
+    const z = (this.footageZoom() / 100) * footagePunch(this.musicNow(), this.musicFx());
+    return z === 1 ? null : `scale(${z})`;
+  });
+  footageVignette = computed(() => vignetteLevel(this.musicNow(), this.musicFx()));
+  /** The music's saturation on the preview's footage, as the finished video draws it. */
+  footageFilter = computed(() => {
+    const k = saturationBoost(this.musicNow(), this.musicFx());
+    return k === 1 ? null : `saturate(${(k * 100).toFixed(1)}%)`;
   });
   /** The HUD's options with the music's effects. */
   private drawOpts = computed<OverlayOptions>(() => ({ ...this.opts(), music: this.musicFx() }));
@@ -2158,7 +2220,7 @@ export class OverlayExportComponent {
     if (this.musicUrl() && music && song) {
       const at = this.renderStart(), len = Math.min(this.renderLength(), Math.max(0, song.duration - this.musicStart()));
       audio.push({ id: 'music', name: this.musicName(), kind: 'audio', start: at, end: at + len, gain: this.dbText(this.musicGain()),
-                   muted: this.musicMuted(), levels: music.filter(m => m.inside).map(m => m.level) });
+                   muted: this.musicMuted(), levels: music.filter(m => m.inside).map(m => m.level), react: this.musicReactTrack(len) });
     }
     return [...video.map((t, i) => ({ ...t, label: `V${video.length - i}` })), ...audio.map((t, i) => ({ ...t, label: `A${i + 1}` }))];
   });

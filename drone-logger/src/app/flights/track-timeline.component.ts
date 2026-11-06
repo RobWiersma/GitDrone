@@ -18,6 +18,11 @@ export interface TimelineTrack {
   /** Sound: the gain, as shown in the track's header. */
   gain?: string;
   muted?: boolean;
+  /**
+   * Music: where its reaction lands. `level` is the footage vignette's darkness across the clip (0 to 1, omitted when the
+   * vignette is off); `hits` are the beats that punch, as fractions of the way along the clip.
+   */
+  react?: { level?: ArrayLike<number>; hits: number[] };
   /** A video track that can be hidden: whether it shows. */
   shown?: boolean;
 }
@@ -85,6 +90,13 @@ export interface TimelineMark {
                   @if (w.clips) { <path class="clips" [attr.d]="w.clips" /> }
                 </svg>
               }
+              @if (reacts().get(tr.id); as r) {
+                <!-- The music's reaction: the vignette's darkness as a line, and a tick at each hit along the bottom. -->
+                <svg viewBox="0 0 1000 40" preserveAspectRatio="none" aria-hidden="true">
+                  @if (r.level) { <path class="react-level" [attr.d]="r.level" /> }
+                  <path class="react-hits" [attr.d]="r.hits" />
+                </svg>
+              }
               <span class="clip-name">{{ tr.name }}</span>
             </button>
             @for (m of marks()[tr.id] ?? []; track $index) {
@@ -130,6 +142,8 @@ export interface TimelineMark {
     .clip svg { position: absolute; inset: 0; width: 100%; height: 100%; }
     .wave { fill: rgb(255 255 255 / .55); }
     .clips { stroke: #ff6b6b; stroke-width: 2; vector-effect: non-scaling-stroke; }
+    .react-level { fill: none; stroke: #ffd84a; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+    .react-hits { stroke: #ff5fd2; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
     .clip-name { position: relative; display: block; padding: 0 .35rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
                  text-shadow: 0 1px 2px rgb(0 0 0 / .7); }
     .audio .clip-name { font-size: .72rem; }
@@ -196,6 +210,19 @@ export class TrackTimelineComponent {
         if (lv[i] >= 1) clips.push(`M${x},0 V6`);
       }
       out.set(tr.id, { wave: `M0,20 L${top.join(' L')} L1000,20 L${bottom.join(' L')} Z`, clips: clips.join(' ') });
+    }
+    return out;
+  });
+
+  /** Each music clip's reaction: the vignette's darkness (none at the bottom, full at the top) and a tick per hit. */
+  reacts = computed(() => {
+    const out = new Map<TrackId, { level: string; hits: string }>();
+    for (const tr of this.tracks()) {
+      if (!tr.react) continue;
+      const lv = tr.react.level, n = lv?.length ?? 0;
+      const level = n ? 'M' + Array.from({ length: n }, (_, i) => `${(((i + 0.5) / n) * 1000).toFixed(1)},${(39 - lv![i] * 37).toFixed(1)}`).join(' L') : '';
+      const hits = tr.react.hits.map(f => `M${(f * 1000).toFixed(1)},33 V40`).join(' ');
+      out.set(tr.id, { level, hits });
     }
     return out;
   });
