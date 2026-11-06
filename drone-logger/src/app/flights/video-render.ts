@@ -204,7 +204,7 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       // Back to front: the stick cam (vertical only), the footage over it (zooming and darkening with the music), then the HUD.
       if (plan.cam) drawCam(ctx, cam, plan, W, H);
       drawFootage(ctx, foot, plan, W, H, grader, footagePunch(level, music), saturationBoost(level, music));
-      drawVignette(ctx, pictureBox(plan, foot, W, H), vignetteLevel(level, music));
+      drawVignette(ctx, pictureBox(plan, foot, W, H), vignetteLevel(level, music), level?.vigBeat ?? 0);
       if (showHud) ctx.drawImage(hud, 0, 0);
       // Fade to black over the last few seconds: everything, OSD included, ending on a fully black frame.
       const fade = fadeLevel(i / fps, (total - 1) / fps, plan.fadeOut);

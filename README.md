@@ -377,12 +377,14 @@ a 0–200% strength:
 - On the OSD: **Pulse** (the HUD punches out from the centre on each hit), **Colour split** (two coloured copies of the
   text slide apart on each hit; pick both colours) and **Tint** (the white takes on colour with the bass, mids, treble or
   everything, drifting round the colour wheel or in one colour).
-- On the footage: **Zoom punch**, **Vignette** (the edges darken) and **Saturation** (the colour swells). These fire
-  only on a trigger and leave the footage alone in between. **Footage on** picks the trigger: **Every hit**, **Big
-  hits** (the sharpest quarter, the default) or **Drops** (where the song jumps up after a quieter stretch, landing on the
-  beat, with a longer flash).
+- On the footage: **Zoom punch**, **Vignette** (the edges break into pixel blocks of the footage's own colour, biggest at the edge and smaller toward the middle, in a lumpy, off-centre shape that changes with every trigger) and **Saturation** (the colour swells). These fire
+  only on a trigger and leave the footage alone in between. **Footage on** picks the zoom and saturation's trigger and
+  **Vignette on** the vignette's: **Every hit**, **Big hits** (the sharpest quarter, the footage's default), **Biggest
+  hits** (a few a minute, well apart, the vignette's default) or **Drops** (where the song jumps up after a quieter
+  stretch, landing on the beat, with a longer flash).
 
-**Hits on** picks what counts as a hit: kicks (sudden bass), hats and snares (sudden highs), or both. **Sensitivity**
+A hit is a kick (sudden bass) or a hat or snare (sudden highs). **OSD on** picks what sets off the pulse and colour split, from the same choices as the footage (every hit by
+default). **Sensitivity**
 sets how readily one counts (and so how many big hits and drops there are), and **Hit length** how long each takes to
 settle. On the timeline, the music's clip shows a pink tick at every footage trigger and a yellow line for the
 vignette's darkness, so you can see where it'll land against the footage. Muting the music turns the reaction off.

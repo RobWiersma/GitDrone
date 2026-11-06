@@ -10,7 +10,7 @@ import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, decode, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
 import { MUSIC_EFFECTS, MUSIC_REACT_DEFAULTS, MusicAnalysis, MusicEffect, MusicFx, MusicReact, analyzeMusic, footagePunch, readMusicReact,
-  saturationBoost, vignetteLevel } from './music-react';
+  saturationBoost, vignetteLevel, vignetteMosaic } from './music-react';
 import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
@@ -379,9 +379,9 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   <!-- The footage graded on the GPU, over the video and framed like it: what the finished video gets. -->
                   <canvas #gradeCanvas class="bg-video" [class.fit]="footage43() && !vertical()" [hidden]="!footageGraded()" aria-hidden="true"
                           [style.transform]="footageTransform()" [style.filter]="footageFilter()"></canvas>
-                  <!-- The music's vignette: the footage's edges darkening with the bass, as the finished video draws it. -->
-                  <div class="beat-vignette" [class.fit]="footage43() && !vertical()" [style.aspect-ratio]="videoAspect()"
-                       [style.opacity]="footageVignette()" aria-hidden="true"></div>
+                  <!-- The music's vignette: a mosaic of the footage's own colours around its edges, as the finished video draws it. -->
+                  <canvas #vignetteCanvas class="beat-vignette" [class.fit]="footage43() && !vertical()" [style.aspect-ratio]="videoAspect()"
+                          [style.display]="footageVignette() ? null : 'none'" aria-hidden="true"></canvas>
                 </div>
               }
               @if (audioUrl()) {
@@ -1018,22 +1018,26 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     <app-icon name="music" /> {{ musicAnalysis() ? 'React to the music' : 'Finding the beat...' }}
                   </button>
                   @if (musicReact().on) {
-                    <span class="offset" title="What the pulse and the split hit on: kick drums (sudden bass), hats and snares (sudden highs), or both">
-                      <label for="hit-by">Hits on</label>
-                      <select id="hit-by" [ngModel]="musicReact().hitBy" (ngModelChange)="setMusicReact('hitBy', $event)">
-                        <option value="bass">Bass (kicks)</option>
-                        <option value="highs">Highs (hats, snares)</option>
-                        <option value="both">Both</option>
+                    <div class="triggers">
+                    <span class="offset" title="What sets off the OSD's pulse and colour split. Biggest hits are a few a minute">
+                      <label for="osd-trigger">OSD on</label>
+                      <select id="osd-trigger" [ngModel]="musicReact().osdTrigger" (ngModelChange)="setMusicReact('osdTrigger', $event)">
+                        @for (o of triggerOptions; track o[0]) { <option [value]="o[0]">{{ o[1] }}</option> }
                       </select>
                     </span>
-                    <span class="offset" title="What sets the footage off (zoom punch, vignette, saturation). Between triggers it's left alone. Drops are where the song jumps up after a quieter stretch">
+                    <span class="offset" title="What sets off the zoom punch and saturation. Between triggers the footage is left alone. Drops are where the song jumps up after a quieter stretch">
                       <label for="footage-trigger">Footage on</label>
                       <select id="footage-trigger" [ngModel]="musicReact().footageTrigger" (ngModelChange)="setMusicReact('footageTrigger', $event)">
-                        <option value="hits">Every hit</option>
-                        <option value="big">Big hits</option>
-                        <option value="drops">Drops</option>
+                        @for (o of triggerOptions; track o[0]) { <option [value]="o[0]">{{ o[1] }}</option> }
                       </select>
                     </span>
+                    <span class="offset" title="What sets off the vignette, separately from the zoom and saturation, so it can be rarer. Biggest hits are a few a minute">
+                      <label for="vignette-trigger">Vignette on</label>
+                      <select id="vignette-trigger" [ngModel]="musicReact().vignetteTrigger" (ngModelChange)="setMusicReact('vignetteTrigger', $event)">
+                        @for (o of triggerOptions; track o[0]) { <option [value]="o[0]">{{ o[1] }}</option> }
+                      </select>
+                    </span>
+                    </div>
                     <button class="btn small" type="button" (click)="resetMusicReact()" title="Every music reaction setting back to its default">Reset reaction</button>
                   }
                 </div>
@@ -1041,7 +1045,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   <div class="profile-key">
                     <span><i class="key react-hit"></i>Footage triggers, on the A2 clip in the timeline</span>
                     @if (musicReact().enabled.vignette && musicReact().vignette > 0) {
-                      <span><i class="key react-level"></i>Vignette darkness (higher is darker)</span>
+                      <span><i class="key react-level"></i>Vignette strength</span>
                     }
                   </div>
                   @for (e of musicFxStrengths; track e.key) {
@@ -1427,8 +1431,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .stage.vertical:fullscreen { width: 100%; }
     .stage.vertical:fullscreen .frame { width: min(100vw, calc(100vh * 9 / 16)); }
     .footage-box { position: absolute; inset: 0; overflow: hidden; background: #000; z-index: 0; }
-    /* Same shape as drawVignette in music-react.ts: clear to 25% of the way to the corners, black at them. */
-    .beat-vignette { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: radial-gradient(ellipse, transparent 25%, rgba(0,0,0,.7) 65%, #000); }
+    /* A tiny mosaic (vignetteMosaic in music-react.ts) blown up with hard edges. */
+    .triggers { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
+    .video-sync .triggers .offset { display: contents; }
+    .frame .beat-vignette { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; image-rendering: pixelated; }
     /* Shown whole (4:3 in 16:9), it covers the picture only, not the black bars beside it. */
     .beat-vignette.fit { left: 50%; right: auto; width: auto; height: 100%; transform: translateX(-50%); }
     /*
@@ -2023,8 +2029,10 @@ export class OverlayExportComponent {
       at: t => {
         const out = t + offset - start; // seconds into the finished video
         if (out < 0 || out > len) return null;
-        const lv = analysis.at(out + song, fx.hitBy, fx.sensitivity, fx.hitLength, fx.footageTrigger), k = fadeLevel(out, len, fadeIn, fadeOut);
-        return { bass: lv.bass * k, mid: lv.mid * k, treble: lv.treble * k, hit: lv.hit * k, punch: lv.punch * k };
+        const lv = analysis.at(out + song, fx.sensitivity, fx.hitLength,
+                               { osd: fx.osdTrigger, footage: fx.footageTrigger, vignette: fx.vignetteTrigger });
+        const k = fadeLevel(out, len, fadeIn, fadeOut);
+        return { ...lv, bass: lv.bass * k, mid: lv.mid * k, treble: lv.treble * k, hit: lv.hit * k, punch: lv.punch * k, vigPunch: lv.vigPunch * k };
       },
     };
   });
@@ -2036,7 +2044,9 @@ export class OverlayExportComponent {
     const fx = this.musicFx(), analysis = this.musicAnalysis();
     if (!fx || !analysis || len <= 0) return undefined;
     const song = this.musicStart(), logAt = this.renderStart() - this.videoOffset();
-    const hits = Array.from(analysis.triggers(fx.footageTrigger, fx.hitBy, fx.sensitivity), t => (t - song) / len).filter(f => f >= 0 && f <= 1);
+    // The ticks: the zoom and saturation's triggers, or the vignette's when it's the only footage effect on.
+    const trigger = fx.zoom > 0 || fx.saturation > 0 || !(fx.vignette > 0) ? fx.footageTrigger : fx.vignetteTrigger;
+    const hits = Array.from(analysis.triggers(trigger, fx.sensitivity), t => (t - song) / len).filter(f => f >= 0 && f <= 1);
     if (!(fx.vignette > 0)) return { hits };
     const n = 600;
     const level = Float32Array.from({ length: n }, (_, i) => vignetteLevel(fx.at(logAt + ((i + 0.5) / n) * len), fx));
@@ -2049,6 +2059,42 @@ export class OverlayExportComponent {
     return z === 1 ? null : `scale(${z})`;
   });
   footageVignette = computed(() => vignetteLevel(this.musicNow(), this.musicFx()));
+  private vignetteCanvas = viewChild<ElementRef<HTMLCanvasElement>>('vignetteCanvas');
+  /** The choices for what sets the footage and the vignette off, rarest last but drops. */
+  readonly triggerOptions = [['hits', 'Every hit'], ['big', 'Big hits'], ['huge', 'Biggest hits'], ['drops', 'Drops']] as const;
+  /** Redraws the vignette mosaic from the footage on screen (graded or not) as the music moves it. */
+  private drawVignetteNow = effect(() => {
+    const alpha = this.footageVignette(), seed = this.musicNow()?.vigBeat ?? 0, graded = this.footageGraded();
+    const c = this.vignetteCanvas()?.nativeElement;
+    const fit = this.footage43() && !this.vertical();
+    const zoom = (this.footageZoom() / 100) * footagePunch(this.musicNow(), this.musicFx());
+    this.videoTime();
+    untracked(() => {
+      const v = this.bgVideo()?.nativeElement, g = this.gradeCanvas()?.nativeElement;
+      if (!c) return;
+      if (!v || !alpha) {
+        c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
+        return;
+      }
+      const draw = () => {
+        const src = graded && g ? g : v, w = graded && g ? g.width : v.videoWidth, h = graded && g ? g.height : v.videoHeight;
+        // Only the part of the footage on screen: cropped to fill its box (the near-square top of vertical) and zoomed
+        // about the middle, as the finished video draws it. Shown whole (4:3 in 16:9), it's the whole frame.
+        const box = c.parentElement?.getBoundingClientRect();
+        let crop = { x: 0, y: 0, w, h };
+        if (!fit && box && box.width > 0 && box.height > 0 && w > 0 && h > 0) {
+          const scale = Math.max(box.width / w, box.height / h) * Math.max(1, zoom);
+          const cw = Math.min(w, box.width / scale), ch = Math.min(h, box.height / scale);
+          crop = { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch };
+        }
+        // Nothing to draw (too faint): clear it, so the last punch's blocks don't hang there.
+        if (!vignetteMosaic(src, crop, c, alpha, seed)) c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
+      };
+      // Mid-seek the frame isn't there yet: draw once it is.
+      if (v.readyState < 2) v.addEventListener('seeked', () => requestAnimationFrame(draw), { once: true });
+      else draw();
+    });
+  });
   /** The music's saturation on the preview's footage, as the finished video draws it. */
   footageFilter = computed(() => {
     const k = saturationBoost(this.musicNow(), this.musicFx());
