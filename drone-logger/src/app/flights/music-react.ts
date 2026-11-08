@@ -244,7 +244,12 @@ export function drawVignette(ctx: CanvasRenderingContext2D, box: Box, alpha: num
  * What the renderer needs: the levels at a log time (null where no music plays), and the effects to draw, each
  * switched-off one at strength 0.
  */
-export interface MusicFx extends Omit<MusicReact, 'on' | 'enabled'> { at: (t: number) => MusicLevel | null }
+export interface MusicFx extends Omit<MusicReact, 'on' | 'enabled'> {
+  /** The levels at log time `t`, where it plays in the finished video; null where it doesn't. */
+  at: (t: number) => MusicLevel | null;
+  /** The levels `out` s into the finished video: what an auto-edit, whose log time jumps at each cut, follows. */
+  atOut: (out: number) => MusicLevel | null;
+}
 
 /** Levels per second. */
 const RATE = 100;
@@ -270,6 +275,9 @@ const DROP_LENGTH = 4, DROP_MIN = 0.6;
  * second): a hit is a rise that stands out from its neighbours.
  */
 interface Rises { flux: Float32Array; mean: Float32Array; sd: Float32Array }
+
+/** The song's beat: every beat (s into the song), which of each four starts a bar (`bar`, 0-3), and the beat's length (s). */
+export interface BeatGrid { beats: Float32Array; bar: number; period: number }
 
 export class MusicAnalysis {
   /** Hits found for each source and sensitivity asked for: their times (s) and how sharp each rise was. */
@@ -348,6 +356,68 @@ export class MusicAnalysis {
       found.push(near ?? t);
     }
     return Float32Array.from(found);
+  }
+
+  private grid: BeatGrid | null = null;
+  /**
+   * The song's beat: its tempo from how its onsets (sudden bass and highs) repeat, then each beat placed on the
+   * strongest onsets while keeping that tempo (a dynamic-programming beat tracker, after Ellis 2007), and which beat
+   * of each four starts a bar (the one the kicks land on most). Cutting on these, rather than on loud moments, is what
+   * makes an edit feel on the music.
+   */
+  beats(): BeatGrid {
+    if (this.grid) return this.grid;
+    const n = this.bass.length, b = this.rises.bass, h = this.rises.highs;
+    // How much is starting at each moment, above what's usual around it.
+    const onset = new Float32Array(n);
+    for (let i = 0; i < n; i++) onset[i] = Math.max(0, b.flux[i] - b.mean[i]) + Math.max(0, h.flux[i] - h.mean[i]);
+    let sd = 0;
+    for (let i = 0; i < n; i++) sd += onset[i] * onset[i];
+    sd = Math.sqrt(sd / Math.max(1, n)) || 1;
+    for (let i = 0; i < n; i++) onset[i] /= sd;
+
+    // The tempo: the lag at which the onsets line up with themselves best, between 70 and 180 BPM, leaning to 120.
+    const lo = Math.floor((60 / 180) * RATE), hi = Math.ceil((60 / 70) * RATE);
+    const score = new Float64Array(hi + 2);
+    for (let lag = lo - 1; lag <= hi + 1; lag++) {
+      let s = 0;
+      for (let i = lag; i < n; i++) s += onset[i] * onset[i - lag];
+      const bpm = (60 * RATE) / lag;
+      score[lag] = (s / (n - lag)) * Math.exp(-0.5 * (Math.log2(bpm / 120) / 1) ** 2);
+    }
+    let best = lo;
+    for (let lag = lo; lag <= hi; lag++) if (score[lag] > score[best]) best = lag;
+    // Between whole samples, from the peak's neighbours.
+    const a = score[best - 1], c = score[best + 1], denom = a - 2 * score[best] + c;
+    const period = best + (denom < 0 ? (0.5 * (a - c)) / denom : 0);
+
+    // The beats: each moment's best total of onsets with the last beat about a period back, steady tempo rewarded.
+    const total = new Float64Array(n), back = new Int32Array(n).fill(-1), tight = 100;
+    for (let i = 0; i < n; i++) {
+      let top = 0, from = -1;
+      for (let j = Math.max(0, Math.round(i - 2 * period)); j <= i - Math.round(period / 2); j++) {
+        const s = total[j] - tight * Math.log((i - j) / period) ** 2;
+        if (from < 0 || s > top) { top = s; from = j; }
+      }
+      total[i] = onset[i] + (from >= 0 ? Math.max(0, top) : 0);
+      back[i] = from >= 0 && top > 0 ? from : -1;
+    }
+    let end = n - 1;
+    for (let i = Math.max(0, n - Math.round(period)); i < n; i++) if (total[i] > total[end]) end = i;
+    const found: number[] = [];
+    for (let i = end; i >= 0; i = back[i]) found.push(i / RATE);
+    const beats = Float32Array.from(found.reverse());
+
+    // The bar: of each four beats, the one with the most bass landing on it.
+    const kick = [0, 0, 0, 0];
+    beats.forEach((t, k) => {
+      const i = Math.round(t * RATE);
+      let m = 0;
+      for (let j = Math.max(0, i - 2); j <= Math.min(n - 1, i + 2); j++) m = Math.max(m, b.flux[j]);
+      kick[k % 4] += m;
+    });
+    const bar = kick.indexOf(Math.max(...kick));
+    return (this.grid = { beats, bar, period: period / RATE });
   }
 
   private hitData(sensitivity: number) {

@@ -11,7 +11,8 @@ import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, decode, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
 import { MUSIC_EFFECTS, MUSIC_REACT_DEFAULTS, MusicAnalysis, MusicEffect, MusicFx, MusicReact, analyzeMusic, footagePunch, readMusicReact,
   saturationBoost, vignetteLevel, vignetteMosaic } from './music-react';
-import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
+import { EditClip, FootageMotion, autoEdit, editLength, editOut, excitement, findTricks, footageMotion } from './auto-edit';
+import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, drawBottomFill, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
 import { KeepFileDirective } from './file-handles';
@@ -124,6 +125,8 @@ export interface EditorPrefs {
   musicReact?: MusicReact;
   statsSeconds: number;
   showPip: boolean;
+  /** Vertical with no stick cam: the footage, soft and dark, filling the bottom; missing in sessions saved before it. */
+  bottomFill?: boolean;
   show: Partial<Record<'landscape' | 'vertical', ShowState>>;
 }
 
@@ -367,6 +370,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <p class="fs-hint" aria-live="polite">Space to {{ videoPlaying() ? 'pause' : 'play' }} · Esc to exit</p>
               }
               <div class="frame">
+              @if (showFill()) {
+                <!-- Vertical with no stick cam: the footage again under the bottom half, soft and dark (as the finished video draws it). -->
+                <canvas #fillCanvas class="bottom-fill" width="540" height="445" aria-hidden="true"></canvas>
+              }
               @if (backdrop() === 'video' && videoUrl()) {
                 <!-- The footage's own box: the whole frame in landscape, the top half in vertical. Zoom stays inside it. -->
                 <div class="footage-box" [class.selected]="mediaSelected() === 'footage'">
@@ -1119,6 +1126,41 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                     <span class="mono">{{ (musicReact().hitLength * 1000).toFixed(0) }} ms</span>
                   </div>
                 }
+                <!-- Auto-edit: the flight's best moments (from the footage and the log) cut on the song's beat, the best of
+                     them on the drop. It plays in the preview and renders in place of the render range. -->
+                @if (hasVideo()) {
+                  <div class="playback-row">
+                    <button class="btn small" type="button" [class.btn-primary]="!!edit()" (click)="edit() ? regenerateEdit() : makeEdit()" [disabled]="!musicAnalysis() || editBusy()"
+                            title="Cut the flight's best moments together on the song's beat, the best of them on the drop. Moments are picked from inside the render range by how fast the footage rushes past (close to things, flips) plus speed, rolls and punch-outs from the log. The first time, it watches the footage once. Once it's made, Regenerate cuts another, with other good moments">
+                      <app-icon name="film" /> {{ edit() ? 'Regenerate' : 'Auto-edit to the beat' }}
+                    </button>
+                    @if (edit()) {
+                      <button class="btn small" type="button" (click)="clearEdit()" title="Back to rendering the render range as it is">Undo the edit</button>
+                    }
+                    <span class="offset" title="How long the edit should be. It's shorter when the flight hasn't enough good moments, or the song ends first">
+                      <label for="edit-length">Length</label>
+                      <select id="edit-length" [ngModel]="editTarget()" (ngModelChange)="setEdit('length', +$event)">
+                        @for (s of editLengths; track s) { <option [ngValue]="s">{{ s }} s</option> }
+                      </select>
+                    </span>
+                    <span class="offset" title="How long each clip runs, in the song's beats (4 is a bar), so every cut lands on the beat. The first clip can be shorter, to line the cuts up with the drop">
+                      <label for="edit-beats">Cut every</label>
+                      <select id="edit-beats" [ngModel]="editBeats()" (ngModelChange)="setEdit('beats', +$event)">
+                        @for (n of editBeatChoices; track n) {
+                          <option [ngValue]="n">{{ n }} beats{{ beatPeriod() ? ' (' + (n * beatPeriod()).toFixed(1) + ' s)' : '' }}</option>
+                        }
+                      </select>
+                    </span>
+                    <label class="check" title="Keep the flight's own sound under the music. Off by default: the motors jump at every cut">
+                      <input type="checkbox" [ngModel]="editSound()" (ngModelChange)="editSound.set($event)" /> Flight sound
+                    </label>
+                  </div>
+                  @if (edit(); as clips) {
+                    <p class="hint">{{ clips.length }} clips, {{ clockText(renderLength()) }} with the song from {{ clockText(musicStart()) }}.
+                      Play to watch it; <strong>Video .mp4</strong> renders it. {{ trickText() }}</p>
+                  }
+                  @if (editNote()) { <p class="hint">{{ editNote() }}</p> }
+                }
               </div>
             }
                 }
@@ -1251,6 +1293,12 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   <button class="btn small step" type="button" [class.btn-primary]="showPip()" [attr.aria-pressed]="showPip()" aria-label="Stick cam picture"
                           title="Stick cam picture in the bottom half, from your sound track video"
                           (click)="showPip.set(!showPip())"><app-icon name="pip" /></button>
+                }
+                <!-- Nothing in vertical's bottom half: fill it with the footage itself, soft and dark, so it isn't a black slab. -->
+                @if (vertical() && videoUrl() && !hasCam()) {
+                  <button class="btn small step" type="button" [class.btn-primary]="bottomFill()" [attr.aria-pressed]="bottomFill()" aria-label="Footage fill in the bottom half"
+                          title="Fill the bottom half with your footage, zoomed in, blurred and darkened toward the bottom, so it fills the space without pulling the eye"
+                          (click)="bottomFill.set(!bottomFill())"><app-icon name="layers" /></button>
                 }
                 @if (opts().showStats) {
                   <span class="stats-time" title="After the log ends: a {{ gapMs }} ms blank, then the stats for this long. Drag the preview past the end to see them.">
@@ -1436,7 +1484,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .video-sync .triggers .offset { display: contents; }
     .frame .beat-vignette { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; image-rendering: pixelated; }
     /* Shown whole (4:3 in 16:9), it covers the picture only, not the black bars beside it. */
-    .beat-vignette.fit { left: 50%; right: auto; width: auto; height: 100%; transform: translateX(-50%); }
+    /* As specific as the rule above (scoped styles count every class), so it wins: just the 4:3 picture, between the bars. */
+    .frame .beat-vignette.fit { left: 50%; right: auto; width: auto; height: 100%; transform: translateX(-50%); }
     /*
      * Vertical is a split screen in three layers: the stick cam at the back (below the split), the flight footage over
      * it (above), and the HUD on top. The split sits 53.7% down, as on a real Short. Neither video is clipped to its
@@ -1462,6 +1511,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     /* The stick cam (vertical only): the bottom of the split screen, under the footage and the HUD. */
     .pip { position: absolute; inset: 53.7% 0 0 0; z-index: 0; pointer-events: none; background: #000; }
     .pip.hidden { display: none; }
+    /* Under the footage (whose zoom can spill down over it) and the HUD: beats the .stage.vertical .frame canvas rule. */
+    .stage.vertical .frame .bottom-fill { position: absolute; inset: 53.7% 0 0 0; width: 100%; height: 46.3%; z-index: 0; pointer-events: none; }
     /* Both sliders' labels share a width so the two bars line up. */
     .scrub-label { font-weight: 600; font-size: .92rem; flex: 0 0 7.5rem; }
     .video-sync { display: grid; gap: .5rem; margin-top: .6rem; font-size: .92rem; justify-items: start; }
@@ -1755,6 +1806,28 @@ export class OverlayExportComponent {
   /** The sound track came from a video, so in vertical its picture can show in the bottom half. */
   audioIsVideo = signal(false);
   showPip = signal(readPrefs().showPip ?? true);
+  /** Fill vertical's bottom with the footage, soft and dark, when there's no stick cam there. */
+  bottomFill = signal(readPrefs().bottomFill ?? true);
+  /** The fill is showing: vertical, footage loaded, nothing else in the bottom, and switched on. */
+  showFill = computed(() => this.vertical() && this.backdrop() === 'video' && !!this.videoUrl() && !this.hasCam() && this.bottomFill());
+  private fillCanvas = viewChild<ElementRef<HTMLCanvasElement>>('fillCanvas');
+  /** Redraws the fill from the footage's frame on screen as it plays and seeks. */
+  private drawFillNow = effect(() => {
+    const on = this.showFill(), c = this.fillCanvas()?.nativeElement;
+    this.videoTime();
+    untracked(() => {
+      const v = this.bgVideo()?.nativeElement;
+      if (!on || !c || !v) return;
+      const g = c.getContext('2d');
+      const draw = () => {
+        if (!g) return;
+        g.clearRect(0, 0, c.width, c.height);
+        drawBottomFill(g, v, v.videoWidth, v.videoHeight, { x: 0, y: 0, w: c.width, h: c.height });
+      };
+      if (v.readyState < 2) v.addEventListener('loadeddata', draw, { once: true });
+      else draw();
+    });
+  });
   audioUrl = signal<string | null>(null);
   audioName = signal('');
   /** Claps found in the phone recording, in seconds, earliest first. */
@@ -1787,7 +1860,10 @@ export class OverlayExportComponent {
   /** "+3.0 dB", "−6.5 dB", "0.0 dB". */
   readonly dbText = (db: number) => `${db > 0 ? '+' : db < 0 ? '−' : ''}${Math.abs(db).toFixed(1)} dB`;
   /** How long the finished video runs, the stats hold included. */
-  renderLength = computed(() => Math.max(0, this.renderEnd() - this.renderStart()) + this.renderStats().hold);
+  renderLength = computed(() => {
+    const clips = this.edit();
+    return clips ? editLength(clips) : Math.max(0, this.renderEnd() - this.renderStart()) + this.renderStats().hold;
+  });
   /**
    * The loudest sample at this gain, in dB below full scale (0 or more clips): over the part of the sound track in the
    * render range, or all of it without footage to place it. `fit` is the gain that puts it at −1 dB.
@@ -1890,7 +1966,7 @@ export class OverlayExportComponent {
   /** The fades' level at the preview's current moment, 0 to 1. */
   private musicFade = signal(1);
   /** Where the music is, in seconds into the song: it follows the footage from the Render range's start. */
-  musicCursor = computed(() => this.videoTime() - this.renderStart() + this.musicStart());
+  musicCursor = computed(() => (this.outOf(this.videoTime()) ?? -1) + this.musicStart());
   /** Song time under the pointer on the music graph. */
   musicHover = signal<number | null>(null);
   /** Each step of the song's peaks as it will sound: at the music gain, and inside the video with the fades applied. */
@@ -2023,16 +2099,21 @@ export class OverlayExportComponent {
     // A switched-off effect draws at strength 0.
     const fx = { ...settings, ...Object.fromEntries(MUSIC_EFFECTS.map(k => [k, enabled[k] ? settings[k] : 0])) };
     const offset = this.videoOffset(), start = this.renderStart(), song = this.musicStart(), len = this.renderLength();
-    const fadeIn = this.musicFadeIn(), fadeOut = this.musicFadeOut();
+    const fadeIn = this.musicFadeIn(), fadeOut = this.musicFadeOut(), clips = this.edit();
+    const atOut = (out: number) => {
+      if (out < 0 || out > len) return null;
+      const lv = analysis.at(out + song, fx.sensitivity, fx.hitLength,
+                             { osd: fx.osdTrigger, footage: fx.footageTrigger, vignette: fx.vignetteTrigger });
+      const k = fadeLevel(out, len, fadeIn, fadeOut);
+      return { ...lv, bass: lv.bass * k, mid: lv.mid * k, treble: lv.treble * k, hit: lv.hit * k, punch: lv.punch * k, vigPunch: lv.vigPunch * k };
+    };
     return {
       ...fx,
+      atOut,
+      // Seconds into the finished video: from the range's start, or wherever an auto-edit shows that moment.
       at: t => {
-        const out = t + offset - start; // seconds into the finished video
-        if (out < 0 || out > len) return null;
-        const lv = analysis.at(out + song, fx.sensitivity, fx.hitLength,
-                               { osd: fx.osdTrigger, footage: fx.footageTrigger, vignette: fx.vignetteTrigger });
-        const k = fadeLevel(out, len, fadeIn, fadeOut);
-        return { ...lv, bass: lv.bass * k, mid: lv.mid * k, treble: lv.treble * k, hit: lv.hit * k, punch: lv.punch * k, vigPunch: lv.vigPunch * k };
+        const out = clips ? editOut(clips, t + offset) : t + offset - start;
+        return out === null ? null : atOut(out);
       },
     };
   });
@@ -2043,13 +2124,13 @@ export class OverlayExportComponent {
   private musicReactTrack(len: number): TimelineTrack['react'] {
     const fx = this.musicFx(), analysis = this.musicAnalysis();
     if (!fx || !analysis || len <= 0) return undefined;
-    const song = this.musicStart(), logAt = this.renderStart() - this.videoOffset();
+    const song = this.musicStart();
     // The ticks: the zoom and saturation's triggers, or the vignette's when it's the only footage effect on.
     const trigger = fx.zoom > 0 || fx.saturation > 0 || !(fx.vignette > 0) ? fx.footageTrigger : fx.vignetteTrigger;
     const hits = Array.from(analysis.triggers(trigger, fx.sensitivity), t => (t - song) / len).filter(f => f >= 0 && f <= 1);
     if (!(fx.vignette > 0)) return { hits };
     const n = 600;
-    const level = Float32Array.from({ length: n }, (_, i) => vignetteLevel(fx.at(logAt + ((i + 0.5) / n) * len), fx));
+    const level = Float32Array.from({ length: n }, (_, i) => vignetteLevel(fx.atOut(((i + 0.5) / n) * len), fx));
     return { level, hits };
   }
   /** The music at the footage's current moment, for its zoom and vignette in the preview. */
@@ -2086,6 +2167,9 @@ export class OverlayExportComponent {
           const scale = Math.max(box.width / w, box.height / h) * Math.max(1, zoom);
           const cw = Math.min(w, box.width / scale), ch = Math.min(h, box.height / scale);
           crop = { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch };
+        } else if (fit && zoom > 1) {
+          // Shown whole, the vignette keeps to the picture between the bars; zoomed, that's the middle of the frame.
+          crop = { x: (w - w / zoom) / 2, y: (h - h / zoom) / 2, w: w / zoom, h: h / zoom };
         }
         // Nothing to draw (too faint): clear it, so the last punch's blocks don't hang there.
         if (!vignetteMosaic(src, crop, c, alpha, seed)) c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
@@ -2121,12 +2205,12 @@ export class OverlayExportComponent {
     const m = this.musicEl()?.nativeElement, v = this.bgVideo()?.nativeElement;
     // The sound's fades, where the footage is in the finished video.
     if (v && this.soundLevel) {
-      const at = v.currentTime - this.renderStart();
+      const at = this.outOf(v.currentTime) ?? -1;
       this.soundLevel.gain.value = this.soundOut() * fadeLevel(at, this.renderLength(), this.soundFadeIn(), this.soundFadeOut());
     }
     if (!m) return;
     if (!v) { if (!m.paused) m.pause(); return; }
-    const t = v.currentTime - this.renderStart(), len = this.renderLength(), target = t + this.musicStart();
+    const t = this.outOf(v.currentTime) ?? -1, len = this.renderLength(), target = t + this.musicStart();
     const inside = t >= 0 && t <= len && (!Number.isFinite(m.duration) || target < m.duration);
     this.musicFade.set(fadeLevel(t, len, this.musicFadeIn(), this.musicFadeOut()));
     if (this.musicLevel) this.musicLevel.gain.value = this.musicOut() * this.musicFade();
@@ -2152,7 +2236,7 @@ export class OverlayExportComponent {
              panX: this.camPanX(), panY: this.camPanY() },
       soundGain: this.soundGain(), soundFadeIn: this.soundFadeIn(), soundFadeOut: this.soundFadeOut(),
       musicGain: this.musicGain(), musicFadeIn: this.musicFadeIn(), musicFadeOut: this.musicFadeOut(), musicReact: this.musicReact(),
-      statsSeconds: this.statsSeconds(), showPip: this.showPip(),
+      statsSeconds: this.statsSeconds(), showPip: this.showPip(), bottomFill: this.bottomFill(),
       // This format's toggles as they are, the other's as last left.
       show: { ...readPrefs().show, [formatOf(this.vertical())]: show },
     };
@@ -2201,6 +2285,7 @@ export class OverlayExportComponent {
     this.musicReact.set(readMusicReact(state.musicReact));
     this.statsSeconds.set(state.statsSeconds);
     this.showPip.set(state.showPip);
+    this.bottomFill.set(state.bottomFill ?? true);
     const pending = { state, footage: files.footage?.name ?? null, sound: files.sound?.name ?? null, music: files.music?.name ?? null };
     this.pendingRestore.set(pending);
     setTimeout(() => { if (this.pendingRestore() === pending) this.finishRestore(); }, 20_000);
@@ -2241,7 +2326,8 @@ export class OverlayExportComponent {
   soundMuted = signal(false);
   musicMuted = signal(false);
   /** What the sound and the music play at, mutes included. */
-  private soundOut = computed(() => (this.soundMuted() ? 0 : this.gainFactor()));
+  /** An auto-edit is music only unless its flight sound is switched on: the motors would jump at every cut. */
+  private soundOut = computed(() => (this.soundMuted() || (this.edit() && !this.editSound()) ? 0 : this.gainFactor()));
   private musicOut = computed(() => (this.musicMuted() ? 0 : this.musicFactor()));
   toggleMute(id: TrackId) {
     if (id === 'sound') this.soundMuted.update(m => !m);
@@ -2793,6 +2879,11 @@ export class OverlayExportComponent {
     this.videoUrl.set(URL.createObjectURL(file));
     this.videoName.set(file.name);
     this.footageFile = file;
+    // New footage: watch it afresh for the next edit, and stop watching the old.
+    this.motion.set(null);
+    if (this.watching) this.watching.control.cancelled = true;
+    this.watching = null;
+    this.editBusy.set(false);
     this.usage.fileEvent('footage-loaded', file);
     this.video.set(file);
     this.videoAspect.set(16 / 9); // until the new file says otherwise
@@ -3052,6 +3143,7 @@ export class OverlayExportComponent {
     const v = this.bgVideo()?.nativeElement;
     if (!v) return;
     if (!v.paused) { v.pause(); return; }
+    this.keepInEdit(v, true);
     v.play().then(() => this.followVideo(), () => this.backdropError.set("This browser can't play that video. Try an H.264 MP4."));
   }
 
@@ -3117,6 +3209,8 @@ export class OverlayExportComponent {
   private followVideo() {
     const v = this.bgVideo()?.nativeElement;
     if (!v || v.paused) return;
+    this.keepInEdit(v, false);
+    if (v.paused) return;
     const t = v.currentTime - this.videoOffset();
     this.beforeLog.set(t < 0);
     this.previewTime.set(Math.min(this.previewMax(), Math.max(0, t)));
@@ -3187,6 +3281,143 @@ export class OverlayExportComponent {
   });
   /** How the render slider's handles read out to assistive tech. */
   readonly clockText = (v: number) => preciseClock(v);
+
+  // ---- auto-edit: the flight's best moments cut on the song's big hits ----
+  /** How long an auto-edit should be, s, and how fast it cuts (0 calm to 1 frantic). */
+  editTarget = signal(30);
+  /** How many beats each clip of an edit runs. */
+  editBeats = signal(8);
+  readonly editBeatChoices = [2, 4, 8, 16, 32];
+  /** A beat of the song, s (for showing how long each choice of clip runs); 0 before it's analysed. */
+  beatPeriod = computed(() => this.musicAnalysis()?.beats().period ?? 0);
+  /** Keep the flight's own sound under an edit's music (off: it would jump at every cut). */
+  editSound = signal(false);
+  editNote = signal('');
+  readonly editLengths = [15, 30, 45, 60];
+  /**
+   * The edit, when one's been made: pieces of the footage played back to back in place of the render range. A new song
+   * start, footage, song or sync makes it stale (its cuts no longer land on the beat), so it goes.
+   */
+  edit = linkedSignal<unknown, EditClip[] | null>({
+    source: computed(() => [this.musicStart(), this.videoUrl(), this.musicUrl(), this.videoOffset()]),
+    computation: () => null,
+  });
+  /** The clip an edit is playing in the preview. */
+  private editClip = 0;
+  /** Which edit: 0 the best one, any other a regenerated one (kept when the length or clip length changes). */
+  private editSeed = 0;
+  /** How exciting the flight is moment to moment, for picking the edit's clips. */
+  private flightScore = computed(() => excitement(this.data(), this.seconds(),
+    this.motion()?.motion.length ? this.motion() : null, this.videoOffset(), this.flightTricks()));
+  /** The flight's flips, rolls and drops, which the edit makes sure to show. */
+  flightTricks = computed(() => findTricks(this.data()));
+  /** What the edit found to show off, in a few words, for under its button. */
+  trickText = computed(() => {
+    const t = this.flightTricks(), drops = t.filter(x => x.kind === 'drop').length, flips = t.length - drops;
+    const punched = t.filter(x => x.punched).length;
+    const parts = [flips ? `${flips} flip${flips === 1 ? '' : 's'} and roll${flips === 1 ? '' : 's'}` + (punched ? ` (${punched} punched out)` : '') : '',
+                   drops ? `${drops} drop${drops === 1 ? '' : 's'}` : ''].filter(Boolean);
+    return parts.length ? `Found ${parts.join(' and ')} in the log; they're picked first.` : '';
+  });
+  /** How fast the footage's picture changes, once it's been watched (kept until other footage loads). */
+  private motion = signal<FootageMotion | null>(null);
+  /** Watching the footage for an edit: what's watching and whether to give up. */
+  private watching: { file: File; control: { cancelled: boolean } } | null = null;
+  editBusy = signal(false);
+
+  /** Where footage time `f` lands in the finished video (null: an edit doesn't show it). */
+  private outOf(f: number): number | null {
+    const clips = this.edit();
+    return clips ? editOut(clips, f) : f - this.renderStart();
+  }
+
+  /** Cuts the edit: the moments come from inside the render range, the cuts from the song from where it starts. */
+  async makeEdit() {
+    const analysis = this.musicAnalysis(), v = this.bgVideo()?.nativeElement, file = this.footageFile;
+    if (!analysis || !v) return;
+    // Watch the footage the first time: what it shows matters more than anything the log can say.
+    if (file && !this.motion()) {
+      if (this.watching?.file === file) return;
+      const control = { cancelled: false };
+      this.watching = { file, control };
+      this.editBusy.set(true);
+      this.editNote.set('Watching your footage for the best moments…');
+      let seen: FootageMotion | null = null;
+      try {
+        seen = await footageMotion(file, done => this.editNote.set(`Watching your footage for the best moments… ${Math.round(done * 100)}%`), control);
+      } catch (e) {
+        console.warn('Could not watch the footage', e);
+      }
+      if (this.watching?.control !== control) return;
+      this.watching = null;
+      this.editBusy.set(false);
+      if (this.footageFile !== file) return;
+      // Can't read it: cut from the log alone (and don't try again for this footage).
+      this.motion.set(seen ?? { step: 1, motion: new Float32Array(0) });
+    }
+    const offset = this.videoOffset();
+    const from = Math.max(0, this.renderStart() - offset), to = Math.min(this.seconds(), this.renderEnd() - offset);
+    const songLeft = (this.musicPeaks()?.duration ?? Infinity) - this.musicStart();
+    const want = Math.min(this.editTarget(), songLeft);
+    const clips = autoEdit(this.flightScore(), from, to, offset, analysis, this.musicStart(), this.musicReact().sensitivity,
+                           { length: want, beats: this.editBeats(), seed: this.editSeed });
+    if (!clips.length) {
+      this.edit.set(null);
+      this.editNote.set(to - from < 3 ? 'The footage and the log only overlap for a moment: sync them first.'
+        : "Couldn't find enough of the flight to cut. Try a shorter length or shorter clips.");
+      return;
+    }
+    this.edit.set(clips);
+    const got = editLength(clips);
+    this.editNote.set(got < want - 0.5 ? `The flight had enough good moments for ${preciseClock(got)}.` : '');
+    this.stopVideo();
+    this.editClip = 0;
+    this.scrubVideo(clips[0].from);
+    this.syncAudio(true);
+  }
+
+  /** A new length or clip length re-cuts an edit that's already made. */
+  setEdit(what: 'length' | 'beats', value: number) {
+    if (!Number.isFinite(value)) return;
+    (what === 'length' ? this.editTarget : this.editBeats).set(value);
+    if (this.edit()) this.makeEdit();
+  }
+
+  /** Another edit from the same song and settings: other good moments get their turn (the cuts stay on the beat). */
+  regenerateEdit() {
+    this.editSeed = 1 + Math.floor(Math.random() * 1e9);
+    this.makeEdit();
+  }
+
+  clearEdit() {
+    this.editSeed = 0;
+    this.edit.set(null);
+    this.editNote.set('');
+  }
+
+  /**
+   * While an edit plays, each clip runs to its end and the next takes over; past the last, it stops. Started outside
+   * every clip (or at the end), it starts from the first.
+   */
+  private keepInEdit(v: HTMLVideoElement, starting: boolean) {
+    const clips = this.edit();
+    if (!clips?.length) return;
+    const f = v.currentTime;
+    if (starting) {
+      const i = clips.findIndex(c => f >= c.from && f < c.to - 0.05);
+      this.editClip = i;
+      if (i < 0) {
+        this.editClip = 0;
+        v.currentTime = clips[0].from;
+      }
+      return;
+    }
+    const c = clips[this.editClip];
+    if (!c || (f >= c.from - 0.3 && f < c.to - 0.008)) return;
+    if (this.editClip + 1 >= clips.length) { v.pause(); return; }
+    this.editClip++;
+    v.currentTime = clips[this.editClip].from;
+  }
 
   useWholeClip() {
     this.renderStart.set(0);
@@ -3296,7 +3527,8 @@ export class OverlayExportComponent {
 
     const fadeIn = this.soundFadeIn(), fadeOut = this.soundFadeOut();
     const sound = this.soundFile && this.audioUrl() ? { file: this.soundFile, offset: this.audioOffset() ?? 0, gain: this.soundOut(), fadeIn, fadeOut } : null;
-    const stats = this.renderStats();
+    const clips = this.edit();
+    const stats = clips ? { ...this.renderStats(), hold: 0 } : this.renderStats();
     const plan: RenderPlan = {
       width: w, height: h, fps, vertical: this.vertical(),
       footage: {
@@ -3310,12 +3542,14 @@ export class OverlayExportComponent {
         picture: { brightness: this.camBrightness(), contrast: this.camContrast(), saturation: this.camSaturation(), zoom: this.camZoom(),
                    panX: this.camPanX(), panY: this.camPanY() },
       } : null,
+      fill: this.showFill(),
       // Without a sound track, the footage's own sound, at the sound's gain.
       sound: sound ?? { file: footage, offset: 0, gain: this.soundOut(), fadeIn, fadeOut },
       music: this.musicFile && this.musicUrl() ? {
         file: this.musicFile, start: this.musicStart(), gain: this.musicOut(), fadeIn: this.musicFadeIn(), fadeOut: this.musicFadeOut(),
       } : null,
       hold: stats.hold,
+      clips,
       overlay: { renderer: this.renderer(), opts: { ...this.drawOpts(), statsAfter: stats.after }, logOffset: this.videoOffset(), logEnd: stats.end },
       fadeOut: this.fadeOut(),
       quantizer: this.renderQp(),

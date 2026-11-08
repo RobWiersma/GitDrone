@@ -54,7 +54,7 @@ in, fast and near lossless on your GPU's video encoder, at the resolution your f
 Reels and TikTok, a split screen with your FPV footage on top, the stick cam below, big sticks and the battery over it,
 and the bottom kept clear of the Shorts buttons. Add a **title** in two colours and your **craft name** in Impact with an
 outline, colour your footage like Lumetri's Basic Correction (temperature, tint, saturation, exposure, contrast,
-highlights, shadows, whites, blacks), zoom both videos, add a **music** track (and make the OSD and footage **react to it**, like a music visualizer), set each sound's gain and fades, pick the part to render, and
+highlights, shadows, whites, blacks), zoom both videos, add a **music** track (and make the OSD and footage **react to it**, like a music visualizer, or **auto-edit** the flight's best moments to its beat), set each sound's gain and fades, pick the part to render, and
 fade out at the end, with Betaflight's post-flight stats as the last frame holds. The frame rate follows your footage
 (100 or 120 fps footage comes out at 60).
 
@@ -341,7 +341,10 @@ keeps the best correlation, and only applies it when the match clearly beats eve
 **A sound track from another recording.** A sound track under **Sources** plays a second file's sound (a phone on the
 ground, or a stick cam) instead of the footage's own. In vertical, if it's a video, its picture fills the bottom half of
 the split screen (toggle it under **Show**), with its own brightness, contrast, saturation, zoom and pan; in 16:9 it
-plays just its sound, so the footage keeps the whole frame. It's its own track, placed on the log just like the footage, with its own
+plays just its sound, so the footage keeps the whole frame. With no stick cam, vertical's bottom half shows the
+footage itself, zoomed in, blurred down to its colours and movement, and darkened toward the bottom, so it fills the
+space behind the sticks and battery without pulling the eye (toggle it under **Show**; the finished video draws it the
+same way). It's its own track, placed on the log just like the footage, with its own
 **Log starts at**, so moving the footage never moves the sound. Its clip on the timeline marks what was heard in it
 (hover a mark for what it is), and the **Sound track** slider in its Track panel moves only the sound, to find a moment in
 it. Ways to place it (`flights/clap.ts`):
@@ -388,6 +391,32 @@ default). **Sensitivity**
 sets how readily one counts (and so how many big hits and drops there are), and **Hit length** how long each takes to
 settle. On the timeline, the music's clip shows a pink tick at every footage trigger and a yellow line for the
 vignette's darkness, so you can see where it'll land against the footage. Muting the music turns the reaction off.
+
+**Auto-edit to the beat.** With footage and music loaded, **Auto-edit to the beat** in the music's Track panel cuts
+the flight's best moments together on the song (`flights/auto-edit.ts`). Tricks come first: flips and rolls (roll or
+pitch stick held near full for a moment, worth more when the throttle punches back up within a second after, as in a
+Matty flip or a power-out) and drops (6 m or more of height lost inside 2.5 s, mostly on low throttle: off a roof, a
+tree or a flip, or a dive, from the barometer with its spikes thrown out, else the GPS). Each clip is chosen to take in
+a trick from just before it to a second after, and the hint under the button says how many it found. There's no gyro
+in this, so how far a flip turned is a guess from how long the stick was held. Between tricks, the footage mostly says
+where the flight is exciting: the first time, it watches the footage once at a tiny size (with a progress note; a few seconds for a short
+clip, a minute or two for long 4K) for how fast the picture rushes past, which is highest flying close to things (gaps,
+containers, trees) and through flips and lowest cruising over open ground. The log adds speed against the flight's own
+top speeds, flips and rolls (roll or pitch stick held near full), punch-outs (the throttle snapped up), current spikes,
+and fast climbs and dives, each measured against that flight, with time on the ground or idling left out. The song says
+where to cut: its beat is tracked (tempo, then each beat), and the cuts fall every few beats, lined up so the first drop
+lands on a cut with the flight's best moment on it; the rest of the moments go to the loudest parts of the song first,
+and the edit ends on a beat line. No bit of the flight is used twice, and clips come from at least 3 s apart in it so
+two don't show the same stretch. Once there's an edit, the button becomes **Regenerate**: another cut on the same
+beats, with each stretch of the flight given some luck up or down so other good moments get their turn. **Length** (15, 30, 45 or 60 s; shorter if the
+flight or song runs out) and **Cut every** (2, 4, 8, 16 or 32 beats, each shown in seconds for that song; 8 to start)
+re-cut it as you change them. The song
+plays straight through from **Song starts at**, and the footage, the stick cam and the OSD jump at each cut, so the OSD
+always shows that moment's numbers. It's music only unless **Flight sound** is ticked, since the motors would jump at
+every cut. The moments come from inside the render range, so narrowing the range keeps the edit to part of the flight.
+**Play** previews the edit, and **Video .mp4** renders it in place of the range, with no post-flight stats (it ends
+mid-flight) and the credit over its last seconds. **Undo the edit** goes back to the range; a new song start, footage,
+song or sync clears it, since its cuts would no longer land on the beat.
 
 It works without footage too: with the Checkerboard or Sky backdrop, **Play** runs the overlay along with the sound.
 Preview only: the exported overlay has no sound; in Premiere, Synchronize → Audio lines the two up. Checkerboard and Sky backdrops are there too; none of them end up in the export.

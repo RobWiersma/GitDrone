@@ -6,6 +6,7 @@ import { Grade, GradeRenderer, isNeutral } from './grade';
 import type { AudioCodec, StreamTargetChunk, Target, VideoCodec, WrappedCanvas } from 'mediabunny';
 import { OverlayOptions, OverlayRenderer } from './overlay-renderer';
 import { drawVignette, footagePunch, saturationBoost, vignetteLevel } from './music-react';
+import { EditClip } from './auto-edit';
 
 /**
  * Renders the finished video: the pilot's footage, the stick cam, the sound and the OSD baked into one H.264/AAC MP4,
@@ -26,8 +27,15 @@ export interface RenderPlan {
              /** Its Lumetri-style colour, graded on the GPU. */ grade: Grade };
   /** Seconds after `footage.end` that the last footage frame stays up, so the post-flight stats can finish over it. */
   hold: number;
+  /**
+   * An auto-edit: these pieces of the footage back to back in place of `footage.start`..`end` (no hold). The footage,
+   * stick cam, sound and OSD jump at each cut; the music and its effects run straight through.
+   */
+  clips?: EditClip[] | null;
   /** A stick cam whose picture fills the bottom of a vertical frame; `offset` is where it starts in footage time. */
   cam: { file: File; offset: number; picture: Picture } | null;
+  /** Vertical with no stick cam: the bottom filled with the footage itself, zoomed in, soft and dark (see drawBottomFill). */
+  fill?: boolean;
   /** Where the sound comes from: the sound track (at its offset in footage time, raised or lowered by `gain`, 1 for as
    *  recorded), or else the footage's own. */
   sound: { file: File; offset: number; gain: number; fadeIn: number; fadeOut: number } | null;
@@ -124,8 +132,23 @@ export const fpsLabel = (fps: number) => String(Number(fps.toFixed(3)));
 export async function renderVideo(plan: RenderPlan, target: RenderTarget | null, progress: (done: number, total: number) => void,
                                   control: { cancelled: boolean }, stage: (what: string) => void = () => undefined): Promise<Blob | null> {
   const { width: W, height: H, fps } = plan;
-  const moving = Math.max(1, Math.round((plan.footage.end - plan.footage.start) * fps));
-  const total = moving + Math.max(0, Math.round(plan.hold * fps));
+  // The footage time of every frame: the range (and the hold after it, for the stick cam and sound running on), or an
+  // auto-edit's clips back to back, each running to the frame its next cut lands on so the cuts stay on the beat.
+  const clips = plan.clips?.length ? plan.clips : null;
+  const times: number[] = [];
+  let moving: number;
+  if (clips) {
+    for (const c of clips) {
+      const frames = Math.round((c.at + c.to - c.from) * fps) - Math.round(c.at * fps);
+      for (let j = 0; j < frames; j++) times.push(c.from + j / fps);
+    }
+    moving = times.length;
+  } else {
+    moving = Math.max(1, Math.round((plan.footage.end - plan.footage.start) * fps));
+    const held = moving + Math.max(0, Math.round(plan.hold * fps));
+    for (let i = 0; i < held; i++) times.push(plan.footage.start + i / fps);
+  }
+  const total = Math.max(1, times.length);
   const seconds = total / fps;
 
   stage('Checking what this browser can encode...');
@@ -175,7 +198,6 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
 
     // Decoded frames, scaled down to roughly the size they're shown at to save work.
     const footageSink = new CanvasSink(footageTrack, { width: Math.min(footageTrack.displayWidth, Math.max(W, H)) });
-    const times = Array.from({ length: total }, (_, i) => plan.footage.start + i / fps);
     // The footage only as far as its end; the hold after it repeats the last frame. The stick cam (and the sound) run on.
     const footageFrames = footageSink.canvasesAtTimestamps(times.slice(0, moving));
     const camDuration = camOk ? await camTrack!.computeDuration() : 0;
@@ -198,11 +220,16 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       ctx.fillRect(0, 0, W, H);
       const logT = t - plan.overlay.logOffset;
       const showHud = logT >= 0 && logT <= plan.overlay.logEnd;
-      if (showHud) plan.overlay.renderer.draw(hudCtx, logT, plan.overlay.opts);
-      const music = plan.overlay.opts.music ?? null, level = music?.at(logT) ?? null;
+      // The music by the finished video's own clock, which an auto-edit's log time doesn't follow; the OSD gets the same.
+      const music = plan.overlay.opts.music ?? null, level = music?.atOut(i / fps) ?? null;
+      let opts = music ? { ...plan.overlay.opts, music: { ...music, at: () => level } } : plan.overlay.opts;
+      // An edit has no post-flight stats (it ends mid-flight), and the credit comes up over its last seconds.
+      if (clips) opts = { ...opts, showStats: false, statsAfter: logT + (seconds - i / fps) };
+      if (showHud) plan.overlay.renderer.draw(hudCtx, logT, opts);
 
       // Back to front: the stick cam (vertical only), the footage over it (zooming and darkening with the music), then the HUD.
       if (plan.cam) drawCam(ctx, cam, plan, W, H);
+      else if (plan.vertical && plan.fill && foot) drawBottomFill(ctx, foot.canvas, foot.canvas.width, foot.canvas.height, bottomBox(W, H));
       drawFootage(ctx, foot, plan, W, H, grader, footagePunch(level, music), saturationBoost(level, music));
       drawVignette(ctx, pictureBox(plan, foot, W, H), vignetteLevel(level, music), level?.vigBeat ?? 0);
       if (showHud) ctx.drawImage(hud, 0, 0);
@@ -257,10 +284,53 @@ function drawFootage(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null,
        { ...p, zoom: p.zoom * punch, saturation: p.saturation * saturation }, 0, 0);
 }
 
+/** The bottom part of the vertical split screen, under the footage: the stick cam's, or the fill's. */
+const bottomBox = (W: number, H: number) => ({ x: 0, y: SPLIT * H, w: W, h: (1 - SPLIT) * H });
+
+/** The fill's look: how far it zooms into the footage, how soft (the share of its box it's shrunk to), and how dark. */
+const FILL = { zoom: 1.4, shrink: 1 / 14, saturate: 60, top: 0.5, bottom: 0.94 };
+let fillScratch: HTMLCanvasElement | null = null;
+
+/**
+ * Fills `box` with the footage (`src`, `sw`×`sh`) when there's nothing else to put there: its middle zoomed in to
+ * cover the box, shrunk to a few dozen pixels and stretched back up (so it's a soft blur of the footage's colours and
+ * movement, nothing to read), desaturated, and darkened more the further down it goes. All on the GPU, no readback.
+ * The preview's bottom fill draws through this too, so the two match.
+ */
+export function drawBottomFill(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sw: number, sh: number,
+                               box: { x: number; y: number; w: number; h: number }) {
+  if (sw <= 0 || sh <= 0 || box.w <= 0 || box.h <= 0) return;
+  const w = Math.max(8, Math.round(box.w * FILL.shrink)), h = Math.max(8, Math.round(box.h * FILL.shrink));
+  fillScratch ??= document.createElement('canvas');
+  const small = fillScratch;
+  if (small.width !== w || small.height !== h) {
+    small.width = w;
+    small.height = h;
+  }
+  const g = small.getContext('2d');
+  if (!g) return;
+  const k = Math.max(w / sw, h / sh) * FILL.zoom, cw = w / k, ch = h / k;
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.filter = `saturate(${FILL.saturate}%)`;
+  g.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, w, h);
+  g.filter = 'none';
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(small, box.x, box.y, box.w, box.h);
+  const fade = ctx.createLinearGradient(0, box.y, 0, box.y + box.h);
+  fade.addColorStop(0, `rgba(0,0,0,${FILL.top})`);
+  fade.addColorStop(1, `rgba(0,0,0,${FILL.bottom})`);
+  ctx.fillStyle = fade;
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+  ctx.restore();
+}
+
 /** The stick cam: the bottom part of the vertical split screen, shown whole. */
 function drawCam(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null, plan: RenderPlan, W: number, H: number) {
   const p = plan.cam!.picture;
-  if (frame) draw(ctx, frame.canvas, { x: 0, y: SPLIT * H, w: W, h: (1 - SPLIT) * H }, 'contain', p, p.panX ?? 0, p.panY ?? 0);
+  if (frame) draw(ctx, frame.canvas, bottomBox(W, H), 'contain', p, p.panX ?? 0, p.panY ?? 0);
 }
 
 /**
@@ -299,12 +369,19 @@ async function mixSound(plan: RenderPlan, seconds: number, open: (file: File) =>
   }
   // From where the output's first moment is in the recording.
   // The sound's and the music's own fades each ride on a gain of their own, before the whole mix's fade out.
-  stage(`Reading the sound from ${source.file.name}...`);
-  const heard = await addTrack(mix, fades(mix, out, source.fadeIn, source.fadeOut, seconds), open(source.file),
-                               plan.footage.start - source.offset, seconds, source.gain);
+  // An auto-edit's sound is cut with its clips; otherwise it runs from the range's start.
+  const pieces: Piece[] = plan.clips?.length
+    ? plan.clips.map(c => ({ from: c.from - source.offset, at: c.at, seconds: c.to - c.from }))
+    : [{ from: plan.footage.start - source.offset, at: 0, seconds }];
+  // Switched off (an auto-edit's default): none at all, not even the footage's own.
+  let heard = false;
+  if (source.gain > 0) {
+    stage(`Reading the sound from ${source.file.name}...`);
+    heard = await addTrack(mix, fades(mix, out, source.fadeIn, source.fadeOut, seconds), open(source.file), pieces, seconds, source.gain);
+  }
   if (plan.music) stage(`Reading the music from ${plan.music.file.name}...`);
   const music = !!plan.music && await addTrack(mix, fades(mix, out, plan.music.fadeIn, plan.music.fadeOut, seconds),
-                                                open(plan.music.file), plan.music.start, seconds, plan.music.gain);
+                                                open(plan.music.file), [{ from: plan.music.start, at: 0, seconds }], seconds, plan.music.gain);
   if (!heard && !music) return null;
   stage('Mixing the sound...');
   return mix.startRendering();
@@ -326,25 +403,33 @@ function fades(mix: OfflineAudioContext, into: AudioNode, fadeIn: number, fadeOu
   return gain;
 }
 
+/** A stretch of a recording in the output: `seconds` of it from `from` s into the recording, landing `at` s into the output. */
+interface Piece { from: number; at: number; seconds: number }
+
 /**
- * Lays `seconds` of a recording's sound into `mix` through a gain of `gain`, starting `from` seconds into the recording
- * (negative: the recording starts that far into the output). False when it has no sound this browser can decode.
+ * Lays pieces of a recording's sound into `mix` (an output `seconds` long) through a gain of `gain`; a piece starting
+ * before the recording does (negative `from`) is silent until it starts. False when it has no sound this browser can decode.
  */
-async function addTrack(mix: OfflineAudioContext, into: AudioNode, input: Input, from: number, seconds: number, gain: number): Promise<boolean> {
+async function addTrack(mix: OfflineAudioContext, into: AudioNode, input: Input, pieces: Piece[], seconds: number, gain: number): Promise<boolean> {
   const track = await input.getPrimaryAudioTrack();
   if (!track || !(await track.canDecode())) return false;
   // The decoded chunks are copied into one buffer covering the whole output, at the recording's own rate, and played as
   // one node: the offline mixer slows to a crawl with a node per chunk (thousands for a few minutes of sound).
   let whole: AudioBuffer | null = null;
-  for await (const { buffer, timestamp } of new AudioBufferSink(track).buffers(Math.max(0, from), from + seconds)) {
-    whole ??= mix.createBuffer(buffer.numberOfChannels, Math.max(1, Math.ceil(seconds * buffer.sampleRate)), buffer.sampleRate);
-    // Where the chunk lands in the output, in samples; a chunk starting before the output's first moment is cut.
-    const at = Math.round((timestamp - from) * whole.sampleRate), skip = Math.max(0, -at);
-    const count = Math.min(buffer.length - skip, whole.length - Math.max(0, at));
-    if (count <= 0) continue;
-    for (let c = 0; c < whole.numberOfChannels; c++) {
-      const data = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1));
-      whole.copyToChannel(data.subarray(skip, skip + count), c, Math.max(0, at));
+  const sink = new AudioBufferSink(track);
+  for (const piece of pieces) {
+    const { from } = piece;
+    for await (const { buffer, timestamp } of sink.buffers(Math.max(0, from), from + piece.seconds)) {
+      whole ??= mix.createBuffer(buffer.numberOfChannels, Math.max(1, Math.ceil(seconds * buffer.sampleRate)), buffer.sampleRate);
+      const rate = whole.sampleRate, start = Math.round(piece.at * rate), end = Math.min(whole.length, Math.round((piece.at + piece.seconds) * rate));
+      // Where the chunk lands in the output, in samples; the parts before the piece's start or past its end are cut.
+      const at = start + Math.round((timestamp - from) * rate), skip = Math.max(0, start - at);
+      const count = Math.min(buffer.length - skip, end - Math.max(start, at));
+      if (count <= 0) continue;
+      for (let c = 0; c < whole.numberOfChannels; c++) {
+        const data = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1));
+        whole.copyToChannel(data.subarray(skip, skip + count), c, Math.max(start, at));
+      }
     }
   }
   if (!whole) return true; // nothing of it falls inside the output
