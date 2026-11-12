@@ -88,17 +88,28 @@ public static class FlightTrack
         return result;
     }
 
-    /// <summary>{"points":[[t,roll,pitch,yaw,throttle],...]}, t in seconds since log start. Null without stick fields.</summary>
+    /// <summary>
+    /// {"points":[[t,roll,pitch,yaw,throttle(,gyroRoll,gyroPitch,gyroYaw(,gMean,gPeak))],...]}, t in seconds since log
+    /// start. Logs with the gyro add its rates over the next 40 ms (whole deg/s, averaged), and with the accelerometer
+    /// too, its pull in g (averaged, and at its peak). Null without stick fields.
+    /// </summary>
     public static string? BuildSticks(BlackboxLog log)
     {
         if (log.Sticks.Count == 0) return null;
+        var motion = log.Motion.Count == log.Sticks.Count ? log.Motion : null;
         var sb = new StringBuilder("{\"points\":[");
         for (var i = 0; i < log.Sticks.Count; i++)
         {
             var s = log.Sticks[i];
             if (i > 0) sb.Append(',');
             sb.Append('[').Append(F((s.TimeUs - log.FirstTimeUs) / 1e6, 2)).Append(',').Append(s.Roll).Append(',').Append(s.Pitch)
-              .Append(',').Append(s.Yaw).Append(',').Append(s.Throttle).Append(']');
+              .Append(',').Append(s.Yaw).Append(',').Append(s.Throttle);
+            if (motion?[i] is { } m)
+            {
+                sb.Append(',').Append(F(m.GyroRoll, 0)).Append(',').Append(F(m.GyroPitch, 0)).Append(',').Append(F(m.GyroYaw, 0));
+                if (m.AccMeanG is { } mean && m.AccPeakG is { } peak) sb.Append(',').Append(F(mean, 2)).Append(',').Append(F(peak, 2));
+            }
+            sb.Append(']');
         }
         return sb.Append("]}").ToString();
     }

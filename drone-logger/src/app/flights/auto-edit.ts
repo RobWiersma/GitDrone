@@ -1,5 +1,6 @@
 import { ALL_FORMATS, BlobSource, CanvasSink, Input } from 'mediabunny';
 import { OverlayData } from './overlay-renderer';
+import { StickPoint } from './flight.models';
 import { MusicAnalysis } from './music-react';
 
 /**
@@ -103,7 +104,22 @@ export async function footageMotion(file: File, progress: (done: number) => void
 }
 
 /** A trick found in the log: when it starts and ends (log time, s), what it is, and how big (about 1 to 2). */
-export interface Trick { from: number; to: number; kind: 'flip' | 'roll' | 'drop'; punched: boolean; size: number }
+export interface Trick {
+  from: number; to: number; kind: 'flip' | 'roll' | 'drop' | 'punch'; punched: boolean; size: number;
+  /** How far a flip or roll turned, from the gyro (null without one: then it's a guess from the stick). */
+  degrees?: number | null;
+}
+
+/** With the gyro: a spin is the craft turning at least SPIN_RATE deg/s about roll or pitch, the same way... */
+const SPIN_RATE = 120;
+/** ...for SPIN_TURN degrees or more in all, peaking at SPIN_PEAK deg/s or faster (not a lazy carve). */
+const SPIN_TURN = 150, SPIN_PEAK = 300;
+/** With the accelerometer: a drop is under FALL_G for FALL_HELD s or longer (falling free, props near idle)... */
+const FALL_G = 0.45, FALL_HELD = 0.5;
+/** ...and a punch-out is a pull of PUNCH_G or more held PUNCH_HELD s (motors flat out, not a bump). */
+const PUNCH_G = 3.5, PUNCH_HELD = 0.25;
+/** The stick slots the gyro and accelerometer are averaged over, s. */
+const SLOT = 0.04;
 
 /** Roll or pitch stick at least this far over (of full) counts as throwing a flip or roll. */
 const TRICK_STICK = 0.8;
@@ -113,11 +129,12 @@ const TRICK_HELD = 0.1;
 const DROP_LOSS = 6, DROP_WITHIN = 2.5;
 
 /**
- * The flight's tricks, from the sticks and height in the log (there's no gyro here, so how far it turned is a guess
- * from how long the stick was held). Flips and rolls: roll or pitch stick held near full, with whether the throttle
- * punched back up within a second after (a Matty flip or a power-out). Drops: a fall of DROP_LOSS m or more inside
- * DROP_WITHIN s, mostly on low throttle (off a building or a tree, or a dive), from the barometer with its spikes
- * thrown out (else the GPS).
+ * The flight's tricks. Flips and rolls: with the gyro in the log, the craft really turning (how far, added up from its
+ * rates); without, roll or pitch stick held near full (how far is a guess). Either way, with whether the throttle
+ * punched back up within a second after (a Matty flip or a power-out). Drops: with the accelerometer, falling free for
+ * a while; without, a fall of DROP_LOSS m or more inside DROP_WITHIN s, mostly on low throttle (off a building or a
+ * tree, or a dive), from the barometer with its spikes thrown out (else the GPS). With the accelerometer, hard
+ * punch-outs too: a pull of several g held for a moment.
  */
 export function findTricks(data: OverlayData): Trick[] {
   const sticks = data.sticks ?? [], out: Trick[] = [];
@@ -126,15 +143,102 @@ export function findTricks(data: OverlayData): Trick[] {
     while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (sticks[mid][0] <= t) lo = mid; else hi = mid - 1; }
     return sticks.length ? (sticks[lo][4] - 1000) / 1000 : 0;
   };
+  const punchedAfter = (t: number, low: number) => {
+    let punch = 0;
+    for (let dt = 0; dt <= 1; dt += 0.04) punch = Math.max(punch, throttleAt(t + dt));
+    return low <= 0.15 && punch >= 0.45;
+  };
+  const gyro = sticks.length > 0 && sticks.filter(p => p.length >= 8).length > sticks.length * 0.9;
+  const acc = sticks.length > 0 && sticks.filter(p => p.length >= 10).length > sticks.length * 0.9;
+  if (gyro) out.push(...spins(sticks, punchedAfter));
+  else out.push(...stickFlips(sticks, punchedAfter));
+  if (acc) out.push(...falls(sticks), ...punches(sticks, out));
+  else out.push(...heightDrops(data, throttleAt));
+  return out.sort((a, b) => a.from - b.from);
+}
+
+/**
+ * Flips and rolls from the gyro: runs of the roll or pitch rate at SPIN_RATE deg/s or more one way, added up into
+ * degrees turned (each rate is the average over its 40 ms, so the sum is the real angle).
+ */
+function spins(sticks: StickPoint[], punchedAfter: (t: number, low: number) => boolean): Trick[] {
+  const out: Trick[] = [];
+  for (const [kind, i] of [['roll', 5], ['pitch', 6]] as const) {
+    let run: { from: number; to: number; sign: number; deg: number; peak: number; low: number } | null = null;
+    const close = () => {
+      if (run && Math.abs(run.deg) >= SPIN_TURN && run.peak >= SPIN_PEAK) {
+        const degrees = Math.abs(run.deg), punched = punchedAfter(run.to, run.low);
+        // A half flip's worth 1.3, a full one 1.75, more tops out at 1.9; a punch out of it adds 0.3.
+        const size = 1.3 + Math.min(0.6, (degrees - 180) / 400) + (punched ? 0.3 : 0);
+        out.push({ from: run.from, to: run.to, kind: kind === 'pitch' ? 'flip' : 'roll', punched, size, degrees: Math.round(degrees) });
+      }
+      run = null;
+    };
+    for (const p of sticks) {
+      const rate = p[i] ?? 0;
+      if (Math.abs(rate) < SPIN_RATE) { close(); continue; }
+      if (run && Math.sign(rate) !== run.sign) close();
+      run ??= { from: p[0], to: p[0], sign: Math.sign(rate), deg: 0, peak: 0, low: 1 };
+      run.deg += rate * SLOT;
+      run.to = p[0] + SLOT;
+      run.peak = Math.max(run.peak, Math.abs(rate));
+      run.low = Math.min(run.low, (p[4] - 1000) / 1000);
+    }
+    close();
+  }
+  return out;
+}
+
+/** Drops from the accelerometer: under FALL_G for FALL_HELD s or more, bigger the longer it falls. */
+function falls(sticks: StickPoint[]): Trick[] {
+  const out: Trick[] = [];
+  let from = -1, to = -1;
+  const close = () => {
+    if (from >= 0 && to - from >= FALL_HELD) out.push({ from, to, kind: 'drop', punched: false, size: Math.min(1.6, 0.7 + (to - from) / 1.5) });
+    from = -1;
+  };
+  for (const p of sticks) {
+    if ((p[8] ?? 1) < FALL_G) {
+      if (from < 0) from = p[0];
+      to = p[0] + SLOT;
+    } else close();
+  }
+  close();
+  return out;
+}
+
+/** Punch-outs from the accelerometer: PUNCH_G or more held PUNCH_HELD s, not already the end of a flip that punched. */
+function punches(sticks: StickPoint[], tricks: Trick[]): Trick[] {
+  const out: Trick[] = [];
+  let from = -1, to = -1, top = 0;
+  const close = () => {
+    if (from >= 0 && to - from >= PUNCH_HELD && !tricks.some(t => t.punched && from >= t.from && from <= t.to + 1)) {
+      out.push({ from, to, kind: 'punch', punched: true, size: Math.min(1.3, 0.6 + (top - PUNCH_G) / 4 + (to - from) / 2) });
+    }
+    from = -1;
+    top = 0;
+  };
+  for (const p of sticks) {
+    if ((p[8] ?? 0) >= PUNCH_G) {
+      if (from < 0) from = p[0];
+      to = p[0] + SLOT;
+      top = Math.max(top, p[8]!);
+    } else close();
+  }
+  close();
+  return out;
+}
+
+/** Flips and rolls from the sticks alone (no gyro in the log): roll or pitch stick held near full for a moment. */
+function stickFlips(sticks: StickPoint[], punchedAfter: (t: number, low: number) => boolean): Trick[] {
+  const out: Trick[] = [];
   let run: { from: number; to: number; axis: 'roll' | 'pitch'; low: number } | null = null;
   const close = () => {
     if (run && run.to - run.from >= TRICK_HELD - 1e-6) {
-      let punch = 0;
-      for (let dt = 0; dt <= 1; dt += 0.04) punch = Math.max(punch, throttleAt(run.to + dt));
-      const punched = run.low <= 0.15 && punch >= 0.45;
+      const punched = punchedAfter(run.to, run.low);
       // Over in under a second where a drop runs two or three, so it counts for more per moment to hold its own.
       const size = 1.3 + Math.min(0.5, (run.to - run.from) / 0.3) + (punched ? 0.3 : 0);
-      out.push({ from: run.from, to: run.to, kind: run.axis === 'pitch' ? 'flip' : 'roll', punched, size });
+      out.push({ from: run.from, to: run.to, kind: run.axis === 'pitch' ? 'flip' : 'roll', punched, size, degrees: null });
     }
     run = null;
   };
@@ -147,7 +251,12 @@ export function findTricks(data: OverlayData): Trick[] {
     } else close();
   }
   close();
+  return out;
+}
 
+/** Drops from the height alone (no accelerometer in the log): a big fall, quickly, mostly on low throttle. */
+function heightDrops(data: OverlayData, throttleAt: (t: number) => number): Trick[] {
+  const out: Trick[] = [];
   // Height, a sample every 0.1 s, with the barometer's spikes (tens of metres for a moment) dropped first.
   const baro = (data.telemetry ?? []).filter(p => p[2] !== null).map(p => [p[0], p[2]!] as const);
   const track = data.track?.points ?? [];
@@ -177,7 +286,7 @@ export function findTricks(data: OverlayData): Trick[] {
       k = low;
     }
   }
-  return out.sort((a, b) => a.from - b.from);
+  return out;
 }
 
 /**

@@ -125,10 +125,10 @@ interface Opening {
           </div>
           <div class="field footage">
             <label for="osd-sound">Sound track (optional)</label>
-            <input id="osd-sound" type="file" appKeepFile accept="audio/*,video/*" (change)="onSound($event)" [disabled]="exporting()" />
+            <input id="osd-sound" type="file" appKeepFile accept="video/*,audio/*" (change)="onSound($event)" [disabled]="exporting()" />
             <p class="hint">
               @if (sound(); as s) { {{ s.name }} plays with the preview, lined up on the arming it hears. }
-              @else { A phone recording or stick cam video of the flight (only its sound is used). It's lined up on the motors arming, or on a clap. }
+              @else { A phone or stick cam video of the flight (or just a sound recording). Its sound plays under the footage, and in vertical its picture can fill the bottom half. It's lined up on the motors arming, or on a clap. }
             </p>
           </div>
           @if (error()) { <p class="error" role="alert">{{ error() }}</p> }

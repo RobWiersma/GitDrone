@@ -10,6 +10,13 @@ public record GpsSample(long TimeUs, double Lat, double Lon, double AltitudeM, d
 /// <summary>Stick positions from rcCommand: roll/pitch/yaw are -500..500, throttle is 1000..2000 (Betaflight 4.x+).</summary>
 public record StickSample(long TimeUs, int Roll, int Pitch, int Yaw, int Throttle);
 
+/// <summary>
+/// How the craft moved over one 40 ms stick slot (the one starting at the matching StickSample): the gyro's rotation
+/// rates in deg/s averaged over every frame in it (so adding them up gives the real angle turned, flips included),
+/// and the accelerometer's pull in g, averaged (near 0 in freefall) and at its peak (impacts are a frame or two).
+/// </summary>
+public record MotionSample(double GyroRoll, double GyroPitch, double GyroYaw, double? AccMeanG, double? AccPeakG);
+
 /// <summary>Every main-frame field at 25 Hz, in MainFields order (raw firmware units).</summary>
 public record MainSample(long TimeUs, int[] Values);
 
@@ -36,7 +43,9 @@ public record BlackboxLog(
     IReadOnlyList<string> MainFields,
     IReadOnlyList<MainSample> Samples,
     IReadOnlyList<SlowSample> Slow,
-    IReadOnlyList<LogEvent> Events)
+    IReadOnlyList<LogEvent> Events,
+    /// <summary>One per stick sample, same order; empty when the log has no gyro (blackbox_disable_gyro).</summary>
+    IReadOnlyList<MotionSample> Motion)
 {
     public long DurationMs => Math.Max(0, (LastTimeUs - FirstTimeUs) / 1000);
 }
@@ -133,6 +142,14 @@ public static class BlackboxDecoder
         private readonly List<LogEvent> events = [];
         private int[] rcIndex = [];
         private long nextStickUs = long.MinValue;
+        private int[] gyroIndex = [];
+        private int[] accIndex = [];
+        private double gyroScale = 1, acc1G;
+        private readonly List<MotionSample> motion = [];
+        // The stick slot being added up: gyro sums per axis, the accelerometer's pull summed and at its peak, frames in it.
+        private readonly double[] slotGyro = new double[3];
+        private double slotAcc, slotAccPeak;
+        private int slotFrames;
         /// <summary>25 Hz: smooth enough to animate, small enough to store per flight.</summary>
         private const long StickIntervalUs = 40_000;
 
@@ -156,7 +173,17 @@ public static class BlackboxDecoder
             throttleIndex = i.IndexOf("rcCommand[3]");
             rcIndex = [i.IndexOf("rcCommand[0]"), i.IndexOf("rcCommand[1]"), i.IndexOf("rcCommand[2]"), throttleIndex];
             if (rcIndex.Any(x => x < 0)) rcIndex = [];
+            gyroIndex = [i.IndexOf("gyroADC[0]"), i.IndexOf("gyroADC[1]"), i.IndexOf("gyroADC[2]")];
+            if (gyroIndex.Any(x => x < 0)) gyroIndex = [];
+            accIndex = [i.IndexOf("accSmooth[0]"), i.IndexOf("accSmooth[1]"), i.IndexOf("accSmooth[2]")];
+            if (accIndex.Any(x => x < 0)) accIndex = [];
+            // Betaflight logs the gyro in deg/s times gyro_scale (1.0), and the accelerometer in units of acc_1G per g.
+            gyroScale = headers.TryGetValue("gyro_scale", out var gs) ? HexFloat(gs) ?? 1 : 1;
+            acc1G = headers.TryGetValue("acc_1G", out var a1) && double.TryParse(a1, NumberStyles.Float, CultureInfo.InvariantCulture, out var g1) && g1 > 0 ? g1 : 0;
+            if (acc1G == 0) accIndex = [];
             ParseData();
+            CloseMotionSlot();
+            if (gyroIndex.Length == 0 || motion.Count != sticks.Count) motion.Clear();
 
             if (mainFrames == 0) return null;
 
@@ -174,7 +201,26 @@ public static class BlackboxDecoder
             return new BlackboxLog(index, headers, firstTime, lastTime, mainFrames, corrupt,
                 throttleCount > 0 ? ThrottlePercent(throttleSum / throttleCount) : null,
                 throttleCount > 0 ? ThrottlePercent(throttleMax) : null,
-                home, homeAlt, gps, sticks, i.Names, samples, slow, events);
+                home, homeAlt, gps, sticks, i.Names, samples, slow, events, motion);
+        }
+
+        /// <summary>"0x3f800000": a float's bits as hex, as the header writes gyro_scale.</summary>
+        private static double? HexFloat(string s) =>
+            s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            && uint.TryParse(s.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var bits)
+                ? BitConverter.UInt32BitsToSingle(bits) : null;
+
+        /// <summary>Ends the 40 ms slot that's been adding up (if a stick sample opened one): its averages and peak.</summary>
+        private void CloseMotionSlot()
+        {
+            if (sticks.Count == 0 || motion.Count >= sticks.Count) return;
+            if (slotFrames == 0) { motion.Add(motion.LastOrDefault() ?? new MotionSample(0, 0, 0, null, null)); return; }
+            motion.Add(new MotionSample(Math.Round(slotGyro[0] / slotFrames, 1), Math.Round(slotGyro[1] / slotFrames, 1),
+                Math.Round(slotGyro[2] / slotFrames, 1),
+                accIndex.Length == 3 ? Math.Round(slotAcc / slotFrames, 2) : null, accIndex.Length == 3 ? Math.Round(slotAccPeak, 2) : null));
+            slotGyro[0] = slotGyro[1] = slotGyro[2] = 0;
+            slotAcc = slotAccPeak = 0;
+            slotFrames = 0;
         }
 
         // rcCommand[3] runs 1000..2000 in Betaflight 4.x and later.
@@ -396,9 +442,23 @@ public static class BlackboxDecoder
             if (firstTime < 0) firstTime = frame[FieldTime];
             if (frame[FieldTime] >= nextStickUs)
             {
+                if (gyroIndex.Length == 3 && rcIndex.Length == 4) CloseMotionSlot();
                 samples.Add(new MainSample(frame[FieldTime], frame.Select(v => (int)v).ToArray()));
                 if (rcIndex.Length == 4) sticks.Add(new StickSample(frame[FieldTime], (int)frame[rcIndex[0]], (int)frame[rcIndex[1]], (int)frame[rcIndex[2]], (int)frame[rcIndex[3]]));
                 nextStickUs = (frame[FieldTime] / StickIntervalUs + 1) * StickIntervalUs; // even grid, no drift
+            }
+            // Every frame counts toward its slot's motion, not just the one the stick sample keeps.
+            if (gyroIndex.Length == 3 && sticks.Count > 0)
+            {
+                for (var k = 0; k < 3; k++) slotGyro[k] += frame[gyroIndex[k]] * gyroScale;
+                if (accIndex.Length == 3)
+                {
+                    double x = frame[accIndex[0]], y = frame[accIndex[1]], z = frame[accIndex[2]];
+                    var g = Math.Sqrt(x * x + y * y + z * z) / acc1G;
+                    slotAcc += g;
+                    if (g > slotAccPeak) slotAccPeak = g;
+                }
+                slotFrames++;
             }
             if (throttleIndex >= 0)
             {

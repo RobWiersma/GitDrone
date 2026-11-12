@@ -3,7 +3,8 @@ import { MODES, StickMode, sampleSticks, stickAxes } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
 import { BfOsdElement, BfOsdId, BfOsdLayout } from './bf-osd';
-import { MusicFx, drawReactive } from './music-react';
+import { MusicFx, SparkMask, drawReactive } from './music-react';
+import { CameraTurn } from './camera-turn';
 
 export interface OverlayData {
   track: { home: [number, number] | null; points: TrackPoint[] } | null;
@@ -219,6 +220,11 @@ export const bfLayout = (o: OverlayOptions) => (o.showBfOsd !== false ? o.bfOsd 
 
 /** Where the footage ends in a vertical frame (the stick cam below it), as a fraction of the height. */
 const FOOTAGE_SPLIT = 0.537;
+/**
+ * The music's sparks leave from the lit pixels of a copy of the HUD this many pixels on its long side: at least this
+ * opaque and this bright in some channel (text and lines, not the dark panels). Masks for this many moments are kept.
+ */
+const SPARK_MASK = 640, SPARK_ALPHA = 150, SPARK_BRIGHT = 150, SPARK_MASKS_KEPT = 80, SPARK_MASK_STEP = 0.1;
 
 /** Characters for a Betaflight OSD line: strings as their (capital) letters, numbers as font slots. */
 const bf = (...parts: (string | number)[]) =>
@@ -348,10 +354,57 @@ export class OverlayRenderer {
     }
   }
 
+  /** The craft's GPS speed at log time `t`, m/s; null without a GPS track. */
+  private readonly speedAt = (t: number) => (this.trackTimes.length ? this.data.track!.points[nearest(this.trackTimes, t)][4] : 0);
+
+  /** How the camera turned through the flight, from the gyro (null without one), worked out on first use. */
+  private turn?: { at: CameraTurn | null };
+
   draw(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {
     const level = o.music?.at(t);
     if (!level) return this.drawHud(ctx, t, o);
-    drawReactive(ctx, level, o.music!, t, (layer, panels) => this.drawHud(layer, t, panels ? o : { ...o, panelOpacity: 0, stickBoxOpacity: 0 }));
+    this.turn ??= { at: CameraTurn.from(this.data.sticks) };
+    const { width: W, height: H } = ctx.canvas;
+    drawReactive(ctx, level, o.music!, t, (layer, panels) => this.drawHud(layer, t, panels ? o : { ...o, panelOpacity: 0, stickBoxOpacity: 0 }),
+                 this.sparkSource(W, H, o), { turn: this.turn.at, speed: this.speedAt });
+  }
+
+  /** The lit pixels of the HUD at each log time (a SPARK_MASK copy), worked out once each and kept a while. */
+  private sparkMasks = new Map<number, SparkMask>();
+  /** What the kept masks were drawn with (the layout, OSD and font), so a change starts them afresh. */
+  private sparkKey = '';
+  private sparkCanvas: HTMLCanvasElement | null = null;
+
+  /**
+   * Where the music's sparks can leave from at each log time: the HUD's actual lit pixels then (its text, glyphs, map
+   * line and stick dots, not panel backgrounds or empty space), from a small copy of the HUD drawn for that moment.
+   * Small and the same shape whatever the output size, so the preview and a 4K render pick the same pixels. None from
+   * the stats screen.
+   */
+  private sparkSource(W: number, H: number, o: OverlayOptions): (t: number) => SparkMask | null {
+    const scale = SPARK_MASK / Math.max(W, H), mw = Math.round(W * scale), mh = Math.round(H * scale);
+    const key = `${mw}x${mh}|${JSON.stringify(this.placements(mw, mh, o))}|${o.bfOsd?.name ?? ''}|${o.showBfOsd}|${o.font?.glyphW ?? ''}`;
+    if (key !== this.sparkKey) { this.sparkKey = key; this.sparkMasks.clear(); }
+    return t => {
+      // A copy every SPARK_MASK_STEP s is plenty (the HUD barely changes between them), and keeps a seek quick.
+      const id = Math.round(t / SPARK_MASK_STEP);
+      t = id * SPARK_MASK_STEP;
+      if (o.showStats && t > o.statsAfter) return null;
+      let mask = this.sparkMasks.get(id);
+      if (mask) return mask;
+      const c = (this.sparkCanvas ??= document.createElement('canvas'));
+      if (c.width !== mw) c.width = mw;
+      if (c.height !== mh) c.height = mh;
+      const x = c.getContext('2d', { willReadFrequently: true })!;
+      this.drawHud(x, t, o);
+      const px = x.getImageData(0, 0, mw, mh).data, lit: number[] = [];
+      for (let i = 0, k = 0; i < px.length; i += 4, k++)
+        if (px[i + 3] >= SPARK_ALPHA && Math.max(px[i], px[i + 1], px[i + 2]) >= SPARK_BRIGHT) lit.push(k);
+      mask = { lit: Uint32Array.from(lit), w: mw, h: mh };
+      if (this.sparkMasks.size >= SPARK_MASKS_KEPT) this.sparkMasks.delete(this.sparkMasks.keys().next().value!);
+      this.sparkMasks.set(id, mask);
+      return mask;
+    };
   }
 
   private drawHud(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {

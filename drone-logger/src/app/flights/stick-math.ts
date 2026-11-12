@@ -40,7 +40,7 @@ export function sampleSticks(points: StickPoint[], t: number): StickPoint {
   }
   const a = points[lo], b = points[hi];
   const f = (t - a[0]) / (b[0] - a[0] || 1);
-  return a.map((v, i) => v + (b[i] - v) * f) as StickPoint;
+  return a.map((v, i) => (v ?? 0) + ((b[i] ?? v ?? 0) - (v ?? 0)) * f) as StickPoint;
 }
 
 /** Stick positions as -1..1 on each axis. Up and right are positive. */
@@ -56,7 +56,7 @@ export function stickAxes(p: StickPoint): StickAxes {
 
 /** The logged rcCommand value for an axis, as Blackbox Explorer prints it (throttle 1000..2000, others ±500). */
 export function rawStick(p: StickPoint, axis: Axis): number {
-  return Math.round(p[{ roll: 1, pitch: 2, yaw: 3, throttle: 4 }[axis]]);
+  return Math.round(p[({ roll: 1, pitch: 2, yaw: 3, throttle: 4 } as const)[axis]]);
 }
 
 /** Throttle stick as 0..100 %. */

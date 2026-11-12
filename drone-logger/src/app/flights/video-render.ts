@@ -222,7 +222,7 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       const showHud = logT >= 0 && logT <= plan.overlay.logEnd;
       // The music by the finished video's own clock, which an auto-edit's log time doesn't follow; the OSD gets the same.
       const music = plan.overlay.opts.music ?? null, level = music?.atOut(i / fps) ?? null;
-      let opts = music ? { ...plan.overlay.opts, music: { ...music, at: () => level } } : plan.overlay.opts;
+      let opts = music ? { ...plan.overlay.opts, music: { ...music, at: () => level, outAt: () => i / fps } } : plan.overlay.opts;
       // An edit has no post-flight stats (it ends mid-flight), and the credit comes up over its last seconds.
       if (clips) opts = { ...opts, showStats: false, statsAfter: logT + (seconds - i / fps) };
       if (showHud) plan.overlay.renderer.draw(hudCtx, logT, opts);
@@ -370,8 +370,11 @@ async function mixSound(plan: RenderPlan, seconds: number, open: (file: File) =>
   // From where the output's first moment is in the recording.
   // The sound's and the music's own fades each ride on a gain of their own, before the whole mix's fade out.
   // An auto-edit's sound is cut with its clips; otherwise it runs from the range's start.
+  // An edit's cuts crossfade the sound, so the motors don't jump from one note to the next (the first clip's start
+  // and the last one's end stay hard: the video starts and ends there).
   const pieces: Piece[] = plan.clips?.length
-    ? plan.clips.map(c => ({ from: c.from - source.offset, at: c.at, seconds: c.to - c.from }))
+    ? plan.clips.map((c, i, all) => ({ from: c.from - source.offset, at: c.at, seconds: c.to - c.from,
+                                       blendIn: i > 0 ? CUT_BLEND : 0, blendOut: i < all.length - 1 ? CUT_BLEND : 0 }))
     : [{ from: plan.footage.start - source.offset, at: 0, seconds }];
   // Switched off (an auto-edit's default): none at all, not even the footage's own.
   let heard = false;
@@ -403,8 +406,27 @@ function fades(mix: OfflineAudioContext, into: AudioNode, fadeIn: number, fadeOu
   return gain;
 }
 
-/** A stretch of a recording in the output: `seconds` of it from `from` s into the recording, landing `at` s into the output. */
-interface Piece { from: number; at: number; seconds: number }
+/** How far either side of an edit's cut the two clips' sounds overlap, s: 0.3 s of crossfade in all. */
+const CUT_BLEND = 0.15;
+
+/**
+ * A stretch of a recording in the output: `seconds` of it from `from` s into the recording, landing `at` s into the
+ * output. With a blend, it reaches that far past its start (or end) into the next piece, fading in (or out) across the
+ * cut while that one fades the other way.
+ */
+interface Piece { from: number; at: number; seconds: number; blendIn?: number; blendOut?: number }
+
+/**
+ * How loud a piece is at `t` s from its own start: equal-power curves across each blended cut (so two different
+ * stretches of motor sound add up to the same loudness all the way through), 1 between.
+ */
+function pieceLevel(piece: Piece, t: number) {
+  const bi = piece.blendIn ?? 0, bo = piece.blendOut ?? 0;
+  let k = 1;
+  if (bi > 0 && t < bi) k *= Math.sin((Math.PI / 4) * (1 + Math.max(-1, t / bi)));
+  if (bo > 0 && t > piece.seconds - bo) k *= Math.cos((Math.PI / 4) * (1 + Math.min(1, (t - piece.seconds) / bo)));
+  return k;
+}
 
 /**
  * Lays pieces of a recording's sound into `mix` (an output `seconds` long) through a gain of `gain`; a piece starting
@@ -413,22 +435,29 @@ interface Piece { from: number; at: number; seconds: number }
 async function addTrack(mix: OfflineAudioContext, into: AudioNode, input: Input, pieces: Piece[], seconds: number, gain: number): Promise<boolean> {
   const track = await input.getPrimaryAudioTrack();
   if (!track || !(await track.canDecode())) return false;
-  // The decoded chunks are copied into one buffer covering the whole output, at the recording's own rate, and played as
+  // The decoded chunks are added into one buffer covering the whole output, at the recording's own rate, and played as
   // one node: the offline mixer slows to a crawl with a node per chunk (thousands for a few minutes of sound).
   let whole: AudioBuffer | null = null;
   const sink = new AudioBufferSink(track);
   for (const piece of pieces) {
-    const { from } = piece;
-    for await (const { buffer, timestamp } of sink.buffers(Math.max(0, from), from + piece.seconds)) {
+    const { from } = piece, bi = piece.blendIn ?? 0, bo = piece.blendOut ?? 0;
+    // Read (and lay down) the blends either side too: they overlap the neighbouring pieces, each fading the other way.
+    const readFrom = from - bi, readTo = from + piece.seconds + bo;
+    for await (const { buffer, timestamp } of sink.buffers(Math.max(0, readFrom), readTo)) {
       whole ??= mix.createBuffer(buffer.numberOfChannels, Math.max(1, Math.ceil(seconds * buffer.sampleRate)), buffer.sampleRate);
-      const rate = whole.sampleRate, start = Math.round(piece.at * rate), end = Math.min(whole.length, Math.round((piece.at + piece.seconds) * rate));
-      // Where the chunk lands in the output, in samples; the parts before the piece's start or past its end are cut.
-      const at = start + Math.round((timestamp - from) * rate), skip = Math.max(0, start - at);
+      const rate = whole.sampleRate;
+      const start = Math.max(0, Math.round((piece.at - bi) * rate)), end = Math.min(whole.length, Math.round((piece.at + piece.seconds + bo) * rate));
+      // Where the chunk lands in the output, in samples; the parts before the piece's reach or past it are cut.
+      const at = Math.round((piece.at + (timestamp - from)) * rate), skip = Math.max(0, start - at);
       const count = Math.min(buffer.length - skip, end - Math.max(start, at));
       if (count <= 0) continue;
+      const first = Math.max(start, at);
+      // Each sample's own level through the blends; added, not copied, so the overlaps mix.
+      const level = new Float32Array(count);
+      for (let s = 0; s < count; s++) level[s] = pieceLevel(piece, (first + s) / rate - piece.at);
       for (let c = 0; c < whole.numberOfChannels; c++) {
-        const data = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1));
-        whole.copyToChannel(data.subarray(skip, skip + count), c, Math.max(start, at));
+        const data = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1)), out = whole.getChannelData(c);
+        for (let s = 0; s < count; s++) out[first + s] += data[skip + s] * level[s];
       }
     }
   }

@@ -338,8 +338,8 @@ browsers. If the footage has its own sound (an onboard camera hears its motors),
 starts at for you: it slides the footage's loudness (high-passed at 800 Hz, on a log scale) along the throttle trace and
 keeps the best correlation, and only applies it when the match clearly beats every other position.
 
-**A sound track from another recording.** A sound track under **Sources** plays a second file's sound (a phone on the
-ground, or a stick cam) instead of the footage's own. In vertical, if it's a video, its picture fills the bottom half of
+**A sound track from another recording.** A sound track under **Sources** plays a second file's sound (usually a phone or stick
+cam video, or just a sound recording; the file picker offers videos first) instead of the footage's own. In vertical, if it's a video, its picture fills the bottom half of
 the split screen (toggle it under **Show**), with its own brightness, contrast, saturation, zoom and pan; in 16:9 it
 plays just its sound, so the footage keeps the whole frame. With no stick cam, vertical's bottom half shows the
 footage itself, zoomed in, blurred down to its colours and movement, and darkened toward the bottom, so it fills the
@@ -379,7 +379,17 @@ a 0–200% strength:
 
 - On the OSD: **Pulse** (the HUD punches out from the centre on each hit), **Colour split** (two coloured copies of the
   text slide apart on each hit; pick both colours) and **Tint** (the white takes on colour with the bass, mids, treble or
-  everything, drifting round the colour wheel or in one colour).
+  everything, drifting round the colour wheel or in one colour), and **Sparks** (glowing particles, sized with **Spark
+  size**, pop off the OSD's actual lit pixels: its text, glyphs, map line and stick dots; more as the song gets louder and in a burst on each hit, harder with the bass;
+  they fly under real gravity, land on the bottom of the frame, bounce, slide to a stop and fade, changing colour as
+  they go). With the gyro logged they stay put in the world: as the quad rolls, flips and yaws, they swing across the
+  picture the way the footage does. **Spectrum bars** (off until ticked) stand a spectrum analyser on every line of OSD
+  text, bass to treble along it, behind the text, with peak caps that fall under gravity. **Look** draws them as
+  light-speed star streaks (the default: white-hot on the text, trailing back along the craft's momentum, curving with
+  the gyro's turns and streaming from straight ahead with the GPS speed; **Streaks** sends them toward the middle, off
+  the text's edge facing it, or out to the edges, off its outer edge; **Colour** is starlight or a rainbow that turns
+  with the song and its bass) or as classic analyser bars; with the gyro they're
+  springy, leaning and wobbling as you roll and yaw and squashing and stretching as you pitch. The sparks are worked out afresh each frame from the music, so a scrubbed preview and the render match.
 - On the footage: **Zoom punch**, **Vignette** (the edges break into pixel blocks of the footage's own colour, biggest at the edge and smaller toward the middle, in a lumpy, off-centre shape that changes with every trigger) and **Saturation** (the colour swells). These fire
   only on a trigger and leave the footage alone in between. **Footage on** picks the zoom and saturation's trigger and
   **Vignette on** the vignette's: **Every hit**, **Big hits** (the sharpest quarter, the footage's default), **Biggest
@@ -393,12 +403,16 @@ settle. On the timeline, the music's clip shows a pink tick at every footage tri
 vignette's darkness, so you can see where it'll land against the footage. Muting the music turns the reaction off.
 
 **Auto-edit to the beat.** With footage and music loaded, **Auto-edit to the beat** in the music's Track panel cuts
-the flight's best moments together on the song (`flights/auto-edit.ts`). Tricks come first: flips and rolls (roll or
-pitch stick held near full for a moment, worth more when the throttle punches back up within a second after, as in a
-Matty flip or a power-out) and drops (6 m or more of height lost inside 2.5 s, mostly on low throttle: off a roof, a
-tree or a flip, or a dive, from the barometer with its spikes thrown out, else the GPS). Each clip is chosen to take in
-a trick from just before it to a second after, and the hint under the button says how many it found. There's no gyro
-in this, so how far a flip turned is a guess from how long the stick was held. Between tricks, the footage mostly says
+the flight's best moments together on the song (`flights/auto-edit.ts`). Tricks come first. With the gyro in the log,
+flips and rolls are the craft really turning (150° or more at up to 300°/s or faster, added up from its rates, so the
+hint can say how far round the biggest went); without, roll or pitch stick held near full for a moment. Either way they
+count for more when the throttle punches back up within a second after, as in a Matty flip or a power-out. With the
+accelerometer, drops are half a second or more of falling free (under 0.45 g), and hard punch-outs (3.5 g or more held
+a moment) count too; without, drops are 6 m or more of height lost inside 2.5 s, mostly on low throttle, from the
+barometer with its spikes thrown out, else the GPS. Each clip is chosen to take in a trick from just before it to a
+second after, and the hint under the button says what it found. The server keeps the gyro and accelerometer with the
+sticks, averaged over each 40 ms (about 85 KB more for a 3-minute flight), and logs without them work as before.
+Between tricks, the footage mostly says
 where the flight is exciting: the first time, it watches the footage once at a tiny size (with a progress note; a few seconds for a short
 clip, a minute or two for long 4K) for how fast the picture rushes past, which is highest flying close to things (gaps,
 containers, trees) and through flips and lowest cruising over open ground. The log adds speed against the flight's own
@@ -412,8 +426,9 @@ beats, with each stretch of the flight given some luck up or down so other good 
 flight or song runs out) and **Cut every** (2, 4, 8, 16 or 32 beats, each shown in seconds for that song; 8 to start)
 re-cut it as you change them. The song
 plays straight through from **Song starts at**, and the footage, the stick cam and the OSD jump at each cut, so the OSD
-always shows that moment's numbers. It's music only unless **Flight sound** is ticked, since the motors would jump at
-every cut. The moments come from inside the render range, so narrowing the range keeps the edit to part of the flight.
+always shows that moment's numbers. It's music only unless **Flight sound** is ticked, since the motors change note at
+every cut. With it ticked, the finished video crossfades the sound across each cut (0.3 s, equal-power, so it doesn't
+dip), and the preview, which plays one video that jumps, eases the sound down into each cut and back up after. The moments come from inside the render range, so narrowing the range keeps the edit to part of the flight.
 **Play** previews the edit, and **Video .mp4** renders it in place of the range, with no post-flight stats (it ends
 mid-flight) and the credit over its last seconds. **Undo the edit** goes back to the range; a new song start, footage,
 song or sync clears it, since its cuts would no longer land on the beat.

@@ -73,8 +73,12 @@ export interface FlightBatterySeries {
  */
 export type TrackPoint = [number, number, number, number, number, number?, number?];
 
-/** [seconds since log start, roll, pitch, yaw (-500..500), throttle (1000..2000)], Betaflight rcCommand at 25 Hz. */
-export type StickPoint = [number, number, number, number, number];
+/**
+ * [seconds since log start, roll, pitch, yaw (-500..500), throttle (1000..2000)], Betaflight rcCommand at 25 Hz.
+ * Logs with the gyro add how fast the craft turned over the next 40 ms (roll, pitch, yaw, deg/s, averaged), and with
+ * the accelerometer too, its pull in g over them (averaged, near 0 falling free, and at its peak, high on an impact).
+ */
+export type StickPoint = [number, number, number, number, number, number?, number?, number?, number?, number?];
 
 export interface FlightSticks {
   points: StickPoint[];

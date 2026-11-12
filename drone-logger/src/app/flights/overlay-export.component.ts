@@ -35,6 +35,8 @@ const VERTICAL_RESOLUTIONS = [
 const FORMAT_KEY = 'gitdrone-overlay-format';
 
 const FADE_KEY = 'gitdrone-render-fade';
+/** How long before an edit's cut the preview starts easing the flight sound down, s (and about how long it takes back up). */
+const PREVIEW_DIP = 0.12;
 const QUALITY_KEY = 'gitdrone-render-quality';
 /**
  * The biggest finished video worth building in memory, bytes. A tab gets about 4 GB, and finishing the file copies it
@@ -1104,6 +1106,45 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         </span>
                       </div>
                     }
+                    @if (e.key === 'spectrum' && musicReact().enabled.spectrum) {
+                      <div class="playback-row">
+                        <span class="offset">
+                          <label for="spectrum-style">Look</label>
+                          <select id="spectrum-style" [ngModel]="musicReact().spectrumStyle" (ngModelChange)="setMusicReact('spectrumStyle', $event)">
+                            <option value="lightspeed">Light speed streaks</option>
+                            <option value="bars">Analyser bars</option>
+                          </select>
+                        </span>
+                        @if (musicReact().spectrumStyle === 'lightspeed') {
+                          <span class="offset" title="Which way the streaks trail off the text, following the craft's motion">
+                            <label for="streak-direction">Streaks</label>
+                            <select id="streak-direction" [ngModel]="musicReact().streakDirection" (ngModelChange)="setMusicReact('streakDirection', $event)">
+                              <option value="in">Toward the middle</option>
+                              <option value="out">Out to the edges</option>
+                            </select>
+                          </span>
+                          <span class="offset" title="The streaks' colour: white-hot like stars, or a rainbow that turns with the music">
+                            <label for="streak-color">Colour</label>
+                            <select id="streak-color" [ngModel]="musicReact().streakColor" (ngModelChange)="setMusicReact('streakColor', $event)">
+                              <option value="white">Starlight</option>
+                              <option value="rainbow">Rainbow with the music</option>
+                            </select>
+                          </span>
+                        }
+                      </div>
+                    }
+                    @if (e.key === 'particles' && musicReact().enabled.particles) {
+                      <div class="video-scrub">
+                        <label class="scrub-label" for="spark-size" title="How big each spark is">Spark size</label>
+                        <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                        <input id="spark-size" type="range" min="0.5" max="4" step="0.1" [ngModel]="musicReact().sparkSize"
+                               (ngModelChange)="setMusicReact('sparkSize', +$event)" />
+                        <button class="btn small step" type="button" (click)="setMusicReact('sparkSize', defaultSparkSize)"
+                                [disabled]="musicReact().sparkSize === defaultSparkSize" aria-label="Reset spark size"
+                                title="Reset spark size"><app-icon name="reset" /></button>
+                        <span class="mono">{{ musicReact().sparkSize.toFixed(1) }}×</span>
+                      </div>
+                    }
                   }
                   <!-- The hits: how readily one is heard, and how long it lasts (the pulse, the split and the zoom ride on them). -->
                   <div class="video-scrub">
@@ -1199,12 +1240,12 @@ function saveColors(o: typeof DEFAULT_COLORS) {
               </div>
 
               <div class="source-row">
-                <span title="Sound track: a phone recording or stick cam video, for its sound (and a stick cam's picture)"><app-icon name="volume" /></span>
+                <span title="Sound track: a phone or stick cam video (or just a recording), for its sound and, in vertical, its picture"><app-icon name="volume" /></span>
                 <span class="sr-only">Sound track:</span>
                 <span class="mono" [title]="audioName() || 'No sound track loaded'">{{ audioUrl() ? audioName() : 'No sound track' }}</span>
                 <label class="btn small step" [title]="audioUrl() ? 'Change the sound track' : 'Load a sound track'">
                   <app-icon name="folder" />
-                  <input class="sr-only" type="file" appKeepFile accept="audio/*,video/*" [attr.aria-label]="audioUrl() ? 'Change the sound track' : 'Load a sound track'"
+                  <input class="sr-only" type="file" appKeepFile accept="video/*,audio/*" [attr.aria-label]="audioUrl() ? 'Change the sound track' : 'Load a sound track'"
                          (change)="onAudioFile($event)" />
                 </label>
                 @if (audioUrl()) {
@@ -1878,6 +1919,10 @@ export class OverlayExportComponent {
   /** The sound plays through Web Audio, for a gain past 100% (which a media element's volume can't reach) and mutes. */
   private audioCtx: AudioContext | null = null;
   private soundLevel: GainNode | null = null;
+  /** Under the sound's gain: eases the sound down into an edit's cut and back up after it, in the preview. */
+  private cutDip: GainNode | null = null;
+  /** The cut the sound's easing down into, as the clip it ends (-1 when none). */
+  private dippingFor = -1;
   private musicLevel: GainNode | null = null;
   private mixBus: GainNode | null = null;
   private routed = new WeakSet<HTMLMediaElement>();
@@ -1918,7 +1963,10 @@ export class OverlayExportComponent {
         this.mixBus.connect(ctx.destination);
         this.soundLevel = ctx.createGain();
         this.soundLevel.gain.value = this.soundOut();
-        this.soundLevel.connect(this.mixBus);
+        // An edit's cuts dip the sound here, apart from its gain (see dipForCut).
+        this.cutDip = ctx.createGain();
+        this.soundLevel.connect(this.cutDip);
+        this.cutDip.connect(this.mixBus);
         this.musicLevel = ctx.createGain();
         this.musicLevel.gain.value = this.musicOut();
         this.musicLevel.connect(this.mixBus);
@@ -2080,11 +2128,14 @@ export class OverlayExportComponent {
   resetMusicReact() {
     this.musicReact.set({ ...MUSIC_REACT_DEFAULTS, on: true });
   }
+  readonly defaultSparkSize = MUSIC_REACT_DEFAULTS.sparkSize;
   /** Each effect's row: an on/off and a strength (the OSD's three, then the footage's two). */
   readonly musicFxStrengths = [
     { key: 'pulse', label: 'Pulse', title: 'How far the OSD punches out from the centre on each hit; 0 for none' },
     { key: 'split', label: 'Colour split', title: 'How far the two coloured copies of the OSD slide apart on each hit; 0 for none' },
     { key: 'tint', label: 'Tint', title: "How strongly the OSD's white takes on colour with the music; 0 for none" },
+    { key: 'spectrum', label: 'Spectrum bars', title: 'Spectrum analyser bars standing on the OSD text, bass to treble along each line, leaning and wobbling with the gyro; how tall' },
+    { key: 'particles', label: 'Sparks', title: 'Glowing sparks falling off the OSD, more as the music gets louder and bursting on each hit, changing colour as they fall; 0 for none' },
     { key: 'zoom', label: 'Zoom punch', title: 'How far the footage zooms in on each trigger; 0 for none' },
     { key: 'vignette', label: 'Vignette', title: "How dark the footage's edges get on each trigger; 0 for none" },
     { key: 'saturation', label: 'Saturation', title: "How much the footage's colour swells on each trigger; 0 for none" },
@@ -2100,6 +2151,7 @@ export class OverlayExportComponent {
     const fx = { ...settings, ...Object.fromEntries(MUSIC_EFFECTS.map(k => [k, enabled[k] ? settings[k] : 0])) };
     const offset = this.videoOffset(), start = this.renderStart(), song = this.musicStart(), len = this.renderLength();
     const fadeIn = this.musicFadeIn(), fadeOut = this.musicFadeOut(), clips = this.edit();
+    const outAt = (t: number) => (clips ? editOut(clips, t + offset) : t + offset - start);
     const atOut = (out: number) => {
       if (out < 0 || out > len) return null;
       const lv = analysis.at(out + song, fx.sensitivity, fx.hitLength,
@@ -2111,8 +2163,15 @@ export class OverlayExportComponent {
       ...fx,
       atOut,
       // Seconds into the finished video: from the range's start, or wherever an auto-edit shows that moment.
+      outAt,
+      spectrumOut: (out, into) => {
+        if (out < 0 || out > len || !analysis.spectrumAt(out + song, into)) return false;
+        const k = fadeLevel(out, len, fadeIn, fadeOut);
+        for (let b = 0; b < into.length; b++) into[b] *= k;
+        return true;
+      },
       at: t => {
-        const out = clips ? editOut(clips, t + offset) : t + offset - start;
+        const out = outAt(t);
         return out === null ? null : atOut(out);
       },
     };
@@ -3313,11 +3372,17 @@ export class OverlayExportComponent {
   flightTricks = computed(() => findTricks(this.data()));
   /** What the edit found to show off, in a few words, for under its button. */
   trickText = computed(() => {
-    const t = this.flightTricks(), drops = t.filter(x => x.kind === 'drop').length, flips = t.length - drops;
-    const punched = t.filter(x => x.punched).length;
-    const parts = [flips ? `${flips} flip${flips === 1 ? '' : 's'} and roll${flips === 1 ? '' : 's'}` + (punched ? ` (${punched} punched out)` : '') : '',
-                   drops ? `${drops} drop${drops === 1 ? '' : 's'}` : ''].filter(Boolean);
-    return parts.length ? `Found ${parts.join(' and ')} in the log; they're picked first.` : '';
+    const t = this.flightTricks(), spins = t.filter(x => x.kind === 'flip' || x.kind === 'roll');
+    const drops = t.filter(x => x.kind === 'drop').length, punches = t.filter(x => x.kind === 'punch').length;
+    const punched = spins.filter(x => x.punched).length;
+    // With the gyro, how far the biggest one went round.
+    const biggest = spins.reduce((m, x) => Math.max(m, x.degrees ?? 0), 0);
+    const parts = [spins.length ? `${spins.length} flip${spins.length === 1 ? '' : 's'} and roll${spins.length === 1 ? '' : 's'}`
+                     + (punched || biggest ? ` (${[biggest ? `up to ${Math.round(biggest / 10) * 10}°` : '', punched ? `${punched} punched out` : ''].filter(Boolean).join(', ')})` : '') : '',
+                   drops ? `${drops} drop${drops === 1 ? '' : 's'}` : '',
+                   punches ? `${punches} punch-out${punches === 1 ? '' : 's'}` : ''].filter(Boolean);
+    const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0];
+    return parts.length ? `Found ${list} in the log; they're picked first.` : '';
   });
   /** How fast the footage's picture changes, once it's been watched (kept until other footage loads). */
   private motion = signal<FootageMotion | null>(null);
@@ -3391,6 +3456,8 @@ export class OverlayExportComponent {
 
   clearEdit() {
     this.editSeed = 0;
+    this.dippingFor = -1;
+    this.dipForCut(1, 0.02);
     this.edit.set(null);
     this.editNote.set('');
   }
@@ -3404,6 +3471,9 @@ export class OverlayExportComponent {
     if (!clips?.length) return;
     const f = v.currentTime;
     if (starting) {
+      // Paused mid-dip last time: full sound again.
+      this.dippingFor = -1;
+      this.dipForCut(1, 0.02);
       const i = clips.findIndex(c => f >= c.from && f < c.to - 0.05);
       this.editClip = i;
       if (i < 0) {
@@ -3413,10 +3483,32 @@ export class OverlayExportComponent {
       return;
     }
     const c = clips[this.editClip];
-    if (!c || (f >= c.from - 0.3 && f < c.to - 0.008)) return;
+    if (!c) return;
+    // Nearly at a cut to another clip: start easing the sound down, so it lands softly.
+    if (this.editClip + 1 < clips.length && f >= c.to - PREVIEW_DIP && this.dippingFor !== this.editClip) {
+      this.dippingFor = this.editClip;
+      this.dipForCut(0.25, Math.max(0.02, c.to - f));
+    }
+    if (f >= c.from - 0.3 && f < c.to - 0.008) return;
     if (this.editClip + 1 >= clips.length) { v.pause(); return; }
     this.editClip++;
     v.currentTime = clips[this.editClip].from;
+    // And back up once the next clip's playing.
+    this.dippingFor = -1;
+    this.dipForCut(1, PREVIEW_DIP * 1.5);
+  }
+
+  /**
+   * The preview's take on the finished video's crossfades at an edit's cuts: it plays one video that jumps, so it can't
+   * overlap the two clips' sounds, but easing the sound to `to` over `seconds` takes the edge off the jump.
+   */
+  private dipForCut(to: number, seconds: number) {
+    const g = this.cutDip?.gain, ctx = this.audioCtx;
+    if (!g || !ctx) return;
+    const now = ctx.currentTime;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(to, now + seconds);
   }
 
   useWholeClip() {
