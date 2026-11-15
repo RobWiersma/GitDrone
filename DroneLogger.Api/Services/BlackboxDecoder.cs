@@ -15,7 +15,8 @@ public record StickSample(long TimeUs, int Roll, int Pitch, int Yaw, int Throttl
 /// rates in deg/s averaged over every frame in it (so adding them up gives the real angle turned, flips included),
 /// and the accelerometer's pull in g, averaged (near 0 in freefall) and at its peak (impacts are a frame or two).
 /// </summary>
-public record MotionSample(double GyroRoll, double GyroPitch, double GyroYaw, double? AccMeanG, double? AccPeakG);
+public record MotionSample(double GyroRoll, double GyroPitch, double GyroYaw, double? AccMeanG, double? AccPeakG,
+    double? AccX = null, double? AccY = null, double? AccZ = null);
 
 /// <summary>Every main-frame field at 25 Hz, in MainFields order (raw firmware units).</summary>
 public record MainSample(long TimeUs, int[] Values);
@@ -149,6 +150,8 @@ public static class BlackboxDecoder
         // The stick slot being added up: gyro sums per axis, the accelerometer's pull summed and at its peak, frames in it.
         private readonly double[] slotGyro = new double[3];
         private double slotAcc, slotAccPeak;
+        // ...and the accelerometer per axis (its direction, for which way is down).
+        private readonly double[] slotAccAxis = new double[3];
         private int slotFrames;
         /// <summary>25 Hz: smooth enough to animate, small enough to store per flight.</summary>
         private const long StickIntervalUs = 40_000;
@@ -215,10 +218,14 @@ public static class BlackboxDecoder
         {
             if (sticks.Count == 0 || motion.Count >= sticks.Count) return;
             if (slotFrames == 0) { motion.Add(motion.LastOrDefault() ?? new MotionSample(0, 0, 0, null, null)); return; }
+            var acc = accIndex.Length == 3;
             motion.Add(new MotionSample(Math.Round(slotGyro[0] / slotFrames, 1), Math.Round(slotGyro[1] / slotFrames, 1),
                 Math.Round(slotGyro[2] / slotFrames, 1),
-                accIndex.Length == 3 ? Math.Round(slotAcc / slotFrames, 2) : null, accIndex.Length == 3 ? Math.Round(slotAccPeak, 2) : null));
+                acc ? Math.Round(slotAcc / slotFrames, 2) : null, acc ? Math.Round(slotAccPeak, 2) : null,
+                acc ? Math.Round(slotAccAxis[0] / slotFrames, 2) : null, acc ? Math.Round(slotAccAxis[1] / slotFrames, 2) : null,
+                acc ? Math.Round(slotAccAxis[2] / slotFrames, 2) : null));
             slotGyro[0] = slotGyro[1] = slotGyro[2] = 0;
+            slotAccAxis[0] = slotAccAxis[1] = slotAccAxis[2] = 0;
             slotAcc = slotAccPeak = 0;
             slotFrames = 0;
         }
@@ -457,6 +464,9 @@ public static class BlackboxDecoder
                     var g = Math.Sqrt(x * x + y * y + z * z) / acc1G;
                     slotAcc += g;
                     if (g > slotAccPeak) slotAccPeak = g;
+                    slotAccAxis[0] += x / acc1G;
+                    slotAccAxis[1] += y / acc1G;
+                    slotAccAxis[2] += z / acc1G;
                 }
                 slotFrames++;
             }

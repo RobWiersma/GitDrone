@@ -69,7 +69,7 @@ the same as the Configurator's button, then opens its drive and loads the newest
 (Chrome or Edge).
 
 <p align="center">
-  <img src="docs/screenshots/overlay.png" alt="The overlay editor in 16:9: the Sticks settings (stick mode, the Pixel look, its Backdrop, trails and colours) and the V1 Flight footage's settings (sync, the Lumetri-style Color and Light sliders, zoom) on the left; a preview of real FPV footage with speed, battery, the Pixel sticks and the mini map in a Betaflight OSD font; under it the Premiere-style timeline with the OSD, footage, sound and music tracks, the sound's waveform with its arming and clap markers, and the Render range; and Options along the bottom in three boxes, Sources, Show and Output (with the Max, High, Smaller and Upload quality buttons), then the Export row and its Overlay .mov and Video .mp4 buttons" width="860">
+  <img src="docs/screenshots/overlay.png" alt="The overlay editor in 16:9: the Sticks settings (stick mode, the Smooth look, its Backdrop, trails and colours) and the V1 Flight footage's settings (sync, the Lumetri-style Color and Light sliders, zoom) on the left; a preview of real FPV footage over a park with speed, battery, the sticks, the mini map, sparks and the glass tube reacting to the music; under it the Premiere-style timeline with the OSD, footage, its own sound and music tracks and the Render range; and Options along the bottom in three boxes, Sources, Show and Output (with the Max, High, Smaller and Upload quality buttons), then the Export row and its Overlay .mov and Video .mp4 buttons" width="860">
 </p>
 
 <table>
@@ -79,6 +79,18 @@ the same as the Configurator's button, then opens its drive and loads the newest
     <td><img src="drone-logger/public/home/osd-treeline.jpg" alt="Skimming the grass toward a tree line, with the overlay showing speed and mAh used"></td>
   </tr>
 </table>
+
+### 🌈 React to the music
+
+Add a song and the video moves with it, like a music visualizer: the OSD pulses and splits into colour on the hits,
+sparks fly, the footage zooms, saturates (or spins round the rainbow) and breaks into pixels at its edges on the big
+ones, and a **Rainbow road** (a clear glass tube, or a ribbon of rainbow pixels) floats out ahead to where the craft
+really flies next, from its gyro, accelerometer and GPS. The song is measured once, so the preview and the render
+match frame for frame.
+
+<p align="center">
+  <img src="docs/screenshots/music.png" alt="The React to the music settings (OSD, footage and vignette triggers, and the Effects list: Pulse, Colour split, Tint, Spectrum bars, Sparks, Rainbow road with its Look set to Glass tube, Road aim and Road length, Zoom punch, Vignette, Saturation with its Look, Rainbow tint, Sensitivity and Hit length) beside three preview frames of real park footage, each with a clear glass tube winding ahead along the craft's path, sparks around it and the OSD" width="860">
+</p>
 
 ### 🗺️ Flight analysis
 
@@ -332,7 +344,8 @@ preview shows exactly what renders; `flights/grade.ts`), and its zoom is in its 
 playhead (the arrow buttons step single frames), or the **Flight footage** slider in the footage's Track panel, to the
 moment you leave the ground and press **Takeoff is here** there:
 GitDrone finds takeoff in the log as the first throttle punch over 20%, or the first GPS movement without stick data.
-**Arming is here** does the same on the arming moment, and **Log starts at** holds the result, so you can type it too.
+**Arming is here** does the same on the arming moment, and **Log starts at** holds the result, so you can type it too (to a hundredth of a second). The preview draws the
+overlay for the exact frame the video is showing, so what you line up there is what renders.
 The overlay is hidden before the log starts, like in your editor. H.264 MP4s play everywhere; H.265 only in some
 browsers. If the footage has its own sound (an onboard camera hears its motors), **Sync from motor sound** finds Log
 starts at for you: it slides the footage's loudness (high-passed at 800 Hz, on a log scale) along the throttle trace and
@@ -390,7 +403,32 @@ a 0–200% strength:
   the text's edge facing it, or out to the edges, off its outer edge; **Colour** is starlight or a rainbow that turns
   with the song and its bass) or as classic analyser bars; with the gyro they're
   springy, leaning and wobbling as you roll and yaw and squashing and stretching as you pitch. The sparks are worked out afresh each frame from the music, so a scrubbed preview and the render match.
-- On the footage: **Zoom punch**, **Vignette** (the edges break into pixel blocks of the footage's own colour, biggest at the edge and smaller toward the middle, in a lumpy, off-centre shape that changes with every trigger) and **Saturation** (the colour swells). These fire
+  **Rainbow road** (off until ticked) is a magic pointer to where the craft is going. Its **Look** is a **Glass tube**
+  (to start: a smooth, round rod of clear glass, brighter toward its edges and faintly tinted with colours
+  that turn with the song, with a white highlight down it and rounded ends, rippling as it streams past, floating free from a quarter of a second out)
+  or a **Pixel road** (a narrow ribbon of rainbow pixels tapering to a point, with sparkles
+  of magic dust streaming past around it). The pixel road comes in from the edge of the picture the
+  ground's on (the bottom when level, turning round the picture with the horizon through rolls and flips), it sweeps from there into where the craft will fly next, narrowing into the distance (**Road length** sets how far
+  ahead, from a quarter of a second to 4 s; half a second to start), its
+  bottom end sliding along the edge toward where the path is. With the gyro, the accelerometer and a GPS track, the
+  path is where the craft really went next, so yaws and slides don't swing it. The gyro has no compass, so it's lined
+  up with north by comparing the way the GPS says the craft is going with the way the camera points, averaged over a few
+  seconds of fast flying. When the craft is flying backwards to the camera (mid loop), the road fades away. Without
+  GPS, or below 4 m/s, the path is the gyro's guess instead: lagging behind where the craft points, as momentum does,
+  so a flip doesn't swing it round, at its GPS speed (15 m/s without one). Either way it's seen through the lens's
+  fisheye. With the accelerometer logged too, the gyro and
+  accelerometer together work out which way is down, so the road banks with the real ground as you roll, and it never
+  climbs or dives steeper than 35°. Looking straight down at the ground, where the roll can't be told, it eases to the
+  camera's own level. It's only there while the craft is flying: none on the ground (throttle at idle for 1.5 s) or, with GPS, below
+  1.5 m/s, fading in and out over half a second. Both its ends break up into random pixels (changing twelve times a second) rather than stopping on a straight edge.
+  Its stripes are fixed to the ground, so they stream past as you fly down it. Its colours turn slowly with the
+  song and kick round on the hits, and it glows brighter with the bass. **Road aim** sets how far below the middle of
+  the picture the craft is heading (12° to start). With the camera tilted up, forward flight heads below the middle, so
+  set it near your camera's uptilt and raise it until the road runs where the footage is going. Logs decoded before
+  this change are decoded again the first time they're opened, to pick up the accelerometer's direction.
+- On the footage: **Zoom punch**, **Vignette** (the edges break into pixel blocks of the footage's own colour, biggest at the edge and smaller toward the middle, in a lumpy, off-centre shape that changes with every trigger) and **Saturation** (the colour swells; its **Look** set to **Rainbow**, the footage's colours also spin once round the rainbow as each trigger fades, back to their own by the time it's gone), and **Rainbow tint** (off until ticked: rainbow bands across the
+  footage that take its hue and keep its light and dark, turning with the song, pushed round by the bass, stronger as the
+  song gets louder and on each trigger; it runs all the time rather than only on triggers). The others fire
   only on a trigger and leave the footage alone in between. **Footage on** picks the zoom and saturation's trigger and
   **Vignette on** the vignette's: **Every hit**, **Big hits** (the sharpest quarter, the footage's default), **Biggest
   hits** (a few a minute, well apart, the vignette's default) or **Drops** (where the song jumps up after a quieter
@@ -424,7 +462,11 @@ and the edit ends on a beat line. No bit of the flight is used twice, and clips 
 two don't show the same stretch. Once there's an edit, the button becomes **Regenerate**: another cut on the same
 beats, with each stretch of the flight given some luck up or down so other good moments get their turn. **Length** (15, 30, 45 or 60 s; shorter if the
 flight or song runs out) and **Cut every** (2, 4, 8, 16 or 32 beats, each shown in seconds for that song; 8 to start)
-re-cut it as you change them. The song
+re-cut it as you change them. **Transition** sets how each clip gives way to the next: **Crossfade** (the outgoing clip
+dissolving into the incoming one, its sound crossfading with it), **Dip to black**, **Flash to white**, or a **Hard cut**,
+over 0.25 to 1.5 s (0.5 s to start; never more than nearly half of either clip). Each is centred on its cut, so the
+cuts stay on the beat, and it's remembered with the other settings. The preview plays a crossfade with a second copy
+of the footage running on over the first. The song
 plays straight through from **Song starts at**, and the footage, the stick cam and the OSD jump at each cut, so the OSD
 always shows that moment's numbers. It's music only unless **Flight sound** is ticked, since the motors change note at
 every cut. With it ticked, the finished video crossfades the sound across each cut (0.3 s, equal-power, so it doesn't

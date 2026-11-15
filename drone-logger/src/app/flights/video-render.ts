@@ -5,8 +5,8 @@ import {
 import { Grade, GradeRenderer, isNeutral } from './grade';
 import type { AudioCodec, StreamTargetChunk, Target, VideoCodec, WrappedCanvas } from 'mediabunny';
 import { OverlayOptions, OverlayRenderer } from './overlay-renderer';
-import { drawVignette, footagePunch, saturationBoost, vignetteLevel } from './music-react';
-import { EditClip } from './auto-edit';
+import { drawRainbowTint, drawVignette, footagePunch, rainbowTint, saturationBoost, saturationHue, vignetteLevel } from './music-react';
+import { EditClip, EditTransition, transitionAt, transitionHalf } from './auto-edit';
 
 /**
  * Renders the finished video: the pilot's footage, the stick cam, the sound and the OSD baked into one H.264/AAC MP4,
@@ -32,6 +32,8 @@ export interface RenderPlan {
    * stick cam, sound and OSD jump at each cut; the music and its effects run straight through.
    */
   clips?: EditClip[] | null;
+  /** How an edit's clips give way to each other (none: hard cuts). */
+  transition?: EditTransition | null;
   /** A stick cam whose picture fills the bottom of a vertical frame; `offset` is where it starts in footage time. */
   cam: { file: File; offset: number; picture: Picture } | null;
   /** Vertical with no stick cam: the bottom filled with the footage itself, zoomed in, soft and dark (see drawBottomFill). */
@@ -136,13 +138,30 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
   // auto-edit's clips back to back, each running to the frame its next cut lands on so the cuts stay on the beat.
   const clips = plan.clips?.length ? plan.clips : null;
   const times: number[] = [];
+  // Across an edit's cuts: the outgoing clip's frame (footage time) and how much of it shows over the incoming one (a
+  // crossfade), or how far the picture dips to black or white.
+  const blend = new Map<number, { oldT: number; old: number; veil: number }>();
   let moving: number;
   if (clips) {
+    const starts: number[] = [];
     for (const c of clips) {
+      starts.push(times.length);
       const frames = Math.round((c.at + c.to - c.from) * fps) - Math.round(c.at * fps);
       for (let j = 0; j < frames; j++) times.push(c.from + j / fps);
     }
     moving = times.length;
+    const kind = plan.transition?.kind ?? 'cut';
+    for (let k = 1; k < clips.length; k++) {
+      const half = transitionHalf(clips, k, plan.transition), reach = Math.round(half * fps);
+      for (let i = Math.max(0, starts[k] - reach); i < Math.min(moving, starts[k] + reach); i++) {
+        const fromCut = (i - starts[k]) / fps, look = transitionAt(kind, half, fromCut);
+        if (look.old <= 0 && look.veil <= 0) continue;
+        // A crossfade shows the incoming clip from the transition's start (running up to its cut), the outgoing one
+        // running on over it as it fades: the same as the preview does it.
+        if (kind === 'crossfade') times[i] = Math.max(0, clips[k].from + fromCut);
+        blend.set(i, { oldT: clips[k - 1].from + (i - starts[k - 1]) / fps, old: look.old, veil: look.veil });
+      }
+    }
   } else {
     moving = Math.max(1, Math.round((plan.footage.end - plan.footage.start) * fps));
     const held = moving + Math.max(0, Math.round(plan.hold * fps));
@@ -200,6 +219,11 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
     const footageSink = new CanvasSink(footageTrack, { width: Math.min(footageTrack.displayWidth, Math.max(W, H)) });
     // The footage only as far as its end; the hold after it repeats the last frame. The stick cam (and the sound) run on.
     const footageFrames = footageSink.canvasesAtTimestamps(times.slice(0, moving));
+    // The outgoing clips' frames under crossfades, in frame order, from a reader of their own.
+    const fading = [...blend.entries()].filter(([, b]) => b.old > 0).sort((a, b) => a[0] - b[0]);
+    const oldFrames = fading.length
+      ? new CanvasSink(footageTrack, { width: Math.min(footageTrack.displayWidth, Math.max(W, H)) }).canvasesAtTimestamps(fading.map(([, b]) => b.oldT))
+      : null;
     const camDuration = camOk ? await camTrack!.computeDuration() : 0;
     const camFrames = camOk
       ? new CanvasSink(camTrack!, { width: Math.min(camTrack!.displayWidth, W) }).canvasesAtTimestamps(times.map(t => Math.max(0, t - plan.cam!.offset)))
@@ -230,8 +254,26 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       // Back to front: the stick cam (vertical only), the footage over it (zooming and darkening with the music), then the HUD.
       if (plan.cam) drawCam(ctx, cam, plan, W, H);
       else if (plan.vertical && plan.fill && foot) drawBottomFill(ctx, foot.canvas, foot.canvas.width, foot.canvas.height, bottomBox(W, H));
-      drawFootage(ctx, foot, plan, W, H, grader, footagePunch(level, music), saturationBoost(level, music));
+      drawFootage(ctx, foot, plan, W, H, grader, footagePunch(level, music), saturationBoost(level, music), saturationHue(level, music));
+      const cut = blend.get(i);
+      if (cut && cut.old > 0) {
+        const old = (await oldFrames!.next()).value ?? null;
+        ctx.globalAlpha = cut.old;
+        // The bottom fill (vertical, no stick cam) crossfades with it.
+        if (!plan.cam && plan.vertical && plan.fill && old) drawBottomFill(ctx, old.canvas, old.canvas.width, old.canvas.height, bottomBox(W, H));
+        drawFootage(ctx, old, plan, W, H, grader, footagePunch(level, music), saturationBoost(level, music), saturationHue(level, music));
+        ctx.globalAlpha = 1;
+      }
+      // The rainbow tint: bands of colour over the footage (only its box: the top part in vertical).
+      const tint = rainbowTint(level, music, i / fps);
+      if (tint) drawRainbowTint(ctx, footageBox(plan, W, H), tint);
       drawVignette(ctx, pictureBox(plan, foot, W, H), vignetteLevel(level, music), level?.vigBeat ?? 0);
+      if (cut && cut.veil > 0) {
+        // The whole picture under the HUD: in vertical the bottom half jumps at the cut too.
+        const box = { x: 0, y: 0, w: W, h: H };
+        ctx.fillStyle = plan.transition?.kind === 'white' ? `rgba(255,255,255,${cut.veil})` : `rgba(0,0,0,${cut.veil})`;
+        ctx.fillRect(box.x, box.y, box.w, box.h);
+      }
       if (showHud) ctx.drawImage(hud, 0, 0);
       // Fade to black over the last few seconds: everything, OSD included, ending on a fully black frame.
       const fade = fadeLevel(i / fps, (total - 1) / fps, plan.fadeOut);
@@ -243,6 +285,7 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       progress(i + 1, total);
     }
     await footageFrames.return(undefined);
+    await oldFrames?.return(undefined);
     await camFrames?.return(undefined);
 
     stage('Finishing the file...');
@@ -273,15 +316,18 @@ function pictureBox(plan: RenderPlan, frame: WrappedCanvas | null, W: number, H:
   return { x: box.x + (box.w - w) / 2, y: box.y, w, h: box.h };
 }
 
-/** The footage in its box, cover-fitted or whole, zoomed (times `punch`, the music's zoom), graded, and saturated by the music. */
+/**
+ * The footage in its box, cover-fitted or whole, zoomed (times `punch`, the music's zoom), graded, saturated by the
+ * music and, with its rainbow swell, its colours turned `hue` degrees.
+ */
 function drawFootage(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null, plan: RenderPlan, W: number, H: number,
-                     grader: GradeRenderer | null, punch: number, saturation = 1) {
+                     grader: GradeRenderer | null, punch: number, saturation = 1, hue = 0) {
   if (!frame) return;
   const p = plan.footage.picture;
   // Graded on the GPU first, exactly as the preview shows it.
   const graded = grader?.draw(frame.canvas, frame.canvas.width, frame.canvas.height, plan.footage.grade);
   draw(ctx, graded ? grader!.canvas : frame.canvas, footageBox(plan, W, H), !plan.vertical && plan.footage.fit ? 'contain' : 'cover',
-       { ...p, zoom: p.zoom * punch, saturation: p.saturation * saturation }, 0, 0);
+       { ...p, zoom: p.zoom * punch, saturation: p.saturation * saturation }, 0, 0, hue);
 }
 
 /** The bottom part of the vertical split screen, under the footage: the stick cam's, or the fill's. */
@@ -338,13 +384,13 @@ function drawCam(ctx: CanvasRenderingContext2D, frame: WrappedCanvas | null, pla
  * `transform: translate(x%, y%) scale(z)` on the preview's video element.
  */
 function draw(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement | OffscreenCanvas, box: { x: number; y: number; w: number; h: number },
-              fit: 'cover' | 'contain', p: Picture, panX: number, panY: number) {
+              fit: 'cover' | 'contain', p: Picture, panX: number, panY: number, hue = 0) {
   const k = fit === 'cover' ? Math.max(box.w / src.width, box.h / src.height) : Math.min(box.w / src.width, box.h / src.height);
   const z = p.zoom / 100, w = src.width * k * z, h = src.height * k * z;
   const cx = box.x + box.w / 2 + (panX / 100) * box.w, cy = box.y + box.h / 2 + (panY / 100) * box.h;
   ctx.save();
-  if (p.brightness !== 100 || p.contrast !== 100 || p.saturation !== 100) {
-    ctx.filter = `brightness(${p.brightness}%) contrast(${p.contrast}%) saturate(${p.saturation}%)`;
+  if (p.brightness !== 100 || p.contrast !== 100 || p.saturation !== 100 || hue) {
+    ctx.filter = `brightness(${p.brightness}%) contrast(${p.contrast}%) saturate(${p.saturation}%)` + (hue ? ` hue-rotate(${hue.toFixed(1)}deg)` : '');
   }
   ctx.drawImage(src, cx - w / 2, cy - h / 2, w, h);
   ctx.restore();
@@ -370,11 +416,14 @@ async function mixSound(plan: RenderPlan, seconds: number, open: (file: File) =>
   // From where the output's first moment is in the recording.
   // The sound's and the music's own fades each ride on a gain of their own, before the whole mix's fade out.
   // An auto-edit's sound is cut with its clips; otherwise it runs from the range's start.
+  // A crossfaded picture takes the sound with it, over the same time.
+  const soundBlend = (all: EditClip[], k: number) =>
+    Math.max(CUT_BLEND, plan.transition?.kind === 'crossfade' ? transitionHalf(all, k, plan.transition) : 0);
   // An edit's cuts crossfade the sound, so the motors don't jump from one note to the next (the first clip's start
   // and the last one's end stay hard: the video starts and ends there).
   const pieces: Piece[] = plan.clips?.length
     ? plan.clips.map((c, i, all) => ({ from: c.from - source.offset, at: c.at, seconds: c.to - c.from,
-                                       blendIn: i > 0 ? CUT_BLEND : 0, blendOut: i < all.length - 1 ? CUT_BLEND : 0 }))
+                                       blendIn: i > 0 ? soundBlend(all, i) : 0, blendOut: i < all.length - 1 ? soundBlend(all, i + 1) : 0 }))
     : [{ from: plan.footage.start - source.offset, at: 0, seconds }];
   // Switched off (an auto-edit's default): none at all, not even the footage's own.
   let heard = false;

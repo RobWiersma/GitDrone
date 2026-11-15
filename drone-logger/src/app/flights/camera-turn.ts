@@ -41,9 +41,28 @@ const RAD = Math.PI / 180;
 /** The gyro's rates for a row, as radians a second about the camera's axes. */
 const rates = (p: StickPoint) => [-(p[6] ?? 0) * RAD, -(p[7] ?? 0) * RAD, (p[5] ?? 0) * RAD] as const;
 
+/**
+ * The accelerometer's push the other way round, in g: it feels what holds the craft up (thrust and drag), which on
+ * average over a few seconds balances gravity, so this averages out to down. Betaflight's axes are x forward, y left,
+ * z up; here that's +z, -x and -y. Crash spikes are capped at DOWN_CAP g. Null on a row without it.
+ */
+function felt(p: StickPoint): [number, number, number] | null {
+  const x = p[10], y = p[11], z = p[12];
+  if (x === undefined || y === undefined || z === undefined) return null;
+  const k = Math.min(1, DOWN_CAP / (Math.hypot(x, y, z) || 1));
+  return [y * k, z * k, -x * k];
+}
+/**
+ * Down is that push averaged over the last DOWN_SETTLE s or so, held still in the world by turning it back with the gyro
+ * as the craft turns. (Over less, thrust wins: it always pushes along the craft's own up.)
+ */
+const DOWN_SETTLE = 3, DOWN_CAP = 4;
+
 export class CameraTurn {
   /** The camera's orientation (camera to world) at each row's time. */
   private orient: Quat[] = [];
+  /** Which way is down in the camera's frame at each row's time (gyro and accelerometer fused); empty without them. */
+  private downs: [number, number, number][] = [];
 
   private constructor(private rows: StickPoint[]) {
     let q = IDENTITY;
@@ -54,6 +73,30 @@ export class CameraTurn {
         const [x, y, z] = rates(p), dt = next[0] - p[0];
         q = normal(mul(q, turnBy(x * dt, y * dt, z * dt)));
       }
+    });
+    this.fuseDown();
+  }
+
+  /**
+   * Works out `downs`: the accelerometer's push, averaged (an exponential average, DOWN_SETTLE s) in a frame turned
+   * back with the gyro so it stays put in the world, starting from the first reading (sitting on the ground).
+   */
+  private fuseDown() {
+    const rows = this.rows, first = rows.findIndex(r => felt(r));
+    if (first < 0) return;
+    let g = felt(rows[first])!;
+    rows.forEach((p, i) => {
+      if (i > 0) {
+        const [x, y, z] = rates(rows[i - 1]), dt = p[0] - rows[i - 1][0];
+        g = rotate(conj(turnBy(x * dt, y * dt, z * dt)), g);
+        const m = felt(p);
+        if (m && dt > 0) {
+          const k = 1 - Math.exp(-dt / DOWN_SETTLE);
+          g = [g[0] + (m[0] - g[0]) * k, g[1] + (m[1] - g[1]) * k, g[2] + (m[2] - g[2]) * k];
+        }
+      }
+      const n = Math.hypot(...g) || 1;
+      this.downs.push([g[0] / n, g[1] / n, g[2] / n]);
     });
   }
 
@@ -73,6 +116,21 @@ export class CameraTurn {
     return mul(this.orient[lo], turnBy(x * dt, y * dt, z * dt));
   }
 
+  /**
+   * Which way is down in the camera's frame at log time `t` (a unit vector; (0, 1, 0) when it's level), or null when
+   * the log has no accelerometer.
+   */
+  down(t: number): [number, number, number] | null {
+    const rows = this.rows, downs = this.downs;
+    if (!downs.length) return null;
+    if (t <= rows[0][0]) return downs[0];
+    let lo = 0, hi = rows.length - 1;
+    if (t >= rows[hi][0]) return downs[hi];
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (rows[mid][0] <= t) lo = mid; else hi = mid; }
+    const [x, y, z] = rates(rows[lo]), dt = t - rows[lo][0];
+    return rotate(conj(turnBy(x * dt, y * dt, z * dt)), downs[lo]);
+  }
+
   /** How fast the camera is turning at log time `t`: radians a second about its own x, y and z axes. */
   rate(t: number): readonly [number, number, number] {
     const rows = this.rows;
@@ -80,6 +138,16 @@ export class CameraTurn {
     let lo = 0, hi = rows.length - 1;
     while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (rows[mid][0] <= t) lo = mid; else hi = mid; }
     return rates(rows[lo]);
+  }
+
+  /** A direction in the camera's frame at log time `t`, in the world's (the frame the camera started the log in). */
+  toWorld(t: number, v: readonly [number, number, number]) {
+    return rotate(this.at(t), v);
+  }
+
+  /** A direction in the world's frame, as the camera sees it at log time `t`. */
+  toCamera(t: number, v: readonly [number, number, number]) {
+    return rotate(conj(this.at(t)), v);
   }
 
   /** What takes a direction the camera saw at log time `from` to where the camera sees it at `to`. */

@@ -10,8 +10,9 @@ import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, decode, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
 import { MUSIC_EFFECTS, MUSIC_REACT_DEFAULTS, MusicAnalysis, MusicEffect, MusicFx, MusicReact, analyzeMusic, footagePunch, readMusicReact,
-  saturationBoost, vignetteLevel, vignetteMosaic } from './music-react';
-import { EditClip, FootageMotion, autoEdit, editLength, editOut, excitement, findTricks, footageMotion } from './auto-edit';
+  footageColourFilter, rainbowCss, rainbowTint, vignetteLevel, vignetteMosaic } from './music-react';
+import { CUT_TRANSITIONS, CutTransition, EditClip, FootageMotion, autoEdit, editLength, editOut, excitement, findTricks, footageMotion,
+         transitionAt, transitionHalf } from './auto-edit';
 import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, drawBottomFill, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
@@ -125,6 +126,8 @@ export interface EditorPrefs {
   musicFadeOut: number;
   /** The HUD reacting to the music; missing in sessions saved before it. */
   musicReact?: MusicReact;
+  /** How an auto-edit's clips give way to each other; missing in sessions saved before it. */
+  editTransition?: { kind: CutTransition; seconds: number };
   statsSeconds: number;
   showPip: boolean;
   /** Vertical with no stick cam: the footage, soft and dark, filling the bottom; missing in sessions saved before it. */
@@ -388,9 +391,26 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   <!-- The footage graded on the GPU, over the video and framed like it: what the finished video gets. -->
                   <canvas #gradeCanvas class="bg-video" [class.fit]="footage43() && !vertical()" [hidden]="!footageGraded()" aria-hidden="true"
                           [style.transform]="footageTransform()" [style.filter]="footageFilter()"></canvas>
+                  <!-- An edit's crossfade: the outgoing clip running on over the incoming one as it fades (graded on a canvas
+                       of its own when the footage is graded). -->
+                  @if (edit()) {
+                    <video #fadeVideo class="bg-video cut-fade" [class.fit]="footage43() && !vertical()" [src]="videoUrl()" [muted]="true"
+                           playsinline preload="auto" aria-hidden="true" [style.transform]="footageTransform()" [style.filter]="footageFilter()"
+                           [style.opacity]="footageGraded() ? 0 : fadeOld()"></video>
+                    <canvas #fadeCanvas class="bg-video cut-fade" [class.fit]="footage43() && !vertical()" aria-hidden="true"
+                            [style.transform]="footageTransform()" [style.filter]="footageFilter()"
+                            [style.opacity]="footageGraded() ? fadeOld() : 0"></canvas>
+                  }
+                  <!-- The music's rainbow tint: bands of colour over the footage, taking its hue and keeping its light and dark. -->
+                  @if (footageRainbow(); as rb) {
+                    <div class="rainbow-tint" [style.background]="rb.background" [style.opacity]="rb.opacity" aria-hidden="true"></div>
+                  }
                   <!-- The music's vignette: a mosaic of the footage's own colours around its edges, as the finished video draws it. -->
                   <canvas #vignetteCanvas class="beat-vignette" [class.fit]="footage43() && !vertical()" [style.aspect-ratio]="videoAspect()"
                           [style.display]="footageVignette() ? null : 'none'" aria-hidden="true"></canvas>
+                  @if (edit()) {
+                    <div class="cut-veil" [class.white]="editTransition() === 'white'" [style.opacity]="cutVeil()" aria-hidden="true"></div>
+                  }
                 </div>
               }
               @if (audioUrl()) {
@@ -777,7 +797,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   }
                   <div class="offset">
                     <label for="video-offset">Log starts at</label>
-                    <input id="video-offset" type="number" step="0.1" [ngModel]="videoOffset()" (ngModelChange)="setOffset(+$event)" />
+                    <input id="video-offset" type="number" step="0.01" [ngModel]="videoOffset()" (ngModelChange)="setOffset(+$event)" />
                     <span>s in the video</span>
                   </div>
                 </div>
@@ -1057,6 +1077,13 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                       <span><i class="key react-level"></i>Vignette strength</span>
                     }
                   </div>
+                  <!-- Every effect, its options and the hit settings, folded away in a panel of their own. -->
+                  <details class="fx-panel" [open]="fxOpen()" (toggle)="fxOpen.set($any($event.target).open)">
+                    <summary>
+                      <span class="fx-title">Effects</span>
+                      <span class="fx-count">{{ fxOnCount() }} of {{ musicFxStrengths.length }} on</span>
+                    </summary>
+                    <div class="fx-body">
                   @for (e of musicFxStrengths; track e.key) {
                     <div class="video-scrub">
                       <label class="scrub-label check" [title]="e.title">
@@ -1133,6 +1160,48 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         }
                       </div>
                     }
+                    @if (e.key === 'saturation' && musicReact().enabled.saturation) {
+                      <div class="playback-row">
+                        <span class="offset" title="The colour swell as it is, or spinning the footage's colours once round the rainbow as each trigger fades">
+                          <label for="saturation-style">Look</label>
+                          <select id="saturation-style" [ngModel]="musicReact().saturationStyle" (ngModelChange)="setMusicReact('saturationStyle', $event)">
+                            <option value="plain">Colour swell</option>
+                            <option value="rainbow">Rainbow</option>
+                          </select>
+                        </span>
+                      </div>
+                    }
+                    @if (e.key === 'road' && musicReact().enabled.road) {
+                      <div class="playback-row">
+                        <span class="offset" title="A glassy tube floating out ahead, or a ribbon of rainbow pixels">
+                          <label for="road-style">Look</label>
+                          <select id="road-style" [ngModel]="musicReact().roadStyle" (ngModelChange)="setMusicReact('roadStyle', $event)">
+                            <option value="tube">Glass tube</option>
+                            <option value="road">Pixel road</option>
+                          </select>
+                        </span>
+                      </div>
+                      <div class="video-scrub">
+                        <label class="scrub-label" for="road-aim" title="How far below the middle of the picture the craft is heading. With the camera tilted up, forward flight heads below the middle: raise this until the road runs where the footage is going">Road aim</label>
+                        <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                        <input id="road-aim" type="range" min="0" max="40" step="1" [ngModel]="musicReact().roadAim"
+                               (ngModelChange)="setMusicReact('roadAim', +$event)" />
+                        <button class="btn small step" type="button" (click)="setMusicReact('roadAim', musicReactDefaults.roadAim)"
+                                [disabled]="musicReact().roadAim === musicReactDefaults.roadAim" aria-label="Reset the road aim"
+                                title="Reset the road aim"><app-icon name="reset" /></button>
+                        <span class="mono">{{ musicReact().roadAim }}° down</span>
+                      </div>
+                      <div class="video-scrub">
+                        <label class="scrub-label" for="road-length" title="How far ahead the road reaches, in seconds of flight">Road length</label>
+                        <span class="btn small step" style="visibility: hidden" aria-hidden="true"><app-icon name="prev" /></span>
+                        <input id="road-length" type="range" min="0.25" max="4" step="0.25" [ngModel]="musicReact().roadLength"
+                               (ngModelChange)="setMusicReact('roadLength', +$event)" />
+                        <button class="btn small step" type="button" (click)="setMusicReact('roadLength', musicReactDefaults.roadLength)"
+                                [disabled]="musicReact().roadLength === musicReactDefaults.roadLength" aria-label="Reset the road length"
+                                title="Reset the road length"><app-icon name="reset" /></button>
+                        <span class="mono">{{ musicReact().roadLength }} s ahead</span>
+                      </div>
+                    }
                     @if (e.key === 'particles' && musicReact().enabled.particles) {
                       <div class="video-scrub">
                         <label class="scrub-label" for="spark-size" title="How big each spark is">Spark size</label>
@@ -1166,6 +1235,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                             aria-label="Reset the hit length" title="Reset the hit length"><app-icon name="reset" /></button>
                     <span class="mono">{{ (musicReact().hitLength * 1000).toFixed(0) }} ms</span>
                   </div>
+                    </div>
+                  </details>
                 }
                 <!-- Auto-edit: the flight's best moments (from the footage and the log) cut on the song's beat, the best of
                      them on the drop. It plays in the preview and renders in place of the render range. -->
@@ -1192,6 +1263,22 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         }
                       </select>
                     </span>
+                    <span class="offset" title="How each clip gives way to the next. Every transition is centred on its cut, so the cuts stay on the beat">
+                      <label for="edit-transition">Transition</label>
+                      <select id="edit-transition" [ngModel]="editTransition()" (ngModelChange)="editTransition.set($event)">
+                        @for (o of cutTransitions; track o[0]) { <option [value]="o[0]">{{ o[1] }}</option> }
+                      </select>
+                    </span>
+                    @if (editTransition() !== 'cut') {
+                      <span class="offset" title="How long each transition takes. It never takes more than nearly half of the clips either side">
+                        <label for="edit-transition-length">over</label>
+                        <select id="edit-transition-length" [ngModel]="editTransitionSeconds()" (ngModelChange)="editTransitionSeconds.set(+$event)">
+                          @for (s of transitionLengths; track s) {
+                            <option [ngValue]="s">{{ s }} s{{ beatPeriod() ? ' (' + (s / beatPeriod()).toFixed(1) + ' beats)' : '' }}</option>
+                          }
+                        </select>
+                      </span>
+                    }
                     <label class="check" title="Keep the flight's own sound under the music. Off by default: the motors jump at every cut">
                       <input type="checkbox" [ngModel]="editSound()" (ngModelChange)="editSound.set($event)" /> Flight sound
                     </label>
@@ -1514,6 +1601,15 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .frame canvas { position: relative; z-index: 1; }
     .bg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
     .bg-video.fit { object-fit: contain; }
+    /* An edit's transitions: the outgoing clip over the incoming one, and the dip through black or white over both. */
+    /* Pinned over the footage in its own box: more specific than the .frame canvas rule, which would otherwise put the canvas in
+       the flow (under the footage, over the bottom half in vertical). */
+    .footage-box .cut-fade { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: none; }
+    .cut-veil { position: absolute; inset: 0; z-index: 3; background: #000; pointer-events: none; opacity: 0; }
+    .cut-veil.white { background: #fff; }
+    .rainbow-tint { position: absolute; inset: 0; z-index: 2; pointer-events: none; mix-blend-mode: color; }
+    /* In vertical the footage's box is the top part; the veil reaches down over the bottom part (the fill or the stick cam) too. */
+    .stage.vertical .cut-veil { bottom: calc(-100% * 46.3 / 53.7); }
     /* Vertical: a tall frame, no taller than most of the window, centred in the preview panel. */
     .stage.vertical { width: min(100%, calc(78vh * 9 / 16)); margin-inline: auto; }
     .stage.vertical .frame { aspect-ratio: 9 / 16; }
@@ -1522,6 +1618,17 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .footage-box { position: absolute; inset: 0; overflow: hidden; background: #000; z-index: 0; }
     /* A tiny mosaic (vignetteMosaic in music-react.ts) blown up with hard edges. */
     .triggers { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
+    /* The music effects, folded into a sub panel of their own. */
+    .fx-panel { justify-self: stretch; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+    .fx-panel > summary { display: flex; align-items: center; gap: .6rem; padding: .45rem .7rem; cursor: pointer; font-weight: 600;
+                          list-style: none; border-radius: 8px; }
+    .fx-panel > summary::-webkit-details-marker { display: none; }
+    .fx-panel > summary::before { content: '▸'; transition: transform .15s; }
+    .fx-panel[open] > summary::before { transform: rotate(90deg); }
+    .fx-panel > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .fx-count { font-weight: 400; color: var(--muted); font-size: .85rem; }
+    .fx-body { display: grid; gap: .5rem; justify-items: start; padding: .2rem .7rem .7rem; border-top: 1px solid var(--line); }
+    .fx-body .video-scrub { justify-self: stretch; margin-top: 0; }
     .video-sync .triggers .offset { display: contents; }
     .frame .beat-vignette { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; image-rendering: pixelated; }
     /* Shown whole (4:3 in 16:9), it covers the picture only, not the black bars beside it. */
@@ -1863,7 +1970,15 @@ export class OverlayExportComponent {
       const draw = () => {
         if (!g) return;
         g.clearRect(0, 0, c.width, c.height);
-        drawBottomFill(g, v, v.videoWidth, v.videoHeight, { x: 0, y: 0, w: c.width, h: c.height });
+        const box = { x: 0, y: 0, w: c.width, h: c.height };
+        drawBottomFill(g, v, v.videoWidth, v.videoHeight, box);
+        // Through an edit's crossfade the outgoing clip fades out over it here too, as in the finished video.
+        const fv = this.fadeVideo()?.nativeElement, old = this.fadeOld();
+        if (old > 0 && fv && fv.readyState >= 2) {
+          g.globalAlpha = old;
+          drawBottomFill(g, fv, fv.videoWidth, fv.videoHeight, box);
+          g.globalAlpha = 1;
+        }
       };
       if (v.readyState < 2) v.addEventListener('loadeddata', draw, { once: true });
       else draw();
@@ -2136,10 +2251,16 @@ export class OverlayExportComponent {
     { key: 'tint', label: 'Tint', title: "How strongly the OSD's white takes on colour with the music; 0 for none" },
     { key: 'spectrum', label: 'Spectrum bars', title: 'Spectrum analyser bars standing on the OSD text, bass to treble along each line, leaning and wobbling with the gyro; how tall' },
     { key: 'particles', label: 'Sparks', title: 'Glowing sparks falling off the OSD, more as the music gets louder and bursting on each hit, changing colour as they fall; 0 for none' },
+    { key: 'road', label: 'Rainbow road', title: "A rainbow road laid out ahead along where the craft is about to fly (from the gyro and GPS speed), glowing with the bass; how bright" },
     { key: 'zoom', label: 'Zoom punch', title: 'How far the footage zooms in on each trigger; 0 for none' },
     { key: 'vignette', label: 'Vignette', title: "How dark the footage's edges get on each trigger; 0 for none" },
     { key: 'saturation', label: 'Saturation', title: "How much the footage's colour swells on each trigger; 0 for none" },
+    { key: 'rainbow', label: 'Rainbow tint', title: 'Rainbow bands sweeping across the footage, turning with the song, pushed round by the bass and stronger on each trigger; how strong' },
   ] as const;
+  /** Whether the Effects sub panel is unfolded. */
+  readonly fxOpen = signal(false);
+  /** How many of the effects are switched on, for the panel's heading. */
+  readonly fxOnCount = computed(() => this.musicFxStrengths.filter(e => this.musicReact().enabled[e.key]).length);
   /**
    * What the renderer reacts to: the song's levels at each log time, where the music plays in the finished video and as
    * loud as its fades let it be. Null while switched off, muted, or not yet measured.
@@ -2238,11 +2359,14 @@ export class OverlayExportComponent {
       else draw();
     });
   });
-  /** The music's saturation on the preview's footage, as the finished video draws it. */
-  footageFilter = computed(() => {
-    const k = saturationBoost(this.musicNow(), this.musicFx());
-    return k === 1 ? null : `saturate(${(k * 100).toFixed(1)}%)`;
+  /** The music's rainbow tint over the preview's footage, as the finished video paints it. */
+  footageRainbow = computed(() => {
+    const fx = this.musicFx(), t = this.videoTime() - this.videoOffset();
+    const tint = rainbowTint(this.musicNow(), fx, fx ? fx.outAt(t) : null);
+    return tint ? { background: rainbowCss(tint.turn), opacity: tint.alpha } : null;
   });
+  /** The music's saturation on the preview's footage, as the finished video draws it. */
+  footageFilter = computed(() => footageColourFilter(this.musicNow(), this.musicFx()));
   /** The HUD's options with the music's effects. */
   private drawOpts = computed<OverlayOptions>(() => ({ ...this.opts(), music: this.musicFx() }));
 
@@ -2295,6 +2419,7 @@ export class OverlayExportComponent {
              panX: this.camPanX(), panY: this.camPanY() },
       soundGain: this.soundGain(), soundFadeIn: this.soundFadeIn(), soundFadeOut: this.soundFadeOut(),
       musicGain: this.musicGain(), musicFadeIn: this.musicFadeIn(), musicFadeOut: this.musicFadeOut(), musicReact: this.musicReact(),
+      editTransition: this.transition(),
       statsSeconds: this.statsSeconds(), showPip: this.showPip(), bottomFill: this.bottomFill(),
       // This format's toggles as they are, the other's as last left.
       show: { ...readPrefs().show, [formatOf(this.vertical())]: show },
@@ -3264,28 +3389,36 @@ export class OverlayExportComponent {
     this.lockIfSynced();
   }
 
-  /** While the video plays, the overlay follows its clock, frame by frame where the browser supports it. */
-  private followVideo() {
+  /**
+   * While the video plays, the overlay follows its clock, frame by frame where the browser supports it: at the time of
+   * the frame going on screen (`shown`, from the frame callback; the clock can be a frame off it), drawn there and then
+   * so it goes up with that frame, not a frame behind once Angular gets round to it (fast turns showed the lag).
+   */
+  private followVideo(shown?: number) {
     const v = this.bgVideo()?.nativeElement;
     if (!v || v.paused) return;
     this.keepInEdit(v, false);
     if (v.paused) return;
-    const t = v.currentTime - this.videoOffset();
+    const at = shown ?? v.currentTime, t = at - this.videoOffset();
     this.beforeLog.set(t < 0);
     this.previewTime.set(Math.min(this.previewMax(), Math.max(0, t)));
-    this.videoTime.set(v.currentTime);
+    this.videoTime.set(at);
     this.drawGraded();
+    this.drawPreview();
     this.syncAudio();
-    const next = () => this.followVideo();
     if ('requestVideoFrameCallback' in v) {
-      this.frameRequest = (v as HTMLVideoElement & { requestVideoFrameCallback(cb: () => void): number }).requestVideoFrameCallback(next);
+      type FrameCallback = (now: number, frame: { mediaTime: number }) => void;
+      this.frameRequest = (v as HTMLVideoElement & { requestVideoFrameCallback(cb: FrameCallback): number })
+        .requestVideoFrameCallback((_, frame) => this.followVideo(frame.mediaTime));
     } else {
-      this.frameRequest = requestAnimationFrame(next);
+      this.frameRequest = requestAnimationFrame(() => this.followVideo());
     }
   }
 
   private stopVideo() {
     this.bgVideo()?.nativeElement.pause();
+    this.endFade();
+    this.cutVeil.set(0);
     this.extAudio()?.nativeElement.pause();
     this.musicEl()?.nativeElement.pause();
     if (this.audioFrame !== null) { cancelAnimationFrame(this.audioFrame); this.audioFrame = null; }
@@ -3351,6 +3484,20 @@ export class OverlayExportComponent {
   beatPeriod = computed(() => this.musicAnalysis()?.beats().period ?? 0);
   /** Keep the flight's own sound under an edit's music (off: it would jump at every cut). */
   editSound = signal(false);
+  /** How an edit's clips give way to each other, and over how long. */
+  editTransition = signal<CutTransition>(readPrefs().editTransition?.kind ?? 'crossfade');
+  editTransitionSeconds = signal(readPrefs().editTransition?.seconds ?? 0.5);
+  readonly cutTransitions = CUT_TRANSITIONS;
+  readonly transitionLengths = [0.25, 0.5, 0.75, 1, 1.5];
+  private transition = computed(() => ({ kind: this.editTransition(), seconds: this.editTransitionSeconds() }));
+  /** In the preview: how much of the outgoing clip shows over the incoming one, and how far the picture's dipped. */
+  fadeOld = signal(0);
+  cutVeil = signal(0);
+  private fadeVideo = viewChild<ElementRef<HTMLVideoElement>>('fadeVideo');
+  private fadeCanvas = viewChild<ElementRef<HTMLCanvasElement>>('fadeCanvas');
+  private fadeGrader: GradeRenderer | null = null;
+  /** The clip whose end the fade video has been lined up on, ready for its crossfade. */
+  private fadePrimed = -1;
   editNote = signal('');
   readonly editLengths = [15, 30, 45, 60];
   /**
@@ -3474,7 +3621,9 @@ export class OverlayExportComponent {
       // Paused mid-dip last time: full sound again.
       this.dippingFor = -1;
       this.dipForCut(1, 0.02);
-      const i = clips.findIndex(c => f >= c.from && f < c.to - 0.05);
+      this.endFade();
+      this.fadePrimed = -1;
+      const i = clips.findIndex((c, k) => f >= c.from - this.leadIn(clips, k) && f < c.to - 0.05);
       this.editClip = i;
       if (i < 0) {
         this.editClip = 0;
@@ -3484,18 +3633,72 @@ export class OverlayExportComponent {
     }
     const c = clips[this.editClip];
     if (!c) return;
-    // Nearly at a cut to another clip: start easing the sound down, so it lands softly.
-    if (this.editClip + 1 < clips.length && f >= c.to - PREVIEW_DIP && this.dippingFor !== this.editClip) {
-      this.dippingFor = this.editClip;
-      this.dipForCut(0.25, Math.max(0.02, c.to - f));
+    const t = this.transition(), k = this.editClip, crossfade = t.kind === 'crossfade';
+    const halfIn = transitionHalf(clips, k, t), halfOut = transitionHalf(clips, k + 1, t);
+    // The transition into this clip (from its cut) and out of it (to the next cut).
+    // (Just after the jump into it the video can read a hair before the transition's start: its clock is rounded.)
+    const into = k > 0 ? transitionAt(t.kind, halfIn, Math.max(-halfIn, f - c.from)) : { old: 0, veil: 0 };
+    const out = k + 1 < clips.length ? transitionAt(t.kind, halfOut, f - c.to) : { old: 0, veil: 0 };
+    this.cutVeil.set(Math.max(into.veil, out.veil));
+    this.showFade(into.old);
+    // A crossfade's next clip takes over at the transition's start, with this one running on over it from a second
+    // video: line that up on this clip's end a moment ahead, so it's ready.
+    if (crossfade && halfOut > 0 && this.fadePrimed !== k && this.fadeOld() === 0 && f >= c.to - halfOut - 1) {
+      const fv = this.fadeVideo()?.nativeElement;
+      if (fv) {
+        fv.pause();
+        fv.currentTime = c.to - halfOut;
+        this.fadePrimed = k;
+      }
     }
-    if (f >= c.from - 0.3 && f < c.to - 0.008) return;
-    if (this.editClip + 1 >= clips.length) { v.pause(); return; }
+    // Nearly at a cut to another clip: start easing the sound down, so it lands softly.
+    const switchAt = c.to - (crossfade ? halfOut : 0);
+    if (k + 1 < clips.length && f >= switchAt - PREVIEW_DIP && this.dippingFor !== k) {
+      this.dippingFor = k;
+      this.dipForCut(0.25, Math.max(0.02, switchAt - f));
+    }
+    if (f >= c.from - Math.max(0.3, this.leadIn(clips, k) + 0.1) && f < switchAt - 0.008) return;
+    if (k + 1 >= clips.length) { v.pause(); return; }
     this.editClip++;
-    v.currentTime = clips[this.editClip].from;
+    const next = clips[this.editClip];
+    if (crossfade && halfOut > 0) {
+      const fv = this.fadeVideo()?.nativeElement;
+      // The outgoing clip carries on over the incoming one, fading out across the cut.
+      if (fv && this.fadePrimed === k && fv.readyState >= 2) {
+        fv.play().catch(() => this.endFade());
+        this.showFade(1);
+      }
+      v.currentTime = Math.max(0, next.from - halfOut);
+    } else {
+      v.currentTime = next.from;
+    }
     // And back up once the next clip's playing.
     this.dippingFor = -1;
     this.dipForCut(1, PREVIEW_DIP * 1.5);
+  }
+
+  /** How far before its own start clip `k` begins playing: a crossfade's incoming clip runs up to its cut. */
+  private leadIn(clips: readonly EditClip[], k: number) {
+    return this.editTransition() === 'crossfade' ? transitionHalf(clips, k, this.transition()) : 0;
+  }
+
+  /** The outgoing clip over the incoming one at `level` (0 hides and stops it), graded like the footage. */
+  private showFade(level: number) {
+    const fv = this.fadeVideo()?.nativeElement;
+    // Only once it's running on from the outgoing clip (it isn't when playback started too near the cut to line it up).
+    if (level <= 0 || !fv || fv.paused) { this.endFade(); return; }
+    this.fadeOld.set(level);
+    const c = this.fadeCanvas()?.nativeElement;
+    if (fv && c && fv.readyState >= 2 && !isNeutral(this.footageGrade())) {
+      if (this.fadeGrader?.canvas !== c) this.fadeGrader = new GradeRenderer(c);
+      this.fadeGrader.draw(fv, fv.videoWidth, fv.videoHeight, this.footageGrade());
+    }
+  }
+
+  private endFade() {
+    if (this.fadeOld() > 0) this.fadeOld.set(0);
+    const fv = this.fadeVideo()?.nativeElement;
+    if (fv && !fv.paused) fv.pause();
   }
 
   /**
@@ -3642,6 +3845,7 @@ export class OverlayExportComponent {
       } : null,
       hold: stats.hold,
       clips,
+      transition: clips ? this.transition() : null,
       overlay: { renderer: this.renderer(), opts: { ...this.drawOpts(), statsAfter: stats.after }, logOffset: this.videoOffset(), logEnd: stats.end },
       fadeOut: this.fadeOut(),
       quantizer: this.renderQp(),
@@ -3719,6 +3923,9 @@ export class OverlayExportComponent {
     this.end.set(this.seconds());
   }
 
+  /** What the preview was last drawn for, so the effect doesn't draw again what following the video just drew. */
+  private previewDrawn: readonly unknown[] = [];
+
   private drawPreview() {
     const r = this.renderer();
     const c = this.canvas()?.nativeElement;
@@ -3727,6 +3934,9 @@ export class OverlayExportComponent {
     if (!c) return;
     // Sized here rather than in the template, so the canvas and what's drawn on it change shape together.
     const w = this.previewW(), h = this.previewH();
+    const key = [r, c, t, o, w, h, this.selected(), this.placed()];
+    if (key.every((k, i) => k === this.previewDrawn[i])) return;
+    this.previewDrawn = key;
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const ctx = c.getContext('2d')!;
     r.draw(ctx, t, o);

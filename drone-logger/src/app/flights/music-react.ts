@@ -26,8 +26,8 @@ const FOOTAGE_TRIGGERS = ['hits', 'big', 'huge', 'drops'] as const;
 export type TintSource = 'bass' | 'mid' | 'treble' | 'all';
 
 /** The effects, each with a strength and its own on/off. */
-export type MusicEffect = 'pulse' | 'split' | 'tint' | 'particles' | 'spectrum' | 'zoom' | 'vignette' | 'saturation';
-export const MUSIC_EFFECTS: readonly MusicEffect[] = ['pulse', 'split', 'tint', 'particles', 'spectrum', 'zoom', 'vignette', 'saturation'];
+export type MusicEffect = 'pulse' | 'split' | 'tint' | 'particles' | 'spectrum' | 'road' | 'zoom' | 'vignette' | 'saturation' | 'rainbow';
+export const MUSIC_EFFECTS: readonly MusicEffect[] = ['pulse', 'split', 'tint', 'particles', 'spectrum', 'road', 'zoom', 'vignette', 'saturation', 'rainbow'];
 
 /** How the HUD and the footage react. Strengths are multipliers: 1 is the default, 0 as good as off. */
 export interface MusicReact {
@@ -58,6 +58,17 @@ export interface MusicReact {
   streakDirection: 'in' | 'out';
   /** Their colour: white-hot and blue, or a rainbow that turns with the music. */
   streakColor: 'white' | 'rainbow';
+  /** A rainbow road laid along where the craft is about to fly, from the gyro and the GPS speed: how bright. */
+  road: number;
+  /**
+   * How far below the middle of the picture the craft is heading, degrees: with the camera tilted up, forward flight
+   * heads below the middle, so the road lines up with where the footage is really going.
+   */
+  roadAim: number;
+  /** How far ahead the road reaches, s of flight. */
+  roadLength: number;
+  /** What it looks like: a glassy tube floating out ahead, or a pixel rainbow ribbon. */
+  roadStyle: 'tube' | 'road';
   /** How long a hit takes to fade, s. */
   hitLength: number;
   /** How readily a sudden rise counts as a hit: higher catches softer ones. */
@@ -66,6 +77,10 @@ export interface MusicReact {
   zoom: number;
   vignette: number;
   saturation: number;
+  /** The saturation swell as is, or spinning the footage's colours once round the rainbow as it fades. */
+  saturationStyle: 'plain' | 'rainbow';
+  /** Rainbow bands sweeping across the footage with the music: how strong. */
+  rainbow: number;
   /** What sets off the zoom and saturation. */
   footageTrigger: FootageTrigger;
   /** What sets off the vignette: rarer by default, so it lands as an event. */
@@ -73,9 +88,9 @@ export interface MusicReact {
 }
 
 export const MUSIC_REACT_DEFAULTS: MusicReact = {
-  on: false, enabled: { pulse: true, split: true, tint: true, particles: true, spectrum: false, zoom: true, vignette: true, saturation: true }, pulse: 1, split: 1, splitColors: ['#ff2a55', '#22e4ff'], osdTrigger: 'hits',
-  tint: 1, tintMode: 'drift', tintColor: '#ff4fd8', tintSpeed: 24, tintBy: 'bass', particles: 1, sparkSize: 1.6, spectrum: 1, spectrumStyle: 'lightspeed', streakDirection: 'in', streakColor: 'white', hitLength: 0.14, sensitivity: 1,
-  zoom: 1, vignette: 1, saturation: 1, footageTrigger: 'big', vignetteTrigger: 'huge',
+  on: false, enabled: { pulse: true, split: true, tint: true, particles: true, spectrum: false, road: false, zoom: true, vignette: true, saturation: true, rainbow: false }, pulse: 1, split: 1, splitColors: ['#ff2a55', '#22e4ff'], osdTrigger: 'hits',
+  tint: 1, tintMode: 'drift', tintColor: '#ff4fd8', tintSpeed: 24, tintBy: 'bass', particles: 1, sparkSize: 1.6, spectrum: 1, spectrumStyle: 'lightspeed', streakDirection: 'in', streakColor: 'white', road: 1, roadAim: 12, roadLength: 0.5, roadStyle: 'tube', hitLength: 0.14, sensitivity: 1,
+  zoom: 1, vignette: 1, saturation: 1, saturationStyle: 'plain', rainbow: 1, footageTrigger: 'big', vignetteTrigger: 'huge',
 };
 
 /** Settings as saved (perhaps by an older version), with anything missing or malformed back at its default. */
@@ -100,6 +115,9 @@ export function readMusicReact(saved: unknown): MusicReact {
     tintBy: pick(s['tintBy'], ['bass', 'mid', 'treble', 'all'] as const, d.tintBy),
     hitLength: num('hitLength', 0.05, 0.5), sensitivity: num('sensitivity', 0.5, 2),
     zoom: num('zoom', 0, 2), vignette: num('vignette', 0, 2), saturation: num('saturation', 0, 2),
+    saturationStyle: pick(s['saturationStyle'], ['plain', 'rainbow'] as const, d.saturationStyle), rainbow: num('rainbow', 0, 2),
+    road: num('road', 0, 2), roadAim: num('roadAim', 0, 40), roadLength: num('roadLength', 0.25, 4),
+    roadStyle: pick(s['roadStyle'], ['tube', 'road'] as const, d.roadStyle),
     footageTrigger: pick(s['footageTrigger'], FOOTAGE_TRIGGERS, d.footageTrigger),
     vignetteTrigger: pick(s['vignetteTrigger'], FOOTAGE_TRIGGERS, d.vignetteTrigger),
   };
@@ -134,7 +152,73 @@ function punchIn(x: number) {
 
 /** How saturated the footage is at this moment, as a multiplier: 1 between triggers, double as one lands at 100%. */
 export const saturationBoost = (lv: MusicLevel | null, fx: MusicFx | null) =>
-  lv && fx ? 1 + fx.saturation * lv.punch : 1;
+  lv && fx ? 1 + fx.saturation * lv.punch * (fx.saturationStyle === 'rainbow' ? RAINBOW_SATURATION : 1) : 1;
+
+/** The rainbow swell is this much more saturated than the plain one, so its colours pop as they spin. */
+const RAINBOW_SATURATION = 1.5;
+/** The rainbow's spin is all the way round once the swell is down to this. */
+const RAINBOW_GONE = 0.01;
+
+/**
+ * With the rainbow swell, how far the footage's colours are turned round the colour wheel at this moment, degrees: once
+ * all the way round as each trigger fades (from where they are as it lands, back to them as it's gone, so nothing
+ * jumps), at an even pace through the fade. 0 otherwise.
+ */
+export function saturationHue(lv: MusicLevel | null, fx: MusicFx | null) {
+  if (!lv || !fx || fx.saturationStyle !== 'rainbow' || !(fx.saturation > 0) || lv.punch <= 0.001) return 0;
+  // The swell fades away exponentially; by its log, the spin goes round at an even pace until it's all but gone.
+  const x = Math.min(1, Math.max(0, Math.log(Math.min(1, lv.punch)) / Math.log(RAINBOW_GONE))), eased = x * x * (3 - 2 * x);
+  return eased * 360;
+}
+
+/** The music's colour on the footage as a CSS filter: its saturation swell, and with the rainbow, its colours turned. */
+export function footageColourFilter(lv: MusicLevel | null, fx: MusicFx | null) {
+  const k = saturationBoost(lv, fx), hue = saturationHue(lv, fx);
+  if (k === 1 && hue === 0) return null;
+  return `saturate(${(k * 100).toFixed(1)}%)` + (hue ? ` hue-rotate(${hue.toFixed(1)}deg)` : '');
+}
+
+/** The rainbow tint's bands run across the picture at this angle (CSS's: 0 points up, clockwise). */
+export const RAINBOW_ANGLE = 115;
+/** How many times round the colour wheel across the picture, how fast it turns (degrees a second), and how far the bass pushes it. */
+const TINT_WHEELS = 1.5, TINT_DRIFT = 36, TINT_BASS = 90;
+
+/**
+ * The rainbow tint `out` s into the finished video: how strongly the footage takes on the bands' colours (they replace
+ * its hue and keep its light and dark), stronger as the song gets louder and on each trigger, and where the wheel has
+ * turned to, degrees. Null when it's off.
+ */
+export function rainbowTint(lv: MusicLevel | null, fx: MusicFx | null, out: number | null): { alpha: number; turn: number } | null {
+  if (!lv || !fx || !(fx.rainbow > 0) || out === null) return null;
+  const energy = (lv.bass + lv.mid + lv.treble) / 3;
+  const alpha = Math.min(0.85, fx.rainbow * (0.18 + 0.32 * energy + 0.3 * lv.punch));
+  return alpha > 0.005 ? { alpha, turn: (out * TINT_DRIFT + lv.bass * TINT_BASS) % 360 } : null;
+}
+
+/** The tint's colours along its gradient: [offset 0..1, colour]. */
+export function rainbowStops(turn: number): [number, string][] {
+  const n = 12;
+  return Array.from({ length: n + 1 }, (_, i) => [i / n, `hsl(${((turn + (i / n) * 360 * TINT_WHEELS) % 360).toFixed(1)}, 100%, 55%)`]);
+}
+
+/** CSS for the tint's gradient over a box. */
+export const rainbowCss = (turn: number) =>
+  `linear-gradient(${RAINBOW_ANGLE}deg, ${rainbowStops(turn).map(([o, c]) => `${c} ${(o * 100).toFixed(1)}%`).join(', ')})`;
+
+/** Paints the tint over `box` on a canvas, exactly as the CSS gradient lays it out (same line, same stops). */
+export function drawRainbowTint(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number },
+                                tint: { alpha: number; turn: number }) {
+  const a = RAINBOW_ANGLE * (Math.PI / 180), dx = Math.sin(a), dy = -Math.cos(a);
+  const half = (Math.abs(box.w * dx) + Math.abs(box.h * dy)) / 2, cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+  const grad = ctx.createLinearGradient(cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half);
+  for (const [o, c] of rainbowStops(tint.turn)) grad.addColorStop(o, c);
+  ctx.save();
+  ctx.globalCompositeOperation = 'color';
+  ctx.globalAlpha = tint.alpha;
+  ctx.fillStyle = grad;
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+  ctx.restore();
+}
 
 type Box = { x: number; y: number; w: number; h: number };
 /** The vignette's smallest blocks across the picture. */
@@ -652,6 +736,8 @@ export function drawReactive(ctx: CanvasRenderingContext2D, lv: MusicLevel, fx: 
     }
   }
   const out = fx.outAt(t);
+  // The rainbow road, out in the footage, under everything of the HUD's.
+  if (fx.road > 0 && out !== null) drawRoad(ctx, fx, lv, t, out, motion);
   // The spectrum bars stand on the text, behind the HUD, so a line's bars never cover the text above it.
   if (fx.spectrum > 0 && out !== null && sparks) {
     const mask = sparks(t);
@@ -667,6 +753,687 @@ export function drawReactive(ctx: CanvasRenderingContext2D, lv: MusicLevel, fx: 
   }
   put(src, 0);
   if (fx.particles > 0 && out !== null && sparks) drawParticles(ctx, fx, t, out, sparks, u, turn);
+}
+
+/**
+ * The rainbow road, a magic pointer to where the craft's going: from ROAD_FROM s ahead to its length (in ROAD_STEPS
+ * steps a second), a ribbon ROAD_WIDTH m wide in ROAD_LANES colours, ROAD_DROP m under where the craft will be. Its
+ * stripes are ROAD_STRIPE m long, fixed to the ground, so they stream past as the craft flies down it. It's drawn in
+ * chunky pixels, ROAD_PIXEL across at 1080p.
+ */
+const ROAD_FROM = 0.06, ROAD_STEPS = 28, ROAD_WIDTH = 1.6, ROAD_LANES = 7, ROAD_DROP = 0.8, ROAD_STRIPE = 1.5;
+const ROAD_PIXEL = 12;
+/** The times ahead the road's rows are laid at, s, for a road from `from` to `length` s ahead. */
+function roadMarks(length: number, from: number) {
+  const steps = Math.max(8, Math.min(60, Math.round(ROAD_STEPS * (length - from))));
+  return Array.from({ length: steps + 1 }, (_, k) => from + (k / steps) * (length - from));
+}
+/**
+ * Its near end is pinned to the bottom of the picture, ROAD_FOOT of the picture's width across, and sweeps from there
+ * into the path over its first ROAD_SWEEP rows, tapering (by ROAD_TAPER at its end) to a point.
+ */
+const ROAD_FOOT = 0.3, ROAD_SWEEP = 6, ROAD_TAPER = 0.9;
+/**
+ * The tube: TUBE_WIDTH m across, with a ripple TUBE_RIPPLE of its width deep every TUBE_WAVE m along the ground (so it
+ * streams past), its ends rounded. It's shaded in TUBE_BANDS bands across, then softened by TUBE_SOFT px (at 1080p).
+ */
+const TUBE_WIDTH = 1, TUBE_RIPPLE = 0.12, TUBE_WAVE = 1.4, TUBE_BANDS = 24, TUBE_SOFT = 1.2;
+/** The tube floats out ahead: it starts TUBE_FROM s ahead, and reaches at least TUBE_MIN s further. */
+const TUBE_FROM = 0.25, TUBE_MIN = 0.25;
+/** How far the bottom end follows the path across the picture (1: all the way to under it). */
+const ROAD_SLIDE = 0.7;
+/** How far off the lens's middle (deg) the road is still drawn: a bit past the picture's edge, not behind the camera. */
+const ROAD_EDGE = 115;
+/**
+ * The road's only there while the craft's flying: the throttle above ROAD_IDLE some time in the last ROAD_GROUNDED s (a
+ * flip or a dive drops it to idle for a moment), and with GPS, moving at least ROAD_STILL m/s (sitting armed, or
+ * hovering, there's no road to fly). It comes and goes over ROAD_FADE s.
+ */
+const ROAD_IDLE = 1050, ROAD_GROUNDED = 1.5, ROAD_STILL = 1.5, ROAD_FADE = 0.5;
+/**
+ * Its ends break up into random pixels rather than stopping on a straight edge: blocks drop out from ROAD_DISSOLVE_FAR
+ * of the way along to none left at its far end, and a few at its near end (down to ROAD_DISSOLVE_NEAR kept right at the
+ * edge, all by ROAD_NEAR_SPAN along). The pattern changes ROAD_TWINKLE times a second.
+ */
+const ROAD_DISSOLVE_FAR = 0.6, ROAD_DISSOLVE_NEAR = 0.45, ROAD_NEAR_SPAN = 0.08, ROAD_TWINKLE = 12;
+/**
+ * Magic dust: a sparkle every ROAD_SPARK_GAP m along the ground (so they stream past with the stripes), scattered up to
+ * ROAD_SPARK_SPREAD of the ribbon's width either side of its middle, each lit about ROAD_SPARK_ON of the time, twinkling.
+ */
+const ROAD_SPARK_GAP = 0.3, ROAD_SPARK_SPREAD = 1.4, ROAD_SPARK_ON = 0.55;
+
+/** How much of the road's pixels are kept at `u` of the way along it (its ends break up). */
+function roadKeep(u: number) {
+  return Math.max(0, Math.min(1, ROAD_DISSOLVE_NEAR + ((1 - ROAD_DISSOLVE_NEAR) * u) / ROAD_NEAR_SPAN, (1 - u) / (1 - ROAD_DISSOLVE_FAR)));
+}
+/** However the camera's pointed, the road climbs at least this far up the picture (a share of its height) by its end. */
+const ROAD_RISE = 0.4;
+/** ...and narrows into the distance like a road should: at its end at most ROAD_NARROW of its width at the bottom. */
+const ROAD_NARROW = 0.25;
+/**
+ * The craft's momentum: which way it's going follows which way it's pointed, but lags it by ROAD_LAG s (a flip doesn't
+ * swing its path round; it carries on). Worked out from ROAD_SETTLE s back, so the lag has caught up by now.
+ */
+const ROAD_LAG = 0.6, ROAD_SETTLE = 2, ROAD_DT = 0.05;
+/** Without a GPS track, the speed to lay the road out at, m/s. */
+const ROAD_SPEED = 15;
+/** With the accelerometer, the road climbs and dives at most this steeply (deg) however the craft is pointed. */
+const ROAD_STEEP = 35;
+
+/** Read either side of now for the roll, s: through a flip the ground's direction swings fast and briefly ill-defined. */
+const ROLL_SPREAD = [-0.04, -0.02, 0, 0.02, 0.04];
+
+/**
+ * How far the camera's rolled at log time `t`, radians (0 level, clockwise positive): the way the ground is across the
+ * picture, averaged a moment either side, counting more where it's clearly across the picture (not dead ahead, looking
+ * straight down). 0 without the accelerometer.
+ */
+function rollAt(motion: CraftMotion, t: number, aim: number) {
+  let x = 0, y = 0;
+  for (const dt of ROLL_SPREAD) {
+    const d = downAt(motion, t + dt, aim);
+    if (!d) return 0;
+    const w = Math.hypot(d[0], d[1]) * (dt === 0 ? 2 : 1);
+    x += d[0] * w; y += d[1] * w;
+  }
+  return Math.hypot(x, y) < 0.05 ? 0 : Math.atan2(x, y);
+}
+
+/**
+ * Which way is down in the picture at log time `t`, by the gyro and accelerometer: the craft's down, tipped back by
+ * `aim` (the camera looks up from the craft by as much as its path sits below the middle). Null without them.
+ */
+function downAt(motion: CraftMotion, t: number, aim: number): [number, number, number] | null {
+  const d = motion.turn?.down(t);
+  if (!d) return null;
+  const cos = Math.cos(aim * RAD), sin = Math.sin(aim * RAD);
+  return [d[0], d[1] * cos + d[2] * sin, d[2] * cos - d[1] * sin];
+}
+
+/** How far the craft has flown by each ROAD_DT s of the log, kept per speed source and filled in as far as needed. */
+const flown = new WeakMap<(t: number) => number, number[]>();
+function distanceFlown(speed: (t: number) => number, t: number) {
+  let d = flown.get(speed);
+  if (!d) flown.set(speed, (d = [0]));
+  const k = Math.max(0, t / ROAD_DT);
+  while (d.length <= Math.ceil(k)) { const i = d.length; d.push(d[i - 1] + Math.max(0, speed((i - 0.5) * ROAD_DT)) * ROAD_DT); }
+  const i = Math.floor(k);
+  return d[i] + (d[Math.min(d.length - 1, i + 1)] - d[i]) * (k - i);
+}
+
+/**
+ * Where the craft will be over the next few seconds, in the camera's frame now (m: +x right, +y down, +z ahead), with
+ * how far along each point is: the way it's heading (below the middle by `aim`) turned with the gyro and lagged by its
+ * momentum, at its GPS speed.
+ */
+function flightAhead(motion: CraftMotion, t: number, aim: number, length: number, from = ROAD_FROM) {
+  const times = roadMarks(length, from);
+  const ahead: [number, number, number][] = [], along: number[] = [];
+  const m: [number, number, number] = [0, Math.sin(aim * RAD), Math.cos(aim * RAD)];
+  const speed = (s: number) => (motion.speed ? Math.max(0, motion.speed(s)) : ROAD_SPEED);
+  const turn = motion.turn;
+  // The gyro and a GPS track: where the craft really went next, turned into the picture.
+  if (turn && motion.place) {
+    const gps = trackAhead(turn, motion.place, t, aim, times);
+    if (gps) return gps;
+  }
+  // No gyro but a GPS track: the track ahead, as seen flying the way it's going now (level, heading down the track).
+  if (!turn && motion.place) {
+    const gps = gpsAhead(motion.place, t, aim, times);
+    if (gps) return gps;
+  }
+  if (!turn) {
+    for (const s of times) {
+      const d = speed(t) * s;
+      ahead.push([m[0] * d, m[1] * d, m[2] * d]);
+      along.push(d);
+    }
+    return { ahead, along };
+  }
+  // In the world's frame: the heading, lagging behind where the camera points, from a couple of seconds back.
+  let h = turn.toWorld(t - ROAD_SETTLE, m);
+  for (let s = t - ROAD_SETTLE; s < t; s += ROAD_DT) h = lag(h, turn.toWorld(s, m));
+  // Knowing which way is down, the path can't climb or dive steeper than ROAD_STEEP (pointing the camera at the sky in
+  // a flip doesn't send the craft up there).
+  const down = downAt(motion, t, aim), dw = down ? turn.toWorld(t, down) : null, steep = Math.sin(ROAD_STEEP * RAD);
+  const along3 = (v: [number, number, number]): [number, number, number] => {
+    if (!dw) return v;
+    const vd = v[0] * dw[0] + v[1] * dw[1] + v[2] * dw[2];
+    if (Math.abs(vd) <= steep) return v;
+    const fx = v[0] - vd * dw[0], fy = v[1] - vd * dw[1], fz = v[2] - vd * dw[2], fl = Math.hypot(fx, fy, fz);
+    // Straight up or down: no way along the ground to keep, so just level.
+    if (fl < 1e-3) return v;
+    const c = Math.sqrt(1 - steep * steep) / fl, u = Math.sign(vd) * steep;
+    return [fx * c + dw[0] * u, fy * c + dw[1] * u, fz * c + dw[2] * u];
+  };
+  let p: [number, number, number] = [0, 0, 0], d = 0, s = t;
+  const marks = times.map(s => t + s);
+  for (const mark of marks) {
+    while (s < mark - 1e-6) {
+      const dt = Math.min(ROAD_DT, mark - s), v = speed(s);
+      h = lag(h, turn.toWorld(s, m), dt);
+      const g = along3(h);
+      p = [p[0] + g[0] * v * dt, p[1] + g[1] * v * dt, p[2] + g[2] * v * dt];
+      d += v * dt;
+      s += dt;
+    }
+    ahead.push(turn.toCamera(t, p));
+    along.push(d);
+  }
+  return { ahead, along };
+}
+
+/**
+ * The gyro knows how the camera turned but not which way north is (there's no compass in the log). Lined up with the GPS:
+ * a quad mostly flies nose first, so over HEADING_WINDOW s either side, the way the GPS says it's going less the way the
+ * camera (`aim` below its middle) points, both level, averaged by how fast it's flying (none under HEADING_SLOW m/s, in
+ * full from twice that), is how far the gyro's world is turned from the map's. Worked out every HEADING_STEP s.
+ */
+const HEADING_WINDOW = 6, HEADING_SLOW = 4, HEADING_STEP = 0.25;
+/** The GPS reports where the craft was about this long ago, s. */
+const GPS_LATENCY = 0.1;
+/** Below this, m/s, the track's too slow and noisy to lay the road along; the gyro's guess is used. */
+const TRACK_SLOW = 4;
+
+interface Heading { turn: CameraTurn; aim: number; at: (Float64Array | null) }
+const headings = new WeakMap<object, Heading>();
+
+/** Level directions in the gyro's world at log time `t`: up, and two across it (a, then b a quarter turn anticlockwise). */
+function levelAxes(turn: CameraTurn, t: number) {
+  const d = turn.down(t);
+  if (!d) return null;
+  const w = turn.toWorld(t, d), up = [-w[0], -w[1], -w[2]] as const;
+  const ref = Math.abs(up[0]) < 0.9 ? [1, 0, 0] : [0, 0, 1];
+  const k = ref[0] * up[0] + ref[1] * up[1] + ref[2] * up[2];
+  const ax = ref[0] - k * up[0], ay = ref[1] - k * up[1], az = ref[2] - k * up[2], al = Math.hypot(ax, ay, az);
+  const a = [ax / al, ay / al, az / al] as const;
+  const b = [up[1] * a[2] - up[2] * a[1], up[2] * a[0] - up[0] * a[2], up[0] * a[1] - up[1] * a[0]] as const;
+  return { up, a, b };
+}
+
+const dot = (u: readonly number[], v: readonly number[]) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+
+/** How far the gyro's world is turned from the map's (radians, anticlockwise from above) every HEADING_STEP s; NaN unknown. */
+function headingOffsets(turn: CameraTurn, place: (t: number) => [number, number, number] | null, aim: number) {
+  const known = headings.get(place);
+  if (known && known.turn === turn && known.aim === aim) return known.at;
+  const m = [0, Math.sin(aim * RAD), Math.cos(aim * RAD)] as const;
+  const sin: number[] = [], cos: number[] = [];
+  // To the track's end (it may start late, and has no gaps the interpolation doesn't bridge).
+  let last = -1;
+  for (let s = 0; s < 4 * 3600; s += 1) if (place(s)) last = s;
+  const end = last < 0 ? 0 : Math.floor((last + 1) / HEADING_STEP);
+  for (let i = 0; i < end; i++) {
+    const s = i * HEADING_STEP, p0 = place(s - 0.3 + GPS_LATENCY), p1 = place(s + 0.3 + GPS_LATENCY), ax = levelAxes(turn, s);
+    let w = 0, x = 0;
+    if (p0 && p1 && ax) {
+      const ve = (p1[0] - p0[0]) / 0.6, vn = (p1[1] - p0[1]) / 0.6, v = Math.hypot(ve, vn);
+      const f = turn.toWorld(s, m), fa = dot(f, ax.a), fb = dot(f, ax.b);
+      w = Math.min(1, Math.max(0, (v - HEADING_SLOW) / HEADING_SLOW)) * Math.hypot(fa, fb);
+      x = Math.atan2(vn, ve) - Math.atan2(fb, fa);
+    }
+    sin.push(w * Math.sin(x)); cos.push(w * Math.cos(x));
+  }
+  const at = new Float64Array(end).fill(NaN), span = Math.round(HEADING_WINDOW / HEADING_STEP);
+  for (let i = 0; i < end; i++) {
+    let ss = 0, cc = 0;
+    for (let j = Math.max(0, i - span); j <= Math.min(end - 1, i + span); j++) { ss += sin[j]; cc += cos[j]; }
+    if (Math.hypot(ss, cc) > 1.5) at[i] = Math.atan2(ss, cc);
+  }
+  headings.set(place, { turn, aim, at: end ? at : null });
+  return end ? at : null;
+}
+
+/**
+ * With the gyro and a GPS track: the road along where the craft really went next (so a yaw or a slide doesn't swing
+ * it), turned from the map into the gyro's world by the heading offset, then into the picture as the camera is now.
+ * Null when that can't be worked out (no accelerometer, hovering, off the track, or no fast flying nearby to line up).
+ */
+function trackAhead(turn: CameraTurn, place: (t: number) => [number, number, number] | null, t: number, aim: number,
+  times: number[]) {
+  const offsets = headingOffsets(turn, place, aim), ax = levelAxes(turn, t);
+  if (!offsets || !ax) return null;
+  const i = Math.round(t / HEADING_STEP), off = offsets[Math.min(offsets.length - 1, Math.max(0, i))];
+  const here = place(t + GPS_LATENCY);
+  if (Number.isNaN(off) || !here) return null;
+  const ahead: [number, number, number][] = [], along: number[] = [];
+  let last = here, d = 0;
+  for (const s of times) {
+    const p = place(t + GPS_LATENCY + s);
+    if (!p) break;
+    d += Math.hypot(p[0] - last[0], p[1] - last[1], p[2] - last[2]);
+    last = p;
+    const qe = p[0] - here[0], qn = p[1] - here[1], qu = p[2] - here[2];
+    const h = Math.hypot(qe, qn), ang = Math.atan2(qn, qe) - off, ca = Math.cos(ang), sa = Math.sin(ang);
+    const w: [number, number, number] = [
+      h * (ca * ax.a[0] + sa * ax.b[0]) + qu * ax.up[0],
+      h * (ca * ax.a[1] + sa * ax.b[1]) + qu * ax.up[1],
+      h * (ca * ax.a[2] + sa * ax.b[2]) + qu * ax.up[2],
+    ];
+    ahead.push(turn.toCamera(t, w));
+    along.push(d);
+  }
+  // Too slow to tell which way it's going: the gyro's guess instead.
+  return ahead.length > 2 && d / times[ahead.length - 1] >= TRACK_SLOW ? { ahead, along } : null;
+}
+
+/** How far either side of now the GPS track is read for the way the craft is heading, s (fixes are noisy). */
+const GPS_HEADING = 0.5;
+
+/**
+ * Without a gyro, the road from the GPS track: where the craft will be over the next few seconds, turned so the way
+ * it's flying now (along the track, level) is `aim` below the middle of the picture, with up as up. Its turns and climbs
+ * bend the road; the camera is taken to be level. Null when the track can't say which way it's heading (hovering, or
+ * off the track's ends).
+ */
+function gpsAhead(place: (t: number) => [number, number, number] | null, t: number, aim: number, times: number[]) {
+  const here = place(t), a = place(t - GPS_HEADING) ?? here, b = place(t + GPS_HEADING) ?? here;
+  if (!here || !a || !b) return null;
+  const he = b[0] - a[0], hn = b[1] - a[1], hl = Math.hypot(he, hn);
+  if (hl < 1) return null;
+  const fe = he / hl, fn = hn / hl, cos = Math.cos(aim * RAD), sin = Math.sin(aim * RAD);
+  const ahead: [number, number, number][] = [], along: number[] = [];
+  let last = here, d = 0;
+  for (const s of times) {
+    const p = place(t + s);
+    if (!p) break;
+    d += Math.hypot(p[0] - last[0], p[1] - last[1], p[2] - last[2]);
+    last = p;
+    const q = [p[0] - here[0], p[1] - here[1], p[2] - here[2]];
+    // Level camera axes: right, down, ahead along the heading; then tipped so straight on is `aim` below the middle.
+    const x = q[0] * fn - q[1] * fe, y = -q[2], z = q[0] * fe + q[1] * fn;
+    ahead.push([x, y * cos + z * sin, z * cos - y * sin]);
+    along.push(d);
+  }
+  return ahead.length > 2 ? { ahead, along } : null;
+}
+
+/** The heading `h` eased `dt` s of the way towards `to`, by the craft's momentum, kept a unit vector. */
+function lag(h: [number, number, number], to: [number, number, number], dt = ROAD_DT): [number, number, number] {
+  const k = 1 - Math.exp(-dt / ROAD_LAG);
+  const x = h[0] + (to[0] - h[0]) * k, y = h[1] + (to[1] - h[1]) * k, z = h[2] + (to[2] - h[2]) * k, n = Math.hypot(x, y, z) || 1;
+  return [x / n, y / n, z / n];
+}
+
+/**
+ * The rainbow road along the flight ahead, drawn into the footage through the fisheye (LENS_FOV round the middle of
+ * the footage): a ribbon under the craft's path, its lanes red to violet across it, its colours turning slowly with
+ * the song and kicked round by the hits, glowing brighter with the bass, fading out into the distance.
+ */
+function drawRoad(ctx: CanvasRenderingContext2D, fx: MusicFx, lv: MusicLevel, t: number, out: number, motion: CraftMotion) {
+  // Not flying (on the ground, or sitting still in the air): no road.
+  const up = roadUp(motion, t);
+  if (up <= 0) return;
+  const { width: W, height: H } = ctx.canvas;
+  // A little past the lens's edge too (it lands off the picture), so the road's sides carry on out of it rather than
+  // stopping; not round behind the camera, though, where the fisheye would fold it back in.
+  const vertical = H > W, cx = W / 2, cy = vertical ? (FOOTAGE_TOP * H) / 2 : H / 2, f = W / (LENS_FOV * RAD), edge = ROAD_EDGE * RAD;
+  // The road is laid out as if the camera weren't rolled (the ground straight down the picture), then turned round the
+  // picture's middle by the roll, so it comes in from whichever edge the ground's on and spins round with the world.
+  const roll = rollAt(motion, t, fx.roadAim), rc = Math.cos(roll), rs = Math.sin(roll);
+  const unroll = (v: readonly number[]): [number, number, number] => [v[0] * rc - v[1] * rs, v[0] * rs + v[1] * rc, v[2]];
+  const hw = W / 2, hh = cy;
+  // From the middle to the picture's edge, toward the ground and across it.
+  const reach = Math.min(hw / Math.max(1e-6, Math.abs(rs)), hh / Math.max(1e-6, Math.abs(rc)));
+  const across = Math.min(hw / Math.max(1e-6, Math.abs(rc)), hh / Math.max(1e-6, Math.abs(rs)));
+  const flight = (fx.roadStyle === 'tube'
+    ? flightAhead(motion, t, fx.roadAim, Math.max(fx.roadLength, TUBE_FROM + TUBE_MIN), TUBE_FROM)
+    : flightAhead(motion, t, fx.roadAim, fx.roadLength)), along = flight.along, ahead = flight.ahead.map(unroll);
+  const toScreen = (p: readonly [number, number, number]): [number, number] | null => {
+    const side = Math.hypot(p[0], p[1]), a = Math.atan2(side, p[2]);
+    if (a > edge || Math.hypot(...p) < 0.5) return null;
+    return side < 1e-6 ? [cx, cy] : [cx + (f * a * p[0]) / side, cy + (f * a * p[1]) / side];
+  };
+  // Across the road and under it: with the accelerometer, level with the real ground and below the path, however the
+  // camera is rolled or pitched. Without it, flat to the camera's own level now. Where the path heads (near) straight
+  // down that way, level sideways is ill-defined, so the road keeps the way it was lying.
+  // Looking (near) straight down at the ground, the roll's ill-defined, so it leans over to the camera's own down.
+  const ground = unroll(downAt(motion, t, fx.roadAim) ?? [0, 1, 0]), keep = Math.max(0, ground[1]);
+  const lean = [ground[0] * keep, ground[1] * keep + (1 - keep), ground[2] * keep], ll = Math.hypot(...lean) || 1;
+  const down = [lean[0] / ll, lean[1] / ll, lean[2] / ll];
+  const tube = fx.roadStyle === 'tube', width = tube ? TUBE_WIDTH : ROAD_WIDTH;
+  let side: [number, number, number] = [1, 0, 0];
+  const rows = ahead.map((p, k) => {
+    const next = ahead[Math.min(ahead.length - 1, k + 1)], prev = ahead[Math.max(0, k - 1)];
+    const tx = next[0] - prev[0], ty = next[1] - prev[1], tz = next[2] - prev[2], tl = Math.hypot(tx, ty, tz) || 1;
+    // down x tangent: right of the path, along the ground.
+    const rx = down[1] * tz - down[2] * ty, ry = down[2] * tx - down[0] * tz, rz = down[0] * ty - down[1] * tx;
+    const rl = Math.hypot(rx, ry, rz);
+    // Kept left to right across the picture, as its bottom end is, so it never twists over.
+    const sg = rx < 0 ? -1 : 1;
+    if (rl / tl > 0.35 || k === 0) side = rl > 1e-6 ? [(sg * rx) / rl, (sg * ry) / rl, (sg * rz) / rl] : side;
+    return Array.from({ length: ROAD_LANES + 1 }, (_, j) => {
+      const w = (j / ROAD_LANES - 0.5) * width;
+      return toScreen([
+        p[0] + side[0] * w + down[0] * ROAD_DROP,
+        p[1] + side[1] * w + down[1] * ROAD_DROP,
+        p[2] + side[2] * w + down[2] * ROAD_DROP,
+      ]);
+    });
+  });
+  // Pinned to the bottom edge (anchor) and eased from there into where the path really is over the first rows. Where the
+  // camera points well above the path, which would leave it all under the picture, it's held up into view: by its end
+  // at least ROAD_RISE of the way up. Points too near to see (under the camera) stay on the bottom edge.
+  // Its bottom end slides along the edge toward where the path is (off the side when the craft's going sideways).
+  const bottom = cy + reach, mid = ROAD_LANES / 2;
+  const middleOf = (r: ([number, number] | null)[]) => {
+    const l = r[Math.floor(mid)], h = r[Math.ceil(mid)];
+    return l && h ? (l[0] + h[0]) / 2 : null;
+  };
+  const aimAt = rows.slice(Math.min(rows.length - 1, ROAD_SWEEP - 1)).map(middleOf).find(x => x !== null)
+    ?? rows.map(middleOf).find(x => x !== null) ?? cx;
+  const slide = Math.max(-2.4 * across, Math.min(2.4 * across, (aimAt - cx) * ROAD_SLIDE));
+  const anchor = Array.from({ length: ROAD_LANES + 1 }, (_, j): [number, number] =>
+    [cx + slide + across * ROAD_FOOT * ((2 * j) / ROAD_LANES - 1), bottom + 2]);
+  const base = anchor[ROAD_LANES][0] - anchor[0][0];
+  // The tube floats free, out ahead: not pinned to the edge, nor held up into view.
+  const road = [...(tube ? [] : [anchor]), ...rows.map((r, i) => {
+    const u = (i + 1) / rows.length, e = tube ? 1 : Math.min(1, (i + 1) / ROAD_SWEEP), b = e * e * (3 - 2 * e);
+    const lowest = tube ? Infinity : bottom - ROAD_RISE * u * 2 * reach;
+    // Squeezed about its middle when it's wider across than this far along allows (a craft's path swinging close), and
+    // tapered to a point.
+    const seen = r.filter((p): p is [number, number] => !!p);
+    const mx = seen.reduce((a, p) => a + p[0], 0) / (seen.length || 1), my = seen.reduce((a, p) => a + p[1], 0) / (seen.length || 1);
+    const span = seen.length > 1 ? Math.hypot(seen[seen.length - 1][0] - seen[0][0], seen[seen.length - 1][1] - seen[0][1]) : 0;
+    const squeeze = Math.min(1, (base * (1 - (1 - ROAD_NARROW) * u)) / (span || 1)) * (tube ? 1 : 1 - ROAD_TAPER * u ** 1.5);
+    return r.map((p, j): [number, number] | null => {
+      if (!p) return i < ROAD_SWEEP && !tube ? anchor[j] : null;
+      const x = mx + (p[0] - mx) * squeeze, y = Math.min(my + (p[1] - my) * squeeze, lowest);
+      return [anchor[j][0] + (x - anchor[j][0]) * b, anchor[j][1] + (y - anchor[j][1]) * b];
+    });
+  })].map(r => r.map((p): [number, number] | null => {
+    // Turned back by the roll, round the picture's middle.
+    if (!p) return null;
+    const dx = p[0] - cx, dy = p[1] - cy;
+    return [cx + dx * rc + dy * rs, cy - dx * rs + dy * rc];
+  }));
+  const far = tube ? along : [along[0] - ROAD_STRIPE, ...along];
+  // Where the craft's path runs out of view (flying backwards to the camera, mid loop), the road fades away.
+  const seen = rows.filter(r => middleOf(r) !== null).length / rows.length, inView = Math.min(1, Math.max(0, (seen - 0.3) / 0.4));
+  if (inView <= 0) return;
+  const travelled = motion.speed ? distanceFlown(motion.speed, t) : out * ROAD_SPEED;
+  const turnAt = (out * 20 + lv.hit * 40 + lv.bass * 30) % 360, glow = 0.75 + 0.25 * lv.bass;
+  const strength = Math.min(1, fx.road * 0.8) * inView * up;
+  if (tube) {
+    ctx.save();
+    if (vertical) { ctx.beginPath(); ctx.rect(0, 0, W, FOOTAGE_TOP * H); ctx.clip(); }
+    drawTube(ctx, road, far, travelled, strength, glow, turnAt);
+    ctx.restore();
+    return;
+  }
+  // Drawn small and blown back up with hard edges: chunky pixels.
+  const px = Math.max(2, Math.round((ROAD_PIXEL * Math.min(W, H)) / 1080));
+  const small = scratch('road', Math.ceil(W / px), Math.ceil(H / px)), g = small.getContext('2d', { willReadFrequently: true })!;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, small.width, small.height);
+  g.setTransform(1 / px, 0, 0, 1 / px, 0, 0);
+  // How far along each pixel is, drawn alongside (0..255 in red) so the ends can break up by it.
+  const umap = scratch('road-u', small.width, small.height), ug = umap.getContext('2d', { willReadFrequently: true })!;
+  ug.setTransform(1, 0, 0, 1, 0, 0);
+  ug.clearRect(0, 0, umap.width, umap.height);
+  ug.setTransform(1 / px, 0, 0, 1 / px, 0, 0);
+  const along01 = (k: number) => k / (road.length - 1);
+  const uShade = (u: number) => `rgb(${Math.round(u * 255)}, 0, 0)`;
+  const fadeAt = (_u: number) => 1;
+  for (let k = 0; k < road.length - 1; k++) {
+    const u = k / (road.length - 1), fade = fadeAt(u);
+    const stripe = Math.floor((travelled + far[k]) / ROAD_STRIPE) % 2 === 0 ? 1 : 0.72;
+    const alpha = strength * fade * glow;
+    if (alpha < 0.01) continue;
+    for (let j = 0; j < ROAD_LANES; j++) {
+      const a = road[k][j], b = road[k][j + 1], c = road[k + 1][j + 1], d = road[k + 1][j];
+      if (!a || !b || !c || !d) continue;
+      const hue = (turnAt + (j / ROAD_LANES) * 290) % 360;
+      g.fillStyle = `hsla(${hue.toFixed(0)}, 100%, ${(52 * stripe + 8).toFixed(0)}%, ${alpha.toFixed(3)})`;
+      g.beginPath();
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]);
+      g.closePath();
+      g.fill();
+      const m0 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], m1 = [(c[0] + d[0]) / 2, (c[1] + d[1]) / 2];
+      const grad = ug.createLinearGradient(m0[0], m0[1], m1[0], m1[1]);
+      grad.addColorStop(0, uShade(along01(k)));
+      grad.addColorStop(1, uShade(along01(k + 1)));
+      ug.fillStyle = grad;
+      ug.beginPath();
+      ug.moveTo(a[0], a[1]); ug.lineTo(b[0], b[1]); ug.lineTo(c[0], c[1]); ug.lineTo(d[0], d[1]);
+      ug.closePath();
+      ug.fill();
+    }
+  }
+  // Bright rails along both edges, a pixel wide.
+  g.globalCompositeOperation = 'lighter';
+  g.lineCap = 'square';
+  g.lineWidth = px;
+  for (const j of [0, ROAD_LANES]) {
+    for (let k = 0; k < road.length - 1; k++) {
+      const a = road[k][j], b = road[k + 1][j];
+      if (!a || !b) continue;
+      g.strokeStyle = `rgba(255, 255, 255, ${(strength * fadeAt(k / (road.length - 1)) * glow * 0.7).toFixed(3)})`;
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      ug.strokeStyle = uShade(along01(k + 0.5));
+      ug.lineWidth = px;
+      ug.beginPath(); ug.moveTo(a[0], a[1]); ug.lineTo(b[0], b[1]); ug.stroke();
+    }
+  }
+  g.globalCompositeOperation = 'source-over';
+  dissolveEnds(g, ug, Math.floor(t * ROAD_TWINKLE));
+  sparkle(g, road, far, travelled, Math.floor(t * ROAD_TWINKLE), strength * glow, turnAt, px);
+  ctx.save();
+  if (vertical) { ctx.beginPath(); ctx.rect(0, 0, W, FOOTAGE_TOP * H); ctx.clip(); }
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(small, 0, 0, small.width * px, small.height * px);
+  ctx.restore();
+}
+
+/** Whether the craft's flying at log time `t` (see ROAD_IDLE): 1 or 0, or 1 when the log can't say. */
+function flyingAt(motion: CraftMotion, t: number) {
+  const speed = motion.speed, throttle = motion.throttle;
+  if (speed && speed(t) < ROAD_STILL) return 0;
+  if (!throttle) return 1;
+  for (let s = t; s >= t - ROAD_GROUNDED; s -= 0.04) if (throttle(s) > ROAD_IDLE) return 1;
+  return 0;
+}
+
+/** How much road there is at log time `t`, 0..1: flying over the last ROAD_FADE s, so it eases in and out. */
+function roadUp(motion: CraftMotion, t: number) {
+  let n = 0;
+  for (let k = 0; k < 5; k++) n += flyingAt(motion, t - (k / 4) * ROAD_FADE);
+  return n / 5;
+}
+
+/**
+ * The glass tube along the road's middle (`road`'s rows, screen points across; `far` m along to each): a round rod of
+ * clear glass, faintly tinted with colours turning with the song (`hue0`), brighter with `glow` (the bass), rippling as
+ * it streams past, its ends rounded off. Drawn apart and softened a touch, so it reads smooth.
+ */
+function drawTube(ctx: CanvasRenderingContext2D, road: ([number, number] | null)[][], far: number[], travelled: number,
+  alpha: number, glow: number, hue0: number) {
+  // The middle and half-width of each row, as far as the tube can be seen unbroken from its near end.
+  const lo = Math.floor(ROAD_LANES / 2), hi = Math.ceil(ROAD_LANES / 2);
+  const mid: [number, number][] = [], rad: number[] = [];
+  for (let k = 0; k < road.length; k++) {
+    const r = road[k], a = r[lo], b = r[hi], l = r[0], e = r[ROAD_LANES];
+    if (!a || !b || !l || !e) {
+      if (mid.length > 1) break;
+      mid.length = rad.length = 0;
+      continue;
+    }
+    const ripple = 1 + TUBE_RIPPLE * Math.sin((2 * Math.PI * (travelled + far[k])) / TUBE_WAVE);
+    mid.push([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    rad.push((Math.hypot(e[0] - l[0], e[1] - l[1]) / 2) * ripple);
+  }
+  if (mid.length < 2) return;
+  const { width: W, height: H } = ctx.canvas;
+  // Smoothed: the rows are far apart on screen where the tube's close, so it's drawn through them on a curve, a point
+  // every few pixels, rather than straight from row to row (which shows corners).
+  const { mid: line, rad: wide } = smoothTube(mid, rad, Math.max(2, Math.min(W, H) / 270));
+  const n = line.length;
+  const run = [0];
+  for (let k = 1; k < n; k++) run.push(run[k - 1] + Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]));
+  const total = run[n - 1];
+  // No wider than it bends: round a tight bend the tube's inside edge would fold back over itself, so it narrows
+  // there instead, easing in and out.
+  const bendR = tightness(line, run, total);
+  // Rounded ends: the radius closes in like a half ball over the last radius's length at each end (at most a third of
+  // the tube each, so a short one close up stays a rod, not a ball).
+  const capA = Math.min(wide[0], total / 3), capB = Math.min(wide[n - 1], total / 3);
+  const round = (x: number) => (x >= 1 ? 1 : Math.sqrt(Math.max(0, 1 - (1 - x) ** 2)));
+  const r = wide.map((v, k) => Math.min(v, bendR[k]) * round(run[k] / (capA || 1)) * round((total - run[k]) / (capB || 1)));
+  // Across the tube at each point: square to its line on screen, the lit side up the picture where it starts and kept
+  // on the same side along it.
+  const across: [number, number][] = [];
+  for (let k = 0; k < n; k++) {
+    const q = line[Math.min(n - 1, k + 2)], o = line[Math.max(0, k - 2)];
+    let x = -(q[1] - o[1]), y = q[0] - o[0];
+    const l = Math.hypot(x, y) || 1;
+    x /= l; y /= l;
+    const prev = across[k - 1];
+    const flip = prev ? x * prev[0] + y * prev[1] < 0 : y > 0;
+    across.push(flip ? [-x, -y] : [x, y]);
+  }
+  const at = (k: number, s: number): [number, number] => [line[k][0] + across[k][0] * r[k] * s, line[k][1] + across[k][1] * r[k] * s];
+  const canvas = scratch('tube', W, H), g = canvas.getContext('2d')!;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, W, H);
+  // In bands along its length, side to side across it (s: -1 one side, 0 the middle, 1 the lit side), shaded as a
+  // round rod of clear glass: see-through in the middle, brighter toward its sides where the glass is seen edge on,
+  // a darker line just inside each edge where it bends the light away, and a white highlight down its lit side. Faintly
+  // tinted along its length in colours that turn with the song.
+  for (let i = 0; i < TUBE_BANDS; i++) {
+    const s0 = -1 + (2 * i) / TUBE_BANDS, s1 = s0 + 2 / TUBE_BANDS, sm = (s0 + s1) / 2;
+    const edge = Math.abs(sm) ** 3, shine = Math.exp(-(((sm - 0.45) / 0.13) ** 2));
+    const bend = Math.exp(-(((Math.abs(sm) - 0.8) / 0.08) ** 2)), under = Math.exp(-(((sm + 0.55) / 0.15) ** 2));
+    const light = Math.max(20, Math.min(97, 82 + 14 * shine + 6 * under - 50 * bend)), sat = 30 - 25 * shine;
+    const a = alpha * Math.min(1, 0.1 + 0.55 * edge + 0.7 * shine + 0.3 * bend + 0.15 * under) * (0.85 + 0.15 * glow);
+    const across0 = hue0;
+    const grad = g.createLinearGradient(line[0][0], line[0][1], line[n - 1][0], line[n - 1][1]);
+    const step = Math.max(1, Math.floor(n / 8));
+    const stop = (k: number) => {
+      const u = k / (n - 1), h = (across0 + u * 220) % 360;
+      grad.addColorStop(u, `hsla(${h.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${(a * (1 - 0.25 * u)).toFixed(3)})`);
+    };
+    for (let k = 0; k < n; k += step) stop(k);
+    stop(n - 1);
+    g.fillStyle = grad;
+    g.beginPath();
+    for (let k = 0; k < n; k++) { const p = at(k, s0); if (k) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); }
+    for (let k = n - 1; k >= 0; k--) { const p = at(k, s1); g.lineTo(p[0], p[1]); }
+    g.closePath();
+    g.fill();
+  }
+  ctx.save();
+  ctx.filter = `blur(${Math.max(0.5, (TUBE_SOFT * Math.min(W, H)) / 1080).toFixed(1)}px)`;
+  ctx.drawImage(canvas, 0, 0);
+  ctx.restore();
+}
+
+/**
+ * The tube's middle line (`mid`) and radius (`rad`) through its rows, on a Catmull-Rom curve with a point about every
+ * `step` px, and the radius eased along it.
+ */
+function smoothTube(mid: [number, number][], rad: number[], step: number) {
+  const n = mid.length, out: [number, number][] = [], wide: number[] = [];
+  const P = (k: number) => mid[Math.max(0, Math.min(n - 1, k))], R = (k: number) => rad[Math.max(0, Math.min(n - 1, k))];
+  const cr = (a: number, b: number, c: number, d: number, t: number) =>
+    0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
+  for (let k = 0; k < n - 1; k++) {
+    const p0 = P(k - 1), p1 = P(k), p2 = P(k + 1), p3 = P(k + 2);
+    const parts = Math.max(1, Math.min(40, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step)));
+    for (let j = 0; j < parts; j++) {
+      const t = j / parts;
+      out.push([cr(p0[0], p1[0], p2[0], p3[0], t), cr(p0[1], p1[1], p2[1], p3[1], t)]);
+      wide.push(Math.max(0, cr(R(k - 1), R(k), R(k + 1), R(k + 2), t)));
+    }
+  }
+  out.push(mid[n - 1]);
+  wide.push(rad[n - 1]);
+  return { mid: out, rad: wide };
+}
+
+/**
+ * How wide the tube can be at each point of its middle line (`line`, `run` px along it, `total` in all) before its
+ * inside edge folds back on a bend: 0.85 of the bend's radius there (measured over a stretch, so a wobble doesn't count),
+ * eased so it narrows smoothly into a tight bend and out again.
+ */
+function tightness(line: [number, number][], run: number[], total: number) {
+  const n = line.length, out = new Array<number>(n).fill(Infinity);
+  if (n < 3) return out;
+  const span = Math.max(6, total / 40);
+  const dir = (k: number) => {
+    const q = line[Math.min(n - 1, k + 1)], o = line[Math.max(0, k - 1)];
+    return Math.atan2(q[1] - o[1], q[0] - o[0]);
+  };
+  let lo = 0, hi = 0;
+  for (let k = 0; k < n; k++) {
+    while (lo < k && run[k] - run[lo] > span) lo++;
+    while (hi < n - 1 && run[hi] - run[k] < span) hi++;
+    let turn = Math.abs(dir(hi) - dir(lo));
+    if (turn > Math.PI) turn = 2 * Math.PI - turn;
+    const arc = run[hi] - run[lo];
+    if (turn > 1e-3 && arc > 0) out[k] = (0.85 * arc) / turn;
+  }
+  // Eased: each limit spreads to its neighbours (a narrowing can't be sharper than it gets wider), then softened.
+  for (let pass = 0; pass < 2; pass++) {
+    for (let k = 1; k < n; k++) out[k] = Math.min(out[k], out[k - 1] + (run[k] - run[k - 1]) * 0.5);
+    for (let k = n - 2; k >= 0; k--) out[k] = Math.min(out[k], out[k + 1] + (run[k + 1] - run[k]) * 0.5);
+  }
+  return out;
+}
+
+/**
+ * Magic dust round the road: sparkles fixed to the ground along it (one every ROAD_SPARK_GAP m, `travelled` m flown so
+ * far, `far` m along to each row), either side of its middle, twinkling on and off with `seed`, white or a rainbow
+ * colour, the odd one a bigger cross. Pixels of `px` (it's drawn on the small road canvas).
+ */
+function sparkle(g: CanvasRenderingContext2D, road: ([number, number] | null)[][], far: number[], travelled: number,
+  seed: number, alpha: number, hue0: number, px: number) {
+  const last = road.length - 1, from = travelled + far[0], to = travelled + far[last];
+  if (!(to > from)) return;
+  g.globalCompositeOperation = 'lighter';
+  let k = 0;
+  for (let j = Math.ceil(from / ROAD_SPARK_GAP); j * ROAD_SPARK_GAP <= to; j++) {
+    const d = (j + hash(j, 1, 7) - 0.5) * ROAD_SPARK_GAP - travelled;
+    while (k < last - 1 && far[k + 1] < d) k++;
+    const a = road[k], b = road[k + 1];
+    const a0 = a[0], a1 = a[ROAD_LANES], b0 = b[0], b1 = b[ROAD_LANES];
+    if (!a0 || !a1 || !b0 || !b1 || far[k + 1] <= far[k]) continue;
+    const f = Math.max(0, Math.min(1, (d - far[k]) / (far[k + 1] - far[k]))), u = (k + f) / last;
+    const on = hash(j, seed, 11);
+    if (on > ROAD_SPARK_ON) continue;
+    // Across the ribbon here: its left and right edges, between the two rows.
+    const lx = a0[0] + (b0[0] - a0[0]) * f, ly = a0[1] + (b0[1] - a0[1]) * f;
+    const rx = a1[0] + (b1[0] - a1[0]) * f, ry = a1[1] + (b1[1] - a1[1]) * f;
+    const o = 0.5 + (hash(j, 3, 13) - 0.5) * ROAD_SPARK_SPREAD;
+    const x = lx + (rx - lx) * o, y = ly + (ry - ly) * o;
+    const bright = alpha * roadKeep(u) * (0.5 + on / ROAD_SPARK_ON / 2);
+    if (bright < 0.03) continue;
+    const white = hash(j, 5, 17) < 0.5;
+    g.fillStyle = white ? `rgba(255, 255, 255, ${bright.toFixed(3)})`
+      : `hsla(${((hue0 + hash(j, 6, 19) * 290) % 360).toFixed(0)}, 100%, 70%, ${bright.toFixed(3)})`;
+    const cxp = Math.floor(x / px) * px, cyp = Math.floor(y / px) * px;
+    g.fillRect(cxp, cyp, px, px);
+    if (hash(j, 8, 23) < 0.25) {
+      g.fillRect(cxp - px, cyp, px, px); g.fillRect(cxp + px, cyp, px, px);
+      g.fillRect(cxp, cyp - px, px, px); g.fillRect(cxp, cyp + px, px, px);
+    }
+  }
+  g.globalCompositeOperation = 'source-over';
+}
+
+/**
+ * Breaks the road's ends up into random pixels: each pixel of `g` is kept or dropped by a dice roll against how far
+ * along the road it is (read from `ug`), the roll changing with `seed`.
+ */
+function dissolveEnds(g: CanvasRenderingContext2D, ug: CanvasRenderingContext2D, seed: number) {
+  const { width: w, height: h } = g.canvas;
+  const img = g.getImageData(0, 0, w, h), u = ug.getImageData(0, 0, w, h).data, px = img.data;
+  for (let i = 0; i < w * h; i++) {
+    const o = i * 4;
+    if (px[o + 3] === 0 || u[o + 3] === 0) continue;
+    const keep = roadKeep(u[o] / 255);
+    if (keep < 1 && hash(i % w, Math.floor(i / w), seed) >= keep) px[o + 3] = 0;
+  }
+  g.putImageData(img, 0, 0);
 }
 
 /** Spectrum bars: across each line of text, at most this many bars, each this many copy pixels wide (gap included). */
@@ -877,7 +1644,14 @@ const RAINBOW_SPREAD = 260, RAINBOW_DRIFT = 40, RAINBOW_BASS = 140;
 const WARP_TRAIL = 0.2, WARP_STEPS = 8, WARP_DEPTH = 8;
 
 /** How the craft was moving, for the streaks: the camera's turns from the gyro, and its speed (m/s) from the GPS. */
-export interface CraftMotion { turn: CameraTurn | null; speed: ((t: number) => number) | null }
+export interface CraftMotion {
+  turn: CameraTurn | null;
+  speed: ((t: number) => number) | null;
+  /** Where the craft is by its GPS at log time `t`: metres east, north and up (null off the track or without one). */
+  place?: ((t: number) => [number, number, number] | null) | null;
+  /** The throttle at log time `t` (rcCommand, 1000 at idle..2000), without sticks null. */
+  throttle?: ((t: number) => number) | null;
+}
 
 /**
  * The paths the streaks follow this frame: for a point on the picture, where the world there was seen over the last

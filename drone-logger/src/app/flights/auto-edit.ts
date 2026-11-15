@@ -54,6 +54,36 @@ export function clipAt(clips: readonly EditClip[], out: number): number {
   return -1;
 }
 
+/**
+ * How one clip gives way to the next: a hard cut, a crossfade (the outgoing clip dissolving into the incoming one),
+ * or a dip through black or a flash through white. Every one is centred on the cut, so the cuts stay on the beat.
+ */
+export type CutTransition = 'cut' | 'crossfade' | 'black' | 'white';
+export const CUT_TRANSITIONS: readonly (readonly [CutTransition, string])[] = [
+  ['crossfade', 'Crossfade'], ['black', 'Dip to black'], ['white', 'Flash to white'], ['cut', 'Hard cut'],
+];
+export interface EditTransition { kind: CutTransition; /** How long each transition takes in all, s. */ seconds: number }
+
+/** Half of the transition at the cut into clip `k` (k ≥ 1), s: no more than nearly half of either clip beside it. */
+export function transitionHalf(clips: readonly EditClip[], k: number, t: EditTransition | null | undefined): number {
+  if (!t || t.kind === 'cut' || k < 1 || k >= clips.length) return 0;
+  return Math.max(0, Math.min(t.seconds / 2, 0.45 * clipLength(clips[k - 1]), 0.45 * clipLength(clips[k])));
+}
+
+/** 0 to 1 with soft ends. */
+const ease = (u: number) => { const x = Math.max(0, Math.min(1, u)); return x * x * (3 - 2 * x); };
+
+/**
+ * The picture `fromCut` s from a cut (negative before it) in a transition `half` s each side of it: how much of the
+ * outgoing clip still shows over the incoming one (a crossfade, 1 down to 0), and how far the picture has dipped to
+ * black or white (1 at the cut). Both 0 outside the transition.
+ */
+export function transitionAt(kind: CutTransition, half: number, fromCut: number): { old: number; veil: number } {
+  if (half <= 0 || kind === 'cut' || fromCut < -half || fromCut >= half) return { old: 0, veil: 0 };
+  if (kind === 'crossfade') return { old: 1 - ease((fromCut + half) / (2 * half)), veil: 0 };
+  return { old: 0, veil: ease(1 - Math.abs(fromCut) / half) };
+}
+
 /** How much the footage's picture changes, every `step` s of footage time from 0. */
 export interface FootageMotion { step: number; motion: Float32Array }
 

@@ -355,7 +355,30 @@ export class OverlayRenderer {
   }
 
   /** The craft's GPS speed at log time `t`, m/s; null without a GPS track. */
+  /** The sticks' times, for reading the throttle (worked out on first use). */
+  private stickTimes?: number[];
+  /** The throttle at log time `t` (rcCommand, 1000 at idle..2000). */
+  private readonly throttleAt = (t: number) => {
+    const sticks = this.data.sticks!;
+    this.stickTimes ??= sticks.map(p => p[0]);
+    return sticks[nearest(this.stickTimes, t)][4];
+  };
   private readonly speedAt = (t: number) => (this.trackTimes.length ? this.data.track!.points[nearest(this.trackTimes, t)][4] : 0);
+
+  /**
+   * Where the craft is at log time `t` by its GPS, in metres east, north and up from the track's first point, between
+   * fixes in a straight line; null off either end of the track or without one.
+   */
+  private readonly placeAt = (t: number): [number, number, number] | null => {
+    const times = this.trackTimes, pts = this.data.track?.points;
+    if (!pts || times.length < 2 || t < times[0] || t > times[times.length - 1]) return null;
+    let lo = 0, hi = times.length - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (times[mid] <= t) lo = mid; else hi = mid; }
+    const a = pts[lo], b = pts[hi], k = times[hi] > times[lo] ? (t - times[lo]) / (times[hi] - times[lo]) : 0;
+    const lat = a[1] + (b[1] - a[1]) * k, lon = a[2] + (b[2] - a[2]) * k, up = a[3] + (b[3] - a[3]) * k;
+    const lat0 = pts[0][1], lon0 = pts[0][2];
+    return [(lon - lon0) * 111320 * Math.cos(lat0 * (Math.PI / 180)), (lat - lat0) * 110540, up];
+  };
 
   /** How the camera turned through the flight, from the gyro (null without one), worked out on first use. */
   private turn?: { at: CameraTurn | null };
@@ -365,8 +388,13 @@ export class OverlayRenderer {
     if (!level) return this.drawHud(ctx, t, o);
     this.turn ??= { at: CameraTurn.from(this.data.sticks) };
     const { width: W, height: H } = ctx.canvas;
+    // Without a GPS track the speed is unknown (not 0): the effects fall back to their own.
     drawReactive(ctx, level, o.music!, t, (layer, panels) => this.drawHud(layer, t, panels ? o : { ...o, panelOpacity: 0, stickBoxOpacity: 0 }),
-                 this.sparkSource(W, H, o), { turn: this.turn.at, speed: this.speedAt });
+                 this.sparkSource(W, H, o),
+                 {
+                   turn: this.turn.at, speed: this.trackTimes.length ? this.speedAt : null, place: this.trackTimes.length ? this.placeAt : null,
+                   throttle: this.data.sticks?.length ? this.throttleAt : null,
+                 });
   }
 
   /** The lit pixels of the HUD at each log time (a SPARK_MASK copy), worked out once each and kept a while. */
