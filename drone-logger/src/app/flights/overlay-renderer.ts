@@ -3,7 +3,7 @@ import { MODES, StickMode, sampleSticks, stickAxes } from './stick-math';
 import { clock, nearest } from './flight-profile.component';
 import { GlyphFont, SYM } from './glyph-font';
 import { BfOsdElement, BfOsdId, BfOsdLayout } from './bf-osd';
-import { MusicFx, SparkMask, drawReactive } from './music-react';
+import { MusicFx, SparkMask, drawReactive, scratch } from './music-react';
 import { CameraTurn } from './camera-turn';
 
 export interface OverlayData {
@@ -149,6 +149,25 @@ export interface OverlayOptions {
   itemHidden?: Partial<Record<ItemKey, boolean>>;
   /** The HUD reacting to the music: pulsing, splitting and tinting with the song under each frame. Null for still. */
   music?: MusicFx | null;
+  /**
+   * A glow round the HUD: 'neon' lights it like signs on a beach strip at sunset, a hot pink, violet and orange haze
+   * round a bright core (breathing with the music's hits, when it reacts). Off when missing.
+   */
+  glow?: 'off' | 'neon';
+  /** The glow's strength, 0.05..2 (1 the default look). */
+  glowStrength?: number;
+  /** Whether the glow's colours turn round the colour wheel with the music (while it reacts). On when missing. */
+  glowFollowsMusic?: boolean;
+  /**
+   * How hard the glow reacts to the beat, 0..2 (1 when missing): how much brighter it flares and how far its colours
+   * jump on each hit and with the bass. 0 keeps it steady (the colours still drift, when following the music).
+   */
+  glowBeat?: number;
+  /**
+   * How much the glow's colours turn as the craft does, from the log's gyro, 0..2 (0 when missing): at 1 a flip or a
+   * roll sweeps them half way round the colour wheel; flying straight leaves them be.
+   */
+  glowGyro?: number;
 }
 
 /** One piece of text in a panel row; `w` replaces measuring for drawn shapes (the built-in battery icon). */
@@ -384,6 +403,36 @@ export class OverlayRenderer {
   private turn?: { at: CameraTurn | null };
 
   draw(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {
+    const strength = o.glow === 'neon' ? o.glowStrength ?? 1 : 0;
+    if (!(strength > 0)) return this.drawLit(ctx, t, o);
+    const { width: W, height: H } = ctx.canvas;
+    const hud = scratch('glow-hud', W, H), h = hud.getContext('2d')!;
+    h.setTransform(1, 0, 0, 1, 0, 0);
+    this.drawLit(h, t, o);
+    // The glow comes off what's lit (text, glyphs, the map line, stick dots), not the dark panels behind them, which
+    // would glow as pink boxes: drawn again without them when there are any.
+    let lit = hud;
+    if (o.panelOpacity > 0 || o.stickBoxOpacity > 0) {
+      lit = scratch('glow-lit', W, H);
+      const l = lit.getContext('2d')!;
+      l.setTransform(1, 0, 0, 1, 0, 0);
+      this.drawLit(l, t, { ...o, panelOpacity: 0, stickBoxOpacity: 0 });
+    }
+    ctx.clearRect(0, 0, W, H);
+    const level = o.music?.at(t) ?? null;
+    // With the music: the colours drift round the wheel as it plays and jump on its hits and bass, as the rainbow road's do.
+    const out = level && o.glowFollowsMusic !== false ? o.music!.outAt(t) : null;
+    const beat = o.glowBeat ?? 1;
+    const turn = level && out !== null ? out * NEON_DRIFT + beat * (level.hit * NEON_HIT_TURN + level.bass * NEON_BASS_TURN) : 0;
+    // With the gyro: the colours sweep round as the craft rolls, flips and yaws.
+    const gyro = o.glowGyro ?? 0;
+    const spin = gyro > 0 ? (this.turn ??= { at: CameraTurn.from(this.data.sticks) }).at?.spun(t) ?? 0 : 0;
+    drawNeonGlow(ctx, lit, strength * (1 + beat * NEON_PULSE * (level?.punch ?? 0)), t, turn + gyro * NEON_GYRO_TURN * spin);
+    ctx.drawImage(hud, 0, 0);
+  }
+
+  /** The HUD for time `t`, reacting to the music when it does. */
+  private drawLit(ctx: CanvasRenderingContext2D, t: number, o: OverlayOptions) {
     const level = o.music?.at(t);
     if (!level) return this.drawHud(ctx, t, o);
     this.turn ??= { at: CameraTurn.from(this.data.sticks) };
@@ -1557,6 +1606,76 @@ function drawCredit(ctx: CanvasRenderingContext2D, cx: number, cy: number, u: nu
   ctx.fillText(lead, tx, baseline);
   ctx.fillStyle = ACCENT;
   ctx.fillText(site, tx + leadW, baseline);
+  ctx.restore();
+}
+
+/** How much brighter the neon glow gets as a music hit lands, at full punch. */
+const NEON_PULSE = 0.6;
+/** The neon glow's colours, across the frame from left to right: hot pink, violet, sunset orange, as [hue, lightness %]. */
+const NEON_STOPS: [number, number, number][] = [[0, 332, 59], [0.5, 276, 62], [1, 25, 61]];
+/**
+ * With the music, how the colours turn round the wheel (degrees): steadily as the song plays (per second), and further
+ * on each hit and with the bass, easing back as they fade.
+ */
+const NEON_DRIFT = 20, NEON_HIT_TURN = 70, NEON_BASS_TURN = 40;
+/** With the gyro at 100%, how far the colours turn per degree the craft turns: a flip, half way round the wheel. */
+const NEON_GYRO_TURN = 0.5;
+/**
+ * Its layers, from the tight halo out to the wide haze: blur (1080p px), opacity, and how many times it's laid down
+ * (blurring thin OSD strokes spreads them thin, so the wider layers are stacked up to read as light, not a smudge).
+ */
+const NEON_LAYERS: [number, number, number][] = [[2, 1, 2], [7, 1, 3], [20, 0.9, 3], [45, 0.7, 2]];
+/** The wider layers are blurred on a copy this much smaller (it's soft anyway), so a 4K frame stays quick. */
+const NEON_SHRINK = 4;
+
+/**
+ * The neon glow under the HUD: what's lit in `lit`, recoloured in the sunset colours (drifting slowly so it shimmers),
+ * turned `turn` degrees round the colour wheel (by the music), then laid down blurred at several widths and added up, so it's brightest close to each line and fades out wide. The
+ * HUD itself goes on top as it is, as the bright core.
+ */
+function drawNeonGlow(ctx: CanvasRenderingContext2D, lit: HTMLCanvasElement, strength: number, t: number, turn = 0) {
+  const { width: W, height: H } = ctx.canvas;
+  const u = Math.min(W, H) / 1080;
+  const tint = scratch('glow-tint', W, H), g = tint.getContext('2d')!;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  g.clearRect(0, 0, W, H);
+  g.drawImage(lit, 0, 0);
+  g.globalCompositeOperation = 'source-in';
+  const drift = 0.15 * Math.sin(t * 0.3);
+  // Across the frame, tipped a little: pink down the left, violet through the middle, orange down the right.
+  const grad = g.createLinearGradient(W * (0.1 + drift), H * 0.35, W * (0.9 + drift), H * 0.65);
+  for (const [at, hue, light] of NEON_STOPS) grad.addColorStop(at, `hsl(${((hue + turn) % 360).toFixed(1)}, 100%, ${light}%)`);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+  g.globalCompositeOperation = 'source-over';
+  const sw = Math.max(1, Math.round(W / NEON_SHRINK)), sh = Math.max(1, Math.round(H / NEON_SHRINK));
+  const small = scratch('glow-small', sw, sh), m = small.getContext('2d')!;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.imageSmoothingEnabled = true;
+  for (const [blur, alpha, times] of NEON_LAYERS) {
+    const shrink = blur * u >= 6;
+    let src: HTMLCanvasElement = tint;
+    if (shrink) {
+      m.setTransform(1, 0, 0, 1, 0, 0);
+      m.clearRect(0, 0, sw, sh);
+      m.filter = `blur(${((blur * u) / NEON_SHRINK).toFixed(2)}px)`;
+      m.drawImage(tint, 0, 0, sw, sh);
+      m.filter = 'none';
+      src = small;
+    } else {
+      ctx.filter = `blur(${(blur * u).toFixed(1)}px)`;
+    }
+    // Strength turns each pass up; past full, the extra goes on as more passes rather than clipping.
+    let left = alpha * strength * times;
+    while (left > 0.01) {
+      ctx.globalAlpha = Math.min(1, left);
+      ctx.drawImage(src, 0, 0, W, H);
+      left -= 1;
+    }
+    ctx.filter = 'none';
+  }
   ctx.restore();
 }
 

@@ -63,15 +63,19 @@ export class CameraTurn {
   private orient: Quat[] = [];
   /** Which way is down in the camera's frame at each row's time (gyro and accelerometer fused); empty without them. */
   private downs: [number, number, number][] = [];
+  /** How far the craft had turned, any way round, by each row's time: degrees, adding up through the flight. */
+  private spins: number[] = [];
 
   private constructor(private rows: StickPoint[]) {
-    let q = IDENTITY;
+    let q = IDENTITY, spun = 0;
     rows.forEach((p, i) => {
       this.orient.push(q);
+      this.spins.push(spun);
       const next = rows[i + 1];
       if (next) {
         const [x, y, z] = rates(p), dt = next[0] - p[0];
         q = normal(mul(q, turnBy(x * dt, y * dt, z * dt)));
+        spun += (Math.hypot(x, y, z) * dt) / RAD;
       }
     });
     this.fuseDown();
@@ -129,6 +133,19 @@ export class CameraTurn {
     while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (rows[mid][0] <= t) lo = mid; else hi = mid; }
     const [x, y, z] = rates(rows[lo]), dt = t - rows[lo][0];
     return rotate(conj(turnBy(x * dt, y * dt, z * dt)), downs[lo]);
+  }
+
+  /**
+   * How far the craft has turned by log time `t`, any way round (rolls, flips and yaw all count), in degrees adding up
+   * from the start of the log: a flip adds 360, flying straight adds nothing.
+   */
+  spun(t: number): number {
+    const rows = this.rows;
+    if (t <= rows[0][0]) return 0;
+    let lo = 0, hi = rows.length - 1;
+    if (t >= rows[hi][0]) return this.spins[hi];
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (rows[mid][0] <= t) lo = mid; else hi = mid; }
+    return this.spins[lo] + (Math.hypot(...rates(rows[lo])) * (t - rows[lo][0])) / RAD;
   }
 
   /** How fast the camera is turning at log time `t`: radians a second about its own x, y and z axes. */

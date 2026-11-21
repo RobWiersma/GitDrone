@@ -230,7 +230,7 @@ const MOSAIC_COLS = 96;
 const MOSAIC_LEVELS = [4, 2, 1], MOSAIC_DEPTH = [0.45, 0.18, -Infinity];
 const canvases = new Map<string, HTMLCanvasElement>();
 /** A scratch canvas kept between frames, sized `w`×`h`. */
-function scratch(name: string, w: number, h: number) {
+export function scratch(name: string, w: number, h: number) {
   let c = canvases.get(name);
   if (!c) canvases.set(name, (c = document.createElement('canvas')));
   if (c.width !== w) c.width = w;

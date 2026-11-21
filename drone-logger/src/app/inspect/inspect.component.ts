@@ -1,6 +1,8 @@
 import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { KeepFileDirective } from '../flights/file-handles';
+import { clipOrder } from '../flights/join-clips';
+import { JoinClipsComponent } from '../flights/join-clips.component';
 import { FlightService } from '../flights/flight.service';
 import { OsdAnalysis, formatDuration } from '../flights/flight.models';
 import { FlightMapComponent, MapPin } from '../flights/flight-map.component';
@@ -22,7 +24,7 @@ type ModelState = 'loading' | 'downloading' | 'ready' | 'missing' | 'error';
  */
 @Component({
   selector: 'app-inspect',
-  imports: [KeepFileDirective, FlightMapComponent],
+  imports: [KeepFileDirective, FlightMapComponent, JoinClipsComponent],
   templateUrl: './inspect.component.html',
   styleUrl: './inspect.component.css',
 })
@@ -215,10 +217,18 @@ export class InspectComponent {
     await this.openModel();
   }
 
+  /** Footage files picked together (one recording the camera split up), waiting to be joined into one, or null. */
+  protected readonly footageParts = signal<File[] | null>(null);
+
   protected onFootage(event: Event) {
-    const input = event.target as HTMLInputElement, f = input.files?.[0];
+    const input = event.target as HTMLInputElement, files = Array.from(input.files ?? []);
     input.value = '';
-    if (!f) return;
+    this.footageParts.set(files.length > 1 ? clipOrder(files) : null);
+    if (files.length === 1) this.loadFootage(files[0]);
+  }
+
+  protected loadFootage(f: File) {
+    this.footageParts.set(null);
     this.stop();
     const old = this.videoUrl();
     if (old) URL.revokeObjectURL(old);

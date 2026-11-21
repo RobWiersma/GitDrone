@@ -17,6 +17,8 @@ import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, drawBottomFil
 import { RangeWindowComponent } from './range-window.component';
 import { Grade, GradeRenderer, NEUTRAL_GRADE, isNeutral } from './grade';
 import { KeepFileDirective } from './file-handles';
+import { clipOrder } from './join-clips';
+import { JoinClipsComponent } from './join-clips.component';
 import { VisitService } from '../stats/visit.service';
 import { TimelineMark, TimelineTrack, TrackId, TrackTimelineComponent } from './track-timeline.component';
 import { IconComponent, IconName } from '../icon.component';
@@ -228,6 +230,31 @@ function readStickStyle(): StickStyle {
   try { const v = localStorage.getItem(STICK_STYLE_KEY); return isStickStyle(v) ? v : 'smooth'; } catch { return 'smooth'; }
 }
 
+const GLOW_KEY = 'gitdrone-overlay-glow', GLOW_FOLLOW_KEY = 'gitdrone-overlay-glow-follows', GLOW_BEAT_KEY = 'gitdrone-overlay-glow-beat',
+  GLOW_GYRO_KEY = 'gitdrone-overlay-glow-gyro';
+
+function readGlow(): Pick<OverlayOptions, 'glow' | 'glowStrength' | 'glowFollowsMusic' | 'glowBeat' | 'glowGyro'> {
+  try {
+    const v = JSON.parse(localStorage.getItem(GLOW_KEY) ?? 'null') as { glow?: unknown; strength?: unknown } | null;
+    const strength = Number(v?.strength);
+    return {
+      glow: v?.glow === 'neon' ? 'neon' : 'off', glowStrength: strength >= 0.05 && strength <= 2 ? strength : 1,
+      glowFollowsMusic: localStorage.getItem(GLOW_FOLLOW_KEY) !== '0', glowBeat: readBeat(),
+      glowGyro: readGyro(),
+    };
+  } catch { return { glow: 'off', glowStrength: 1, glowFollowsMusic: true, glowBeat: 1, glowGyro: 0 }; }
+}
+
+function readGyro() {
+  const raw = localStorage.getItem(GLOW_GYRO_KEY), v = Number(raw);
+  return raw !== null && v >= 0 && v <= 2 ? v : 0.5;
+}
+
+function readBeat() {
+  const raw = localStorage.getItem(GLOW_BEAT_KEY), v = Number(raw);
+  return raw !== null && v >= 0 && v <= 2 ? v : 1;
+}
+
 function readTrailIntensity(): number {
   try {
     const v = Number(localStorage.getItem(TRAIL_KEY));
@@ -357,7 +384,7 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     '(document:fullscreenchange)': 'onFullscreenChange()',
     '(document:keydown)': 'onFullscreenKey($event)',
   },
-  imports: [FormsModule, IconComponent, TrackTimelineComponent, KeepFileDirective],
+  imports: [FormsModule, IconComponent, TrackTimelineComponent, KeepFileDirective, JoinClipsComponent],
   template: `
         <div class="layout">
           <section class="panel preview-panel" aria-labelledby="preview-heading">
@@ -762,6 +789,36 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 @case ('osd') {
                   <p class="hint">The OSD drawn from your log. Its elements are in Components; it starts where the footage's sync puts it.</p>
                   <button class="btn small" type="button" (click)="selectMedia('footage')">Footage sync</button>
+                  <!-- Effects on the whole OSD, like a clip's effects in Premiere. -->
+                  <fieldset class="item-sizes">
+                    <legend>Effects</legend>
+                    <label class="check" title="A neon glow round the OSD: a hot pink, violet and sunset orange haze, like signs on a beach strip at dusk. With the music reacting, it flares on the hits">
+                      <input type="checkbox" [ngModel]="opts().glow === 'neon'" (ngModelChange)="setGlow($event ? 'neon' : 'off', opts().glowStrength ?? 1)" /> Neon glow
+                    </label>
+                    <div class="grade">
+                      <label for="glow-strength">Glow strength</label>
+                      <input id="glow-strength" type="range" min="0.05" max="2" step="0.05" [ngModel]="opts().glowStrength ?? 1"
+                             (ngModelChange)="setGlow(opts().glow ?? 'off', +$event)" [disabled]="opts().glow !== 'neon'" />
+                      <span class="mono">{{ ((opts().glowStrength ?? 1) * 100).toFixed(0) }}%</span>
+                    </div>
+                    <div class="grade" title="How hard the glow reacts to the music's beat: how much it flares, and how far its colours jump, on each hit. 0% keeps it steady">
+                      <label for="glow-beat">Beat intensity</label>
+                      <input id="glow-beat" type="range" min="0" max="2" step="0.05" [ngModel]="opts().glowBeat ?? 1"
+                             (ngModelChange)="setGlowBeat(+$event)" [disabled]="opts().glow !== 'neon'" />
+                      <span class="mono">{{ ((opts().glowBeat ?? 1) * 100).toFixed(0) }}%</span>
+                    </div>
+                    @if (hasGyro()) {
+                      <div class="grade" title="How much the glow's colours turn as the quad does, from the log's gyro: at 100% a flip or roll sweeps them half way round the rainbow. Flying straight leaves them be. 0% is off">
+                        <label for="glow-gyro">Gyro colour</label>
+                        <input id="glow-gyro" type="range" min="0" max="2" step="0.05" [ngModel]="opts().glowGyro ?? 0"
+                               (ngModelChange)="setGlowGyro(+$event)" [disabled]="opts().glow !== 'neon'" />
+                        <span class="mono">{{ ((opts().glowGyro ?? 0) * 100).toFixed(0) }}%</span>
+                      </div>
+                    }
+                    <label class="check" title="With the music reacting, the glow's colours drift round the rainbow as the song plays and jump on its hits and bass. Off keeps the pink, violet and orange">
+                      <input type="checkbox" [ngModel]="opts().glowFollowsMusic !== false" (ngModelChange)="setGlowFollows($event)" [disabled]="opts().glow !== 'neon'" /> Colours follow the music
+                    </label>
+                  </fieldset>
                 }
                 @case ('footage') {
                   <p class="mono">{{ videoName() }}</p>
@@ -1316,15 +1373,19 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                 <span title="Flight footage: your FPV video, played behind the preview and used for the finished video"><app-icon name="film" /></span>
                 <span class="sr-only">Flight footage:</span>
                 <span class="mono" [title]="videoName() || 'No footage loaded'">{{ videoName() || 'No footage' }}</span>
-                <label class="btn small step" [title]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'">
+                <!-- Several files at once are one recording the camera split up (DJI cards do, every 4 GB): they're joined. -->
+                <label class="btn small step" [title]="(videoUrl() ? 'Change the flight footage' : 'Load your flight footage') + '. If the camera split the flight into several files, pick them all to join them into one'">
                   <app-icon name="folder" />
-                  <input class="sr-only" type="file" appKeepFile accept="video/*" [attr.aria-label]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'"
+                  <input class="sr-only" type="file" appKeepFile multiple accept="video/*" [attr.aria-label]="videoUrl() ? 'Change the flight footage' : 'Load your flight footage'"
                          (change)="onVideoFile($event)" />
                 </label>
                 @if (hasVideo()) {
                   <button class="btn small step" type="button" (click)="selectMedia('footage')" aria-label="Adjust the footage's picture" title="Adjust the footage's picture"><app-icon name="sliders" /></button>
                 }
               </div>
+              @if (footageParts(); as parts) {
+                <app-join-clips [files]="parts" (joined)="footageParts.set(null); loadVideo($event)" (dismissed)="footageParts.set(null)" />
+              }
 
               <div class="source-row">
                 <span title="Sound track: a phone or stick cam video (or just a recording), for its sound and, in vertical, its picture"><app-icon name="volume" /></span>
@@ -1749,6 +1810,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
  */
 export class OverlayExportComponent {
   data = input.required<OverlayData>();
+  /** Whether the log has the gyro, for the glow's colours to follow the craft's turns. */
+  hasGyro = computed(() => (this.data().sticks ?? []).some(r => r.length >= 8 && !!(r[5] || r[6] || r[7])));
   /** Flight length; the export range and preview slider cover 0 to this. */
   seconds = input.required<number>();
   /** File name before the "-1920x1080-30fps.mov" part. */
@@ -1803,7 +1866,7 @@ export class OverlayExportComponent {
   end = linkedSignal({ source: this.range, computation: r => r.seconds });
   opts = signal<OverlayOptions>({
     stickTrails: true, stickStyle: readStickStyle(), stickBoxOpacity: readStickBoxOpacity(), altSource: 'gps', statsAfter: 0, flightSeconds: 0, ...savedShow(this.vertical()),
-    ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(),
+    ...readColors(), ...readLabels(), stickTrailIntensity: readTrailIntensity(), ...readGlow(),
     stickMode: readStickMode(), font: null, speedUnit: 'kmh', layout: readLayout(this.vertical()), itemScale: readItemScales(),
     itemHidden: readHiddenItems(),
   });
@@ -2839,6 +2902,27 @@ export class OverlayExportComponent {
     this.pickElement(key);
   }
 
+  /** The OSD's glow and its strength, remembered for next time. */
+  setGlow(glow: 'off' | 'neon', strength: number) {
+    this.opts.update(o => ({ ...o, glow, glowStrength: strength }));
+    try { localStorage.setItem(GLOW_KEY, JSON.stringify({ glow, strength })); } catch { /* not remembered */ }
+  }
+
+  setGlowBeat(value: number) {
+    this.set('glowBeat', value);
+    try { localStorage.setItem(GLOW_BEAT_KEY, String(value)); } catch { /* not remembered */ }
+  }
+
+  setGlowGyro(value: number) {
+    this.set('glowGyro', value);
+    try { localStorage.setItem(GLOW_GYRO_KEY, String(value)); } catch { /* not remembered */ }
+  }
+
+  setGlowFollows(on: boolean) {
+    this.set('glowFollowsMusic', on);
+    try { localStorage.setItem(GLOW_FOLLOW_KEY, on ? '1' : '0'); } catch { /* not remembered */ }
+  }
+
   setTrailIntensity(value: number) {
     this.set('stickTrailIntensity', value);
     try { localStorage.setItem(TRAIL_KEY, String(value)); } catch { /* not remembered */ }
@@ -3046,10 +3130,15 @@ export class OverlayExportComponent {
 
   onVideoFile(e: Event) {
     const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
+    const files = Array.from(input.files ?? []);
     input.value = '';
-    if (file) this.loadVideo(file);
+    // Several at once: one recording the camera split up, offered for joining into one.
+    this.footageParts.set(files.length > 1 ? clipOrder(files) : null);
+    if (files.length === 1) this.loadVideo(files[0]);
   }
+
+  /** Footage files picked together, waiting to be joined into one, or null. */
+  footageParts = signal<File[] | null>(null);
 
   loadVideo(file: File) {
     this.stopVideo();

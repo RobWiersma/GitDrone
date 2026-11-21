@@ -16,7 +16,7 @@ export const handleOf = (file: File | null | undefined) => (file ? handles.get(f
 export const canKeepFiles = () => typeof window !== 'undefined' && 'showOpenFilePicker' in window;
 
 interface PickerType { description: string; accept: Record<string, string[]> }
-type OpenFilePicker = (o: { id?: string; types?: PickerType[]; excludeAcceptAllOption?: boolean }) => Promise<FileSystemFileHandle[]>;
+type OpenFilePicker = (o: { id?: string; types?: PickerType[]; excludeAcceptAllOption?: boolean; multiple?: boolean }) => Promise<FileSystemFileHandle[]>;
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.ts', '.mts'];
 const AUDIO_EXTS = ['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.oga', '.opus', '.flac', '.weba'];
@@ -58,26 +58,28 @@ export class KeepFileDirective {
       pickerBroken = true;
       try { input.showPicker(); } catch { /* needs a fresh click, which now opens it */ }
     };
-    let handle: FileSystemFileHandle;
+    let picked: FileSystemFileHandle[];
     try {
-      [handle] = await picker({ id: pickerId(input.accept), types: pickerTypes(input.accept), excludeAcceptAllOption: false });
+      picked = await picker({ id: pickerId(input.accept), types: pickerTypes(input.accept), excludeAcceptAllOption: false, multiple: input.multiple });
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) fallBack();
       return; // closed without picking
     }
-    let file: File;
+    let files: File[];
     try {
-      file = await handle.getFile();
+      files = await Promise.all(picked.map(h => h.getFile()));
     } catch {
       fallBack();
       return;
     }
     const dt = new DataTransfer();
-    dt.items.add(file);
+    for (const file of files) dt.items.add(file);
     input.files = dt.files;
-    // The input may hand out its own File object for the same file; remember the handle for both.
-    rememberHandle(file, handle);
-    if (input.files[0]) rememberHandle(input.files[0], handle);
+    // The input may hand out its own File objects for the same files; remember the handles for both.
+    picked.forEach((handle, i) => {
+      rememberHandle(files[i], handle);
+      if (input.files?.[i]) rememberHandle(input.files[i], handle);
+    });
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 }

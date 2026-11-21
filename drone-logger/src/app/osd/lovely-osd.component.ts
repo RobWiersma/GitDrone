@@ -11,6 +11,8 @@ import { EditorState, OverlayExportComponent } from '../flights/overlay-export.c
 import { BlackboxTipsComponent } from '../flights/blackbox-tips.component';
 import { FcUsbComponent } from '../flights/fc-usb.component';
 import { KeepFileDirective, canKeepFiles } from '../flights/file-handles';
+import { clipOrder } from '../flights/join-clips';
+import { JoinClipsComponent } from '../flights/join-clips.component';
 import { SavedSession, deleteSession, listSessions, putSession, reopen, savedFile } from '../flights/session-store';
 import { IconComponent } from '../icon.component';
 import { PhoneNoticeComponent } from '../phone-notice.component';
@@ -35,7 +37,7 @@ interface Opening {
  */
 @Component({
   selector: 'app-lovely-osd',
-  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent, KeepFileDirective, IconComponent, PhoneNoticeComponent, RouterLink],
+  imports: [DatePipe, FormsModule, FlightViewComponent, OverlayExportComponent, BlackboxTipsComponent, FcUsbComponent, KeepFileDirective, IconComponent, PhoneNoticeComponent, RouterLink, JoinClipsComponent],
   template: `
     <div class="page">
       <h1>LovelyOSD Editor</h1>
@@ -116,7 +118,11 @@ interface Opening {
           @if (busy()) { <p class="hint" role="status">Reading {{ fileName() }}...</p> }
           <div class="field footage">
             <label for="osd-video">Flight footage (optional)</label>
-            <input id="osd-video" type="file" appKeepFile accept="video/*" (change)="onVideo($event)" [disabled]="exporting()" />
+            <input id="osd-video" type="file" appKeepFile multiple accept="video/*" (change)="onVideo($event)" [disabled]="exporting()" />
+            <!-- Several files at once: one recording the camera split up (DJI cards do, every 4 GB), joined into one. -->
+            @if (videoParts(); as parts) {
+              <app-join-clips [files]="parts" (joined)="videoParts.set(null); video.set($event)" (dismissed)="videoParts.set(null)" />
+            }
             <p class="hint">
               @if (video(); as v) { {{ v.name }} plays behind the overlay preview. }
               @else { Plays behind the overlay preview so you can line it up. }
@@ -327,9 +333,13 @@ export class LovelyOsdComponent {
   }
 
   onVideo(event: Event) {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (file) this.video.set(file);
+    const files = Array.from((event.target as HTMLInputElement).files ?? []);
+    this.videoParts.set(files.length > 1 ? clipOrder(files) : null);
+    if (files.length === 1) this.video.set(files[0]);
   }
+
+  /** Footage files picked together, waiting to be joined into one, or null. */
+  videoParts = signal<File[] | null>(null);
 
   onSound(event: Event) {
     const file = (event.target as HTMLInputElement).files?.[0];

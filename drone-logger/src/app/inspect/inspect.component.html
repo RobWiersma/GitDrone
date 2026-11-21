@@ -13,9 +13,13 @@
 
   <section class="panel tools" aria-label="Footage and scan">
     <label class="btn" [class.btn-primary]="!file()">
-      <input class="sr-only" type="file" appKeepFile accept="video/*" (change)="onFootage($event)" [disabled]="scanning()" />
+      <input class="sr-only" type="file" appKeepFile multiple accept="video/*" (change)="onFootage($event)" [disabled]="scanning()" />
       {{ file() ? 'Change footage' : 'Load footage' }}
     </label>
+    <!-- Several files at once: one recording the camera split up (DJI cards do, every 4 GB), joined into one. -->
+    @if (footageParts(); as parts) {
+      <app-join-clips class="full" [files]="parts" (joined)="loadFootage($event)" (dismissed)="footageParts.set(null)" />
+    }
     <div class="ctl">
       <label for="step">Check a frame every</label>
       <select id="step" (change)="setStep($event)" [disabled]="scanning()">
