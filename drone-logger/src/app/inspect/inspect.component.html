@@ -1,0 +1,245 @@
+<div class="page wide">
+  <header class="head">
+    <div class="intro">
+      <p class="eyebrow">GitDrone · Beta</p>
+      <h1>Inspector <span class="beta-tag">Beta</span></h1>
+      <p class="hint">Load slow footage of power lines, solar panels, fences, gates or buildings. Each sampled frame is checked
+        for them, and anything that looks worth a closer look is flagged. It all runs on this computer: the video isn't uploaded.</p>
+    </div>
+    <p class="callout beta-note"><strong>Beta:</strong> the Inspector is new and still learning. It can miss things and
+      flag things that are fine, so treat every finding as a hint to look closer, check it yourself, and don't rely on it as
+      your only check of power lines or other live equipment.</p>
+  </header>
+
+  <section class="panel tools" aria-label="Footage and scan">
+    <label class="btn" [class.btn-primary]="!file()">
+      <input class="sr-only" type="file" appKeepFile accept="video/*" (change)="onFootage($event)" [disabled]="scanning()" />
+      {{ file() ? 'Change footage' : 'Load footage' }}
+    </label>
+    <div class="ctl">
+      <label for="step">Check a frame every</label>
+      <select id="step" (change)="setStep($event)" [disabled]="scanning()">
+        @for (s of steps; track s) { <option [value]="s" [selected]="s === step()">{{ s }} s</option> }
+      </select>
+    </div>
+    @if (scanning()) {
+      <button type="button" class="btn" (click)="stop()">Stop</button>
+    } @else {
+      <button type="button" class="btn" [class.btn-primary]="!!file()" (click)="scan()" [disabled]="!file() || modelState() !== 'ready' || !wanted().size">
+        {{ result() ? 'Scan again' : 'Scan' }}
+      </button>
+    }
+    <p class="model" aria-live="polite">
+      @switch (modelState()) {
+        @case ('loading') { Loading the detector{{ modelProgress() ? ' ' + pct(modelProgress()) : '' }}… }
+        @case ('ready') { Detector ready on {{ backend() === 'webgpu' ? 'the GPU (WebGPU)' : 'the CPU (WebAssembly)' }}.
+          <button type="button" class="link" (click)="reloadModel()">Reload</button> }
+        @case ('missing') { No detector model here yet. }
+        @case ('error') { <span class="error">The detector didn't load: {{ modelError() }}</span> }
+      }
+    </p>
+    @if (modelState() === 'missing' || modelState() === 'error') {
+      <label class="btn">
+        <input class="sr-only" type="file" accept=".onnx" (change)="onModel($event)" />
+        Load model (.onnx)
+      </label>
+      <p class="hint full">Make one with <code>tools/inspection/export_model.py</code>, then load it here once. It's kept in this browser.</p>
+    }
+    <details class="full look">
+      <summary>Look for: <strong>{{ wantedSummary() }}</strong></summary>
+      <fieldset [disabled]="scanning()">
+        <legend class="sr-only">What to look for</legend>
+        <div class="chips" role="group" aria-label="Presets">
+          @for (p of presets; track p.name) {
+            <button type="button" class="chip" [attr.aria-pressed]="isPreset(p.set)" (click)="usePreset(p.set)">{{ p.name }}</button>
+          }
+        </div>
+        <div class="kinds">
+          <div role="group" aria-labelledby="kinds-things">
+            <p id="kinds-things" class="eyebrow">Things</p>
+            @for (c of objectClasses; track c.i) {
+              <label class="check"><input type="checkbox" [checked]="wanted().has(c.i)" (change)="toggleWanted(c.i)" />
+                <span class="dot" [style.background]="c.color"></span>{{ c.label }}</label>
+            }
+          </div>
+          <div role="group" aria-labelledby="kinds-alike">
+            <p id="kinds-alike" class="eyebrow">Look-alikes</p>
+            @for (c of lookalikeClasses; track c.i) {
+              <label class="check"><input type="checkbox" [checked]="wanted().has(c.i)" (change)="toggleWanted(c.i)" />
+                <span class="dot" [style.background]="c.color"></span>{{ c.label }}</label>
+            }
+          </div>
+          <div role="group" aria-labelledby="kinds-defects">
+            <p id="kinds-defects" class="eyebrow">Defects the model can see</p>
+            @for (c of defectClasses; track c.i) {
+              <label class="check"><input type="checkbox" [checked]="wanted().has(c.i)" (change)="toggleWanted(c.i)" />
+                <span class="dot" [style.background]="c.color"></span>{{ c.label }}</label>
+            }
+          </div>
+        </div>
+        <p class="hint">Unticked kinds are left out of the scan. Each box is still named by its closest kind first, so a bench
+          won't turn up as a fence when you look for fences only.</p>
+      </fieldset>
+    </details>
+    @if (wantedChanged()) { <p class="hint full" role="status">Scan again to look for {{ wantedSummary() }}.</p> }
+    @if (!wanted().size) { <p class="error full">Pick at least one kind of thing to look for.</p> }
+    @if (progress(); as p) {
+      <div class="full progress">
+        <progress [value]="p.done" [max]="p.total" aria-label="Scan progress"></progress>
+        <span class="num">{{ p.done }} / {{ p.total }} frames · {{ p.fps.toFixed(1) }} per second</span>
+      </div>
+    }
+    @if (error()) { <p class="error full" role="alert">{{ error() }}</p> }
+  </section>
+
+  <section class="panel tools" aria-labelledby="log-h">
+    <h2 id="log-h" class="tools-h">Telemetry</h2>
+    <label class="btn">
+      <input class="sr-only" type="file" appKeepFile accept=".bbl,.bfl,.bbs,.txt" (change)="onLog($event)" [disabled]="logBusy()" />
+      {{ logBusy() ? 'Reading the log…' : log() ? 'Change blackbox log' : 'Load blackbox log' }}
+    </label>
+    @if (log(); as l) {
+      @if (l.sessions.length > 1) {
+        <div class="ctl">
+          <label for="flight">Flight</label>
+          <select id="flight" (change)="setSession($event)">
+            @for (s of l.sessions; track $index) {
+              <option [value]="$index" [selected]="$index === sessionIndex()">{{ $index + 1 }}: {{ formatDuration(s.flight.durationMs) }}</option>
+            }
+          </select>
+        </div>
+      }
+      <div class="ctl">
+        <label for="offset">Log starts at</label>
+        <input id="offset" class="num offset" type="number" step="0.1" [value]="offset()" (change)="setOffset($event)" aria-describedby="offset-hint" />
+        <span>s into the footage</span>
+      </div>
+      <button type="button" class="btn" (click)="takeoffHere()" [disabled]="takeoff() === null || !videoUrl()">Takeoff is on screen now</button>
+      <button type="button" class="btn" (click)="syncFromMotors()" [disabled]="!videoUrl() || !session()?.sticks?.points?.length">Match motor sound</button>
+      <label class="check"><input type="checkbox" [checked]="showPosition()" (change)="setShowPosition($event)" aria-describedby="pos-hint" /> Show GPS position</label>
+      <button type="button" class="link" (click)="forgetLog()">Remove log</button>
+      <p id="offset-hint" class="hint full">{{ l.fileName }}{{ takeoff() !== null ? ' · takeoff ' + clock(takeoff()!) + ' into the log' : '' }}{{ hasTrack() ? '' : ' · no GPS in this log, so no positions' }}.
+        Pause the footage where the quad leaves the ground and press "Takeoff is on screen now", or type the offset.</p>
+      <p id="pos-hint" class="hint full">{{ showPosition() ? 'Latitude and longitude are in the readout, the findings and every export.' : 'Latitude and longitude are left out of the readout, the findings and every export (the map here still uses them).' }}</p>
+      @if (syncNote()) { <p class="hint full" role="status">{{ syncNote() }}</p> }
+    } @else {
+      <p class="hint">Add the flight's Betaflight log to see where the craft was, how high and how fast, at each finding.</p>
+    }
+    @if (logError()) { <p class="error full" role="alert">{{ logError() }}</p> }
+  </section>
+  <p class="sr-only" aria-live="polite">{{ announce() }}</p>
+
+  <div class="grid">
+    <section class="watch" aria-label="Footage with what was found">
+      <div class="stage" [style.aspect-ratio]="aspect()">
+        @if (videoUrl(); as url) {
+          <video #video [src]="url" controls preload="metadata" muted (loadedmetadata)="onMeta()"
+                 [attr.aria-label]="'Footage: ' + file()?.name"></video>
+          <canvas #overlay aria-hidden="true"></canvas>
+        } @else {
+          <p class="empty">Load footage to begin.</p>
+        }
+      </div>
+
+      @if (lanes().length) {
+        <h2 class="sub">Timeline</h2>
+        <!-- Mouse shortcut only: every finding here is also a button in the list. -->
+        <div class="timeline" aria-hidden="true">
+          @for (lane of lanes(); track lane.cls) {
+            <div class="lane">
+              <span class="lane-name">{{ classes[lane.cls].label }}</span>
+              <div class="track" (click)="seekLane($event)">
+                @for (f of lane.items; track f.id) {
+                  <div class="mark" [class.flag]="f.cues.length" [class.sel]="selected() === f.id"
+                       [style.left]="left(f.from)" [style.width]="width(f)" [style.background]="classes[f.cls].color"
+                       [title]="label(f) + ' #' + f.id + ' · ' + clock(f.from)" (click)="show(f); $event.stopPropagation()"></div>
+                }
+                <div class="head-line" [style.left]="left(now())"></div>
+              </div>
+            </div>
+          }
+        </div>
+      }
+      @if (hasTrack()) {
+        <h2 class="sub">Where</h2>
+        <app-flight-map [track]="session()!.track!" [hoverIndex]="craftNow()?.trackIndex ?? null" [pins]="pins()" (pinPick)="showById($event)" />
+        <p class="hint">The path is the craft's; each dot is where the craft was when it saw a finding, not the object itself.</p>
+      }
+    </section>
+
+    <aside class="panel side" aria-labelledby="found-h">
+      <div class="side-head">
+        <h2 id="found-h">Findings</h2>
+        @if (result()) {
+          <span class="count">{{ findings().length }} shown · <strong>{{ flaggedCount() }} flagged</strong></span>
+        }
+      </div>
+
+      @if (result()) {
+        <div class="filters">
+          <label class="ctl" for="thr">At least <span class="num">{{ pct(threshold()) }}</span> sure</label>
+          <input id="thr" type="range" min="12" max="90" step="1" [value]="threshold() * 100" (input)="setThreshold($event)" />
+          <label class="check"><input type="checkbox" [checked]="flaggedOnly()" (change)="setFlaggedOnly($event)" /> Flagged only</label>
+          <div class="chips" role="group" aria-label="Show these kinds of thing">
+            @for (c of classes; track c.label; let i = $index) {
+              @if (counts()[i]) {
+                <button type="button" class="chip" [attr.aria-pressed]="!hidden().has(i)" (click)="toggleClass(i)">
+                  <span class="dot" [style.background]="c.color"></span>{{ c.label }} <span class="num">{{ counts()[i] }}</span>
+                </button>
+              }
+            }
+          </div>
+        </div>
+
+        <ul class="list">
+          @for (f of findings(); track f.id) {
+            <li>
+              <button type="button" class="item" [class.sel]="selected() === f.id" [attr.aria-pressed]="selected() === f.id" (click)="show(f)">
+                @if (f.thumb) { <img [src]="f.thumb" alt="" width="96" height="64" /> }
+                <span class="what">
+                  <span class="title"><span class="dot" [style.background]="classes[f.cls].color"></span>{{ label(f) }} #{{ f.id }}</span>
+                  <span class="meta num">{{ clock(f.from) }}–{{ clock(f.to) }} · {{ score(f) }} · {{ f.hits }} frames</span>
+                  @if (shown(craftFor().get(f.id)); as c) { <span class="meta">{{ describe(c) }}</span> }
+                  @for (c of f.cues; track $index) { <span class="cue">⚠ {{ c.text }}</span> }
+                </span>
+              </button>
+            </li>
+          } @empty {
+            <li class="hint">{{ scanning() ? 'Nothing yet…' : 'Nothing found with these filters.' }}</li>
+          }
+        </ul>
+
+        <div class="exports">
+          <button type="button" class="btn" (click)="exportJson()" [disabled]="scanning()">Export JSON</button>
+          <button type="button" class="btn" (click)="exportCsv()" [disabled]="scanning()">Export CSV</button>
+        </div>
+        <div class="video-export" role="group" aria-labelledby="vid-h">
+          <h3 id="vid-h" class="eyebrow">Video with findings</h3>
+          <div class="exports">
+            <label class="ctl" for="vid-size">Size</label>
+            <select id="vid-size" (change)="setExportHeight($event)" [disabled]="rendering() || scanning()">
+              @for (v of videoSizes; track v.label) { <option [value]="v.height" [selected]="v.height === exportHeight()">{{ v.label }}</option> }
+            </select>
+            @if (rendering()) {
+              <button type="button" class="btn" (click)="cancelExport()">Cancel</button>
+            } @else {
+              <button type="button" class="btn" (click)="exportVideo()" [disabled]="scanning()">Export video</button>
+            }
+          </div>
+          <p class="hint">{{ exportSize() }} MP4 with the boxes{{ session() ? (showPosition() ? ' and the telemetry, GPS position included,' : ' and the telemetry (no GPS position)') : '' }} drawn in, as filtered here. Made on this computer.</p>
+          @if (rendering()) {
+            <div class="progress">
+              <progress [value]="renderDone()" [max]="renderTotal() || 1" aria-label="Video export progress"></progress>
+              <span class="num">{{ renderDone() }} / {{ renderTotal() || '…' }}</span>
+            </div>
+          }
+          @if (renderNote()) { <p class="hint" role="status">{{ renderNote() }}</p> }
+          @if (renderError()) { <p class="error" role="alert">{{ renderError() }}</p> }
+        </div>
+      } @else {
+        <p class="hint">Findings show here as the scan goes. Flags are hints to look closer (rust colour, vegetation close to
+          a pole or line, bright spots on a panel, a pole off upright), not a verdict.</p>
+      }
+    </aside>
+  </div>
+</div>

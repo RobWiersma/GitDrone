@@ -1,0 +1,27 @@
+{
+  "_comment": "The inspection detector's classes, read by the /inspect page (inspect-model.ts) and by tools/inspection/export_model.py. Each class has one or more prompts: what the model is told to look for, worded the way CLIP understands best (specific beats short). The model gets one output per prompt, in this order, and the page folds them back into classes. kind: object (what inspections are about), lookalike (named so it isn't mistaken for an object), defect. Change it, then re-export the model.",
+  "classes": [
+    { "label": "Building", "kind": "object", "color": "#5ab0ff", "prompts": ["building", "house"] },
+    { "label": "Roof", "kind": "object", "color": "#8fc7ff", "prompts": ["roof"] },
+    { "label": "Fence", "kind": "object", "color": "#ffb44d", "prompts": ["chain-link fence", "wooden fence", "metal fence"] },
+    { "label": "Railing", "kind": "object", "color": "#ffc98a", "prompts": ["railing"] },
+    { "label": "Gate", "kind": "object", "color": "#ff8a3d", "prompts": ["metal gate", "wooden gate", "racing drone gate"] },
+    { "label": "Utility pole", "kind": "object", "color": "#f5e14a", "prompts": ["wooden utility pole", "concrete utility pole"] },
+    { "label": "Transmission tower", "kind": "object", "color": "#ffd166", "prompts": ["transmission tower", "electricity pylon"] },
+    { "label": "Power line", "kind": "object", "color": "#fff06a", "prompts": ["power line", "overhead cable"] },
+    { "label": "Insulator", "kind": "object", "color": "#e9c46a", "prompts": ["electrical insulator"] },
+    { "label": "Solar panel", "kind": "object", "color": "#4de2f0", "prompts": ["solar panel"] },
+    { "label": "Tree", "kind": "object", "color": "#9be564", "prompts": ["tree"] },
+    { "label": "Vehicle", "kind": "object", "color": "#c9a7ff", "prompts": ["car", "truck"] },
+    { "label": "Person", "kind": "object", "color": "#ff9bd2", "prompts": ["person"] },
+    { "label": "Bench", "kind": "lookalike", "color": "#d9b38c", "prompts": ["bench"] },
+    { "label": "Boat", "kind": "lookalike", "color": "#a0e7e5", "prompts": ["boat"] },
+    { "label": "Lamp post", "kind": "lookalike", "color": "#e0e0a0", "prompts": ["lamp post", "street light"] },
+    { "label": "Street sign", "kind": "lookalike", "color": "#b8d0ff", "prompts": ["street sign"] },
+    { "label": "Pier", "kind": "lookalike", "color": "#9fc5b8", "prompts": ["pier", "wooden piling"] },
+    { "label": "Rust", "kind": "defect", "color": "#ff6b5b", "prompts": ["rust"] },
+    { "label": "Crack", "kind": "defect", "color": "#ff4d6d", "prompts": ["crack"] },
+    { "label": "Bird nest", "kind": "defect", "color": "#ff7f50", "prompts": ["bird nest"] },
+    { "label": "Graffiti", "kind": "defect", "color": "#ff5fa2", "prompts": ["graffiti"] }
+  ]
+}

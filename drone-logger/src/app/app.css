@@ -9,6 +9,10 @@
 .link { white-space: nowrap; }
 .link:hover { color: var(--nav-ink); }
 .link.active { color: var(--nav-ink); border-bottom-color: var(--nav-accent); }
+/* "Beta" tag on links to features still being proven. Part of the link's name ("Inspect Beta"). */
+.beta { display: inline-block; margin-left: .35rem; padding: .05rem .35rem; border-radius: 999px; vertical-align: .12em;
+        background: var(--nav-accent); color: var(--nav-bg); font-size: .62rem; font-weight: 800; letter-spacing: .06em;
+        text-transform: uppercase; line-height: 1.3; }
 .nav a:focus-visible, .theme:focus-visible { outline: 2px solid var(--nav-accent); outline-offset: 3px; border-radius: 4px; }
 .account { margin-left: auto; display: inline-flex; align-items: center; gap: .75rem; font-size: .88rem; }
 .who { color: var(--nav-muted); max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

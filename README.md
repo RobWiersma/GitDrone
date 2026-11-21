@@ -10,7 +10,7 @@ Drop in your Betaflight blackbox log (straight off the quad over USB, if you lik
 lines them up on your takeoff, draws your OSD in your goggles' own font, grades the picture, mixes your sound and music,
 and renders a finished video or YouTube Short on your GPU, near lossless, right in your browser. Or it exports a
 transparent OSD overlay for Premiere. GitDrone, around it, keeps your flights as maps, charts and stick replays, and
-your tune history.
+your tune history, and its Inspector (beta) finds the fences, power lines and solar panels in your inspection footage.
 
 [![Deploy to Azure](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml/badge.svg)](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
@@ -24,6 +24,7 @@ your tune history.
 [Features](#features) ·
 [Getting started](#getting-started) ·
 [Shorts](#vertical-video-shorts-reels-tiktok) ·
+[Inspector](#inspector-beta) ·
 [How it works](#comparing-tunes)
 
 <img src="drone-logger/public/home/osd-hillside.jpg" alt="FPV view over a sunny hillside and bay, with its OSD from LovelyOSD Editor showing speed, battery per cell, the mini map and both sticks" width="860">
@@ -119,6 +120,29 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
   <img src="docs/screenshots/hangar.png" alt="An aircraft page: photo and specs of a Speedybee Mario 5 X, a table of flights with map thumbnails, and the start of its tune history" width="860">
 </p>
 
+### 🔍 Inspector (beta)
+
+**[Inspector](https://lovelyosd.com/inspector)** (`/inspector`) watches slow inspection footage for you. Load a clip and
+it scans it on your own computer, frame by frame on your GPU (WebGPU, or WebAssembly without one), with an open-vocabulary
+detector (YOLO-World): buildings and roofs, fences, railings and gates, utility poles, pylons, power lines and insulators,
+solar panels, trees, vehicles and people. Nothing is uploaded.
+
+- **Look for** only what you inspect: presets for power lines, solar, fences and gates, or buildings, or tick the classes.
+- **Findings, not frames.** Each thing is tracked across the clip into one finding with its best frame, a thumbnail and
+  where it shows on the timeline. Things that look alike (benches, boats, lamp posts, street signs, piers) get their own
+  classes so they aren't called fences or poles.
+- **Possible defects** are flagged as hints to look at, not verdicts: rust, cracks, bird nests and graffiti from the model,
+  plus rust-coloured patches, vegetation growing over a fence or line, a pole or tower leaning, and hot spots on a panel.
+- **Add the blackbox log** and each finding gets the craft's height, speed and heading at that moment, and a pin on the
+  map. Line the log up with the button at takeoff or by the motor sound. GPS latitude and longitude stay out of the
+  readout and every export unless you turn **Show GPS position** on.
+- **Export** the findings as JSON or CSV, or a video of the footage with the boxes, labels and telemetry drawn in
+  (H.264 `.mp4`, made in the browser).
+
+It's a beta: the detector misses small and distant things and sometimes names them wrong, so treat it as a second pair
+of eyes. The model (about 190 MB) isn't on the live site yet; export it with `tools/inspection/export_model.py` and pick
+the `.onnx` on the page (it's kept in your browser after that). See [Inspector (beta)](#inspector-beta) below.
+
 ### 🏠 And a front page to show it off
 
 <p align="center">
@@ -133,6 +157,7 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 | Backend | ASP.NET Core minimal APIs on .NET 10, Entity Framework Core with SQLite |
 | Log decoding | `Services/BlackboxDecoder.cs`, a C# port of Betaflight's Blackbox Explorer decoder |
 | Video | Overlay: PNG frames in a QuickTime `.mov` written in the browser (`flights/mov-writer.ts`), alpha kept. Finished video: H.264/AAC `.mp4` decoded, composited and encoded in the browser with WebCodecs via [Mediabunny](https://mediabunny.dev/) (`flights/video-render.ts`), its sound mixed with Web Audio. Editor timeline: `flights/track-timeline.component.ts` |
+| Inspection | [ONNX Runtime Web](https://onnxruntime.ai/) on WebGPU (WebAssembly fallback) running a YOLO-World model exported by `tools/inspection/export_model.py` (`inspect/`) |
 | USB | Web Serial (MSP) to reboot the flight controller into mass storage, File System Access to read its drive (`flights/fc-usb.ts`) |
 | Hosting | One free Linux Azure App Service (F1), deployed by GitHub Actions on every push to `master` |
 | Auth | App Service Authentication (Microsoft), owner-only writes |
@@ -174,10 +199,12 @@ GitDrone/
 │       │                         render, logs over USB
 │       ├── icon.component.ts     The small outline icons used across the editor
 │       ├── osd/                  LovelyOSD Editor (no-account video and overlay tool)
+│       ├── inspect/              Inspector (beta): detector, scan, tracking, defect hints, telemetry, video export
 │       ├── guides/               How-to pages written for search, like adding your OSD to DJI O4 footage
 │       ├── tunes/                Import, timeline, compare
 │       ├── about/                The public By the numbers page
 │       └── home/ · stats/        Front page and visitor stats
+├── tools/inspection/             export_model.py: builds the Inspector's ONNX model from inspect/vocabulary.json
 ├── docs/screenshots/             Images for this README
 └── .github/workflows/deploy.yml  Build Angular into wwwroot and deploy to Azure
 ```
@@ -202,6 +229,7 @@ GitDrone/
 | /flights/:id                 | FlightDetailComponent      |
 | /flights/:id/overlay         | FlightOverlayComponent     |
 | /osd                         | LovelyOsdComponent         |
+| /inspector                   | InspectComponent (beta)    |
 | /stats                       | StatsComponent (signed in) |
 
 </details>
@@ -545,7 +573,7 @@ and charts as a flight page (folded away under the editor until you open **Fligh
 file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
 page, so leaving it clears them, unless you save the session. A file with several armed sessions gets a session picker.
 
-**The site is about the editor.** The nav is LovelyOSD Editor and About; your logbook (Flights, Hangar, and Visitor
+**The site is about the editor.** The nav is LovelyOSD Editor, Inspector (beta) and About; your logbook (Flights, Hangar, and Visitor
 stats for owners) is in the account menu once you're signed in, and the home page shows the latest flights only then.
 Those pages still work for anyone with a link.
 
@@ -569,6 +597,35 @@ the flight controller's drive included; in other browsers, or for a file that ha
 It waits for the files to load before putting the sync back, since loading them sets their own (`flights/session-store.ts`). It's open to visitors who
 aren't signed in, since nothing is stored; to protect the small App Service plan, the API decodes at most two logs at
 once (two more wait, the rest get a "busy, try again" 503).
+
+## Inspector (beta)
+
+`/inspector` (also `/inspect`) finds things to inspect in drone footage, entirely in the browser
+(`drone-logger/src/app/inspect/`). It's linked in the header with a **Beta** tag.
+
+- **The model.** YOLO-World v2 (Ultralytics) with GitDrone's vocabulary baked in, exported to ONNX and run with
+  [ONNX Runtime Web](https://onnxruntime.ai/) on WebGPU, falling back to WebAssembly (`inspect-model.ts`). The classes,
+  their colours and the prompts for each live in `inspect/vocabulary.json`, shared by the page and the export script;
+  several prompts can map to one class ("chain-link fence", "wooden fence" and "metal fence" are all Fence). Naming the
+  look-alikes and being specific ("wooden utility pole", not "pole") does more for accuracy than anything else.
+- **Making it.** `tools/inspection/export_model.py` (Python, on your own machine; the setup is in its header) writes
+  `drone-logger/public/models/inspection-<size>.onnx` for `--size s`, `m` or `l` (the default) and copies it to
+  `inspection-v1.onnx`, the one the page loads. Re-run it after changing `vocabulary.json`; it takes about a minute. The
+  folder is git-ignored, so the model is neither committed nor deployed: where `models/inspection-v1.onnx` isn't served,
+  the page asks you to pick the file, and keeps it in Cache Storage. On 4K footage all three sizes scan at about 8 frames
+  a second on an RTX 3060 Ti (decoding is the bottleneck), so large is the default.
+- **Scanning.** Mediabunny decodes a frame every 0.25–2 s (your choice) at 1280 px wide, skipping near-identical ones;
+  each is letterboxed to 640 px for the detector. Detections are matched across frames into tracks, and the boxes on the
+  preview and in the exported video slide between sampled frames (`inspect-scan.ts`, `inspect-draw.ts`). Colour and
+  shape checks add the defect hints (`inspect-cues.ts`).
+- **Telemetry.** A blackbox log goes through the same `POST /api/osd/analyze` as LovelyOSD Editor (read in memory and
+  forgotten). The GPS track gives each moment's position, height, speed, course and satellites (`inspect-log.ts`).
+  **Show GPS position** is off by default and remembered in the browser; while it's off, latitude and longitude are
+  stripped from the readout, the findings list, the JSON and CSV and the exported video. The map on the page uses them
+  either way, since it never leaves your computer.
+- **The video.** **Export video** renders the footage at 1080p, 720p or its own size, up to 30 fps, H.264 at constant
+  quality, with the findings as filtered on the page and a small "GitDrone Inspector · Beta" stamp (`inspect-render.ts`).
+  It streams to a file you pick in Chrome and Edge, and downloads from memory elsewhere. There's no sound.
 
 ## Deploying to Azure (free tier)
 
@@ -634,3 +691,7 @@ GitDrone stands on the open-source FPV world:
   contributors (ODbL) for the flight maps.
 - **[Mediabunny](https://mediabunny.dev/)** (MPL-2.0): reading, decoding and encoding video in the browser for the
   finished `.mp4`.
+- **[ONNX Runtime Web](https://onnxruntime.ai/)** (MIT): running the Inspector's detector in the browser.
+- **[Ultralytics YOLO-World](https://github.com/ultralytics/ultralytics)** (AGPL-3.0) and **[CLIP](https://github.com/openai/CLIP)**
+  (MIT): the open-vocabulary detector behind the Inspector, exported on your own machine; its weights aren't in this
+  repository.

@@ -59,11 +59,20 @@ const COUNTS: Record<string, { label: string; sub?: boolean }> = {
         }
       </section>
 
+      <section aria-labelledby="inspector-heading">
+        <h2 id="inspector-heading">Also here: Inspector (beta)</h2>
+        <p>
+          The <a routerLink="/inspector">Inspector</a> scans slow drone footage for things to inspect, like fences, power lines,
+          poles and solar panels, and flags possible defects for a closer look. It runs on your own computer too, and can
+          add the craft's height and speed from your blackbox log. It's new, so it makes mistakes.
+        </p>
+      </section>
+
       <section aria-labelledby="privacy-heading">
         <h2 id="privacy-heading">Your files stay yours</h2>
         <ul class="points">
-          <li>Your footage, sound, music and OSD font play and render on your own computer. They're never uploaded.</li>
-          <li>The blackbox log is sent to be decoded, read in memory and forgotten. No account, nothing kept.</li>
+          <li>Your footage, sound, music and OSD font play and render on your own computer, and the Inspector scans footage there too. They're never uploaded.</li>
+          <li>The blackbox log is sent to be decoded, read in memory and forgotten. No account, nothing kept. The Inspector leaves GPS position out of what it exports unless you ask for it.</li>
           <li>
             The numbers above come from anonymous counters: when someone renders a video, only the words "video rendered" are
             counted, with a visitor hash that changes every day. No cookies, no IP addresses, no file names or settings.

@@ -1,6 +1,6 @@
 # GitDrone frontend (`drone-logger`)
 
-The Angular 22 app behind GitDrone: the hangar, flight pages, tune history and LovelyOSD Editor (the video and overlay editor). The
+The Angular 22 app behind GitDrone: the hangar, flight pages, tune history, LovelyOSD Editor (the video and overlay editor) and the Inspector (beta). The
 [main README](../README.md) covers what GitDrone does; this one is about working on the frontend.
 
 ## Running it
@@ -27,6 +27,10 @@ overlay editor sits close to it, so new styles there should reuse the existing c
 The sample flight behind **Try a sample flight** lives in `public/samples/`: a blackbox log and 20-second cuts of its
 footage and phone stick cam, about 13 MB in all.
 
+The Inspector loads its model from `public/models/inspection-v1.onnx`, which is git-ignored (about 190 MB). Make it with
+`../tools/inspection/export_model.py`; without it the page asks for the file. `tsconfig.json` has `resolveJsonModule`
+on so the page can import its classes from `inspect/vocabulary.json`, the same file the export script reads.
+
 ## Where things are
 
 ```text
@@ -49,6 +53,13 @@ src/app/
 │   │                               it: the OSD's pulse, colour split and tint; the footage's zoom, vignette, saturation
 │   └── glyph-font, stick-math      Betaflight OSD fonts (WTFOS .png and .bin) and stick modes
 ├── osd/           LovelyOSD Editor: the no-account video and overlay tool (/osd)
+├── inspect/       Inspector (beta, /inspector): finding things to inspect in drone footage
+│   ├── vocabulary.json             The classes, colours and detector prompts (shared with tools/inspection)
+│   ├── inspect-model               Loading the ONNX model and running it (ONNX Runtime Web, WebGPU or WASM)
+│   ├── inspect-scan, inspect-cues  Sampling the footage, tracking findings across frames, defect hints
+│   ├── inspect-log                 The blackbox log's telemetry at any moment of the footage
+│   ├── inspect-draw, inspect-render  Boxes and readout over the preview; the exported .mp4
+│   └── inspect.component           The page
 ├── tunes/         Import, timeline, compare
 ├── home/ · stats/ Front page and visitor stats
 └── icon.component.ts   The small outline icons used across the editor (hover text lives on the buttons)
@@ -64,7 +75,9 @@ src/app/
 | [IndexedDB](https://developer.mozilla.org/docs/Web/API/IndexedDB_API) | Saved sessions and the OSD font, in this browser only | Everywhere (not in private windows) |
 | [WebGL 2](https://developer.mozilla.org/docs/Web/API/WebGL2RenderingContext) | Grading the footage on the GPU, in the preview and every rendered frame | Everywhere; without it the footage goes ungraded |
 | [Web Audio](https://developer.mozilla.org/docs/Web/API/Web_Audio_API) | Gain past 100%, mutes and fades in the preview; mixing the finished video's sound | Everywhere |
+| [WebGPU](https://developer.mozilla.org/docs/Web/API/WebGPU_API) (via [ONNX Runtime Web](https://onnxruntime.ai/)) | Running the Inspector's detector on the GPU | Chrome and Edge; elsewhere it runs on WebAssembly, several times slower |
+| [Cache Storage](https://developer.mozilla.org/docs/Web/API/CacheStorage) | Keeping an Inspector model you picked, so it isn't asked for again | Everywhere (not in private windows) |
 | [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API) | Rebooting the flight controller into mass storage | Chrome and Edge |
 
 Nothing a visitor loads is uploaded except a log they decode (read in memory by the API and forgotten in LovelyOSD Editor).
-Footage, sound tracks, music and fonts stay on their computer.
+Footage, sound tracks, music, fonts and the Inspector's model stay on their computer.

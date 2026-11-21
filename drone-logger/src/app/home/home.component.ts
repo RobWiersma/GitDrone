@@ -107,6 +107,18 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
         </div>
       </section>
 
+      <section class="panel inspector" aria-labelledby="inspector-heading">
+        <h2 id="inspector-heading">Inspector <span class="beta-tag">Beta</span></h2>
+        <p>
+          Flying slow inspection footage? The Inspector scans it on your own computer and finds the things worth a closer look:
+          buildings and roofs, fences and gates, utility poles, power lines and insulators, solar panels. Each one is tracked
+          into a single finding, with hints like rust, cracks, overgrowth or a leaning pole. Add the blackbox log for the
+          craft's height and speed at each, then export the list or a video with the boxes drawn in.
+        </p>
+        <p class="hint">A beta: treat it as a second pair of eyes. It needs its model file, and runs best in Chrome or Edge.</p>
+        <a class="btn" routerLink="/inspector">Open the Inspector</a>
+      </section>
+
       <section class="promises" aria-labelledby="promises-heading">
         <h2 id="promises-heading">Free, private, open source</h2>
         <p class="about-link">How many videos have been made so far? <a routerLink="/about">See the numbers</a>.</p>
@@ -173,6 +185,9 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
     .features h3 a:hover { color: var(--accent); }
     .features p { margin: 0; line-height: 1.5; }
     .features li { border-top: 3px solid var(--accent); }
+    .inspector p { margin: 0 0 .75rem; line-height: 1.55; max-width: 60rem; }
+    .beta-tag { font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; vertical-align: middle;
+                padding: .12rem .45rem; border-radius: 999px; background: var(--accent); color: var(--accent-ink); }
 
     .steps-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; }
     .steps ol { margin: 0 0 1rem; padding-left: 1.3rem; display: grid; gap: .5rem; line-height: 1.5; }

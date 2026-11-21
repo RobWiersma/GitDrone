@@ -29,6 +29,9 @@ export const routes: Routes = [
     title: 'How to add OSD to DJI O4 footage, free in your browser · LovelyOSD Editor' },
   { path: 'about', loadComponent: () => import('./about/about.component').then(m => m.AboutComponent),
     title: 'About LovelyOSD Editor: free OSD video editing for FPV pilots' },
+  // Lazy: this page pulls in ONNX Runtime Web for the detector.
+  { path: 'inspector', loadComponent: () => import('./inspect/inspect.component').then(m => m.InspectComponent), title: 'Inspector (beta): find things to inspect in your drone footage' },
+  { path: 'inspect', redirectTo: 'inspector' },
   { path: 'osd', loadComponent: () => import('./osd/lovely-osd.component').then(m => m.LovelyOsdComponent), title: 'LovelyOSD Editor' },
 
   // Old /aircraft addresses, kept so bookmarks still work.

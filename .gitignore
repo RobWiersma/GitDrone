@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 # Real blackbox logs for local testing; never commit them
 testlogs/
+
+# Inspection model export work files
+tools/inspection/build/

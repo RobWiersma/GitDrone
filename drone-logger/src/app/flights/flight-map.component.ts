@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnDestroy, afterNextRender, computed, effect, inject, input, model, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterNextRender, computed, effect, inject, input, model, output, signal, viewChild } from '@angular/core';
 import * as L from 'leaflet';
 import { FlightTrack, SpeedUnit, TrackPoint, speedFromMs } from './flight.models';
 import { ThemeService } from '../theme.service';
@@ -24,6 +24,9 @@ function bandsFor(unit: SpeedUnit) {
   const labels = [`under ${s[0]}`, `${s[0]}–${s[1]}`, `${s[1]}–${s[2]}`, `${s[2]}–${s[3]}`, `${s[3]}+`];
   return COLORS.map((c, i) => ({ ...c, upTo: s[i] ?? Infinity, label: labels[i] }));
 }
+
+/** A marked spot on the map (the inspection page's findings): clicking it emits its id through `pinPick`. */
+export interface MapPin { id: number; lat: number; lon: number; color: string; label: string }
 
 /** Leaflet draws on canvas, so CSS variables have to be resolved to real colours. */
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -55,6 +58,10 @@ export class FlightMapComponent implements OnDestroy {
   /** Index into track().points under the pointer, shared with the height/speed charts. */
   hoverIndex = model<number | null>(null);
 
+  /** Extra spots to mark, drawn over the path. */
+  pins = input<MapPin[]>([]);
+  pinPick = output<number>();
+
   private theme = inject(ThemeService);
   readonly units = inject(UnitsService);
   private rawBands = computed(() => bandsFor(this.units.speed()));
@@ -63,6 +70,7 @@ export class FlightMapComponent implements OnDestroy {
   private host = viewChild.required<ElementRef<HTMLDivElement>>('map');
   private map?: L.Map;
   private layers?: L.LayerGroup;
+  private pinLayer?: L.LayerGroup;
   private cursor?: L.CircleMarker;
   private ready = signal(false);
   private resize?: ResizeObserver;
@@ -76,6 +84,7 @@ export class FlightMapComponent implements OnDestroy {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(this.map);
       this.layers = L.layerGroup().addTo(this.map);
+      this.pinLayer = L.layerGroup().addTo(this.map);
       this.map.on('mousemove', e => this.onMove(e));
       this.map.on('mouseout', () => this.clearHover());
       // The container can still be 0px tall when the map is created, which makes fitBounds jump to max zoom.
@@ -93,6 +102,11 @@ export class FlightMapComponent implements OnDestroy {
       this.theme.dark(); // redraw with the other palette when the theme changes
       this.units.speed(); // or the bands when the speed unit changes
       if (this.ready()) this.draw(t);
+    });
+
+    effect(() => {
+      const pins = this.pins();
+      if (this.ready()) this.drawPins(pins);
     });
 
     // Follow hovers that start on the charts.
@@ -152,6 +166,17 @@ export class FlightMapComponent implements OnDestroy {
     this.bounds = bounds;
     map.invalidateSize();
     map.fitBounds(bounds, { padding: [24, 24], animate: false });
+  }
+
+  private drawPins(pins: MapPin[]) {
+    const layer = this.pinLayer!;
+    layer.clearLayers();
+    for (const p of pins) {
+      L.circleMarker([p.lat, p.lon], { radius: 6, color: cssVar('--mark-ink'), weight: 1.5, fillColor: p.color, fillOpacity: 1 })
+        .bindTooltip(p.label, { direction: 'top', offset: [0, -6] })
+        .on('click', () => this.pinPick.emit(p.id))
+        .addTo(layer);
+    }
   }
 
   /** Snap to the nearest track point within 24px of the pointer. */

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "drone-logger",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["ng", "serve", "--port", "4300"],
+      "cwd": "drone-logger",
+      "port": 4300
+    }
+  ]
+}
