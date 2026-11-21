@@ -72,3 +72,4 @@ select:focus-visible, input:focus-visible, .link:focus-visible { outline: 2px so
 .video-export { display: grid; gap: .4rem; border-top: 1px solid var(--line); padding-top: .6rem; }
 .video-export .eyebrow { margin: 0; }
 .video-export .hint { margin: 0; }
+.tools > progress { width: 100%; height: .6rem; accent-color: var(--accent); }

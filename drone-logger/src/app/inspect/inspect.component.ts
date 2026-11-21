@@ -8,10 +8,12 @@ import { matchMotorSound } from '../flights/clap';
 import { CraftFix, craftAt, describe, takeoffTime, withoutPosition } from './inspect-log';
 import { detectionsAt, drawCraft, drawDetections } from './inspect-draw';
 import { InspectRenderPlan, MEMORY_LIMIT, RenderCancelled, estimateBytes, outputSize, renderInspection } from './inspect-render';
-import { CLASSES, Detector, PRESETS, classIndex, forgetModels, keepPickedModel, loadModelBytes } from './inspect-model';
+import {
+  CLASSES, Detector, HOSTED_MODEL, PRESETS, classIndex, downloadHostedModel, forgetModels, keepPickedModel, loadModelBytes,
+} from './inspect-model';
 import { Finding, ScanProgress, ScanResult, clock, findingsCsv, scanFootage } from './inspect-scan';
 
-type ModelState = 'loading' | 'ready' | 'missing' | 'error';
+type ModelState = 'loading' | 'downloading' | 'ready' | 'missing' | 'error';
 
 /**
  * Inspection: load slow footage of power lines, solar panels, fences, gates or buildings, and the page finds them
@@ -181,6 +183,21 @@ export class InspectComponent {
       this.detector = await Detector.open(b);
       this.backend.set(this.detector.backend);
       this.modelState.set('ready');
+    } catch (err) {
+      this.modelState.set('error');
+      this.modelError.set(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /** The model online, offered as a download when there's none here. */
+  protected readonly hosted = HOSTED_MODEL;
+
+  protected async downloadModel() {
+    this.modelState.set('downloading');
+    this.modelProgress.set(0);
+    this.modelError.set('');
+    try {
+      await this.openModel(await downloadHostedModel(p => this.modelProgress.set(p)));
     } catch (err) {
       this.modelState.set('error');
       this.modelError.set(err instanceof Error ? err.message : String(err));

@@ -115,7 +115,7 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
           into a single finding, with hints like rust, cracks, overgrowth or a leaning pole. Add the blackbox log for the
           craft's height and speed at each, then export the list or a video with the boxes drawn in.
         </p>
-        <p class="hint">A beta: treat it as a second pair of eyes. It needs its model file, and runs best in Chrome or Edge.</p>
+        <p class="hint">A beta: treat it as a second pair of eyes. The detector is a one-time 186 MB download, and it runs best in Chrome or Edge.</p>
         <a class="btn" routerLink="/inspector">Open the Inspector</a>
       </section>
 

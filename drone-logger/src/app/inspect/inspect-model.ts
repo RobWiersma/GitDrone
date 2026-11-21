@@ -44,6 +44,15 @@ export interface Detection { cls: number; score: number; box: Box }
 
 /** Where the model is looked for first: a file next to the app (kept out of git; see the export script). */
 export const MODEL_URL = 'models/inspection-v1.onnx';
+/**
+ * The model online, for the live site (which doesn't serve one): a public Hugging Face repo, which is free and allows
+ * other sites to download from it. Give each upload a new file name (inspection-l-v2.onnx…)
+ * so browsers that kept the old one fetch the new one.
+ */
+export const HOSTED_MODEL: { url: string; megabytes: number } | null = {
+  url: 'https://huggingface.co/bswiersma/gitdrone-inspector/resolve/main/inspection-l-v1.onnx',
+  megabytes: 186,
+};
 const ORT_VERSION = '1.31.1';
 /** ONNX Runtime's WebAssembly, from the CDN rather than our own (free, bandwidth-capped) server. */
 const WASM_PATHS = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
@@ -177,13 +186,14 @@ async function openCache(): Promise<Cache | null> {
 }
 
 /**
- * The model's bytes: one the pilot picked earlier (kept in the browser's cache), else the one next to the app.
- * Null when there's neither, so the page asks for the file.
+ * The model's bytes, from what's already at hand: one the pilot picked earlier or downloaded from {@link HOSTED_MODEL}
+ * (both kept in the browser's cache), else the one next to the app. Null when there's none, so the page offers the
+ * download or asks for the file.
  */
 export async function loadModelBytes(progress: (fraction: number) => void): Promise<Uint8Array | null> {
   const cache = await openCache();
-  const picked = await cache?.match(PICKED_KEY);
-  if (picked) return new Uint8Array(await picked.arrayBuffer());
+  const kept = (await cache?.match(PICKED_KEY)) ?? (HOSTED_MODEL ? await cache?.match(HOSTED_MODEL.url) : undefined);
+  if (kept) return new Uint8Array(await kept.arrayBuffer());
   // The served one is left to the HTTP cache, so a re-exported model is picked up as soon as it's there.
   let res: Response;
   try {
@@ -193,7 +203,36 @@ export async function loadModelBytes(progress: (fraction: number) => void): Prom
   }
   const type = res.headers.get('content-type') ?? '';
   if (!res.ok || type.includes('text/html')) return null; // the app's own page, not a model
-  const total = Number(res.headers.get('content-length')) || 0;
+  return readAll(res, progress);
+}
+
+/**
+ * Downloads {@link HOSTED_MODEL} and keeps it in the browser, so it's downloaded once; models kept from older uploads
+ * are dropped. Throws when the download fails.
+ */
+export async function downloadHostedModel(progress: (fraction: number) => void): Promise<Uint8Array<ArrayBuffer>> {
+  if (!HOSTED_MODEL) throw new Error('There is no model online yet.');
+  const res = await fetch(HOSTED_MODEL.url);
+  if (!res.ok) throw new Error(`The download failed (${res.status}).`);
+  const bytes = await readAll(res, progress, HOSTED_MODEL.megabytes * 1e6);
+  // Kept in the background while the detector starts: writing 186 MB takes a while.
+  const url = HOSTED_MODEL.url;
+  // The Response copies the bytes now, before the detector can take them over.
+  const kept = new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } });
+  void (async () => {
+    try {
+      const cache = await openCache();
+      if (!cache) return;
+      for (const req of await cache.keys()) if (new URL(req.url).pathname !== PICKED_KEY) await cache.delete(req);
+      await cache.put(url, kept);
+    } catch { /* fine: it's downloaded again next time */ }
+  })();
+  return bytes;
+}
+
+/** A response's body, reporting how far it's got. */
+async function readAll(res: Response, progress: (fraction: number) => void, expected = 0): Promise<Uint8Array<ArrayBuffer>> {
+  const total = Number(res.headers.get('content-length')) || expected;
   const reader = res.body?.getReader();
   if (!reader) return new Uint8Array(await res.arrayBuffer());
   const parts: Uint8Array[] = [];
@@ -203,7 +242,7 @@ export async function loadModelBytes(progress: (fraction: number) => void): Prom
     if (done) break;
     parts.push(value);
     got += value.length;
-    if (total) progress(got / total);
+    if (total) progress(Math.min(1, got / total));
   }
   const bytes = new Uint8Array(got);
   let at = 0;
@@ -218,7 +257,7 @@ export async function keepPickedModel(file: File): Promise<Uint8Array> {
   return bytes;
 }
 
-/** Forgets cached models (so a re-exported one is fetched again). */
+/** Forgets kept models (picked and downloaded), so a re-exported one is fetched again. */
 export async function forgetModels() {
   try { if (typeof caches !== 'undefined') await caches.delete(CACHE); } catch { /* fine */ }
 }

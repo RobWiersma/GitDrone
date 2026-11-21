@@ -28,7 +28,8 @@ The sample flight behind **Try a sample flight** lives in `public/samples/`: a b
 footage and phone stick cam, about 13 MB in all.
 
 The Inspector loads its model from `public/models/inspection-v1.onnx`, which is git-ignored (about 190 MB). Make it with
-`../tools/inspection/export_model.py`; without it the page asks for the file. `tsconfig.json` has `resolveJsonModule`
+`../tools/inspection/export_model.py`; without it the page offers the copy on Hugging Face (`HOSTED_MODEL` in
+`inspect/inspect-model.ts`), downloaded once. `tsconfig.json` has `resolveJsonModule`
 on so the page can import its classes from `inspect/vocabulary.json`, the same file the export script reads.
 
 ## Where things are
@@ -76,7 +77,7 @@ src/app/
 | [WebGL 2](https://developer.mozilla.org/docs/Web/API/WebGL2RenderingContext) | Grading the footage on the GPU, in the preview and every rendered frame | Everywhere; without it the footage goes ungraded |
 | [Web Audio](https://developer.mozilla.org/docs/Web/API/Web_Audio_API) | Gain past 100%, mutes and fades in the preview; mixing the finished video's sound | Everywhere |
 | [WebGPU](https://developer.mozilla.org/docs/Web/API/WebGPU_API) (via [ONNX Runtime Web](https://onnxruntime.ai/)) | Running the Inspector's detector on the GPU | Chrome and Edge; elsewhere it runs on WebAssembly, several times slower |
-| [Cache Storage](https://developer.mozilla.org/docs/Web/API/CacheStorage) | Keeping an Inspector model you picked, so it isn't asked for again | Everywhere (not in private windows) |
+| [Cache Storage](https://developer.mozilla.org/docs/Web/API/CacheStorage) | Keeping the Inspector's model (downloaded or picked), so it's fetched once | Everywhere (not in private windows) |
 | [Web Serial](https://developer.mozilla.org/docs/Web/API/Web_Serial_API) | Rebooting the flight controller into mass storage | Chrome and Edge |
 
 Nothing a visitor loads is uploaded except a log they decode (read in memory by the API and forgotten in LovelyOSD Editor).

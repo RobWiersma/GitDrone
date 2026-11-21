@@ -34,16 +34,26 @@
         @case ('loading') { Loading the detector{{ modelProgress() ? ' ' + pct(modelProgress()) : '' }}… }
         @case ('ready') { Detector ready on {{ backend() === 'webgpu' ? 'the GPU (WebGPU)' : 'the CPU (WebAssembly)' }}.
           <button type="button" class="link" (click)="reloadModel()">Reload</button> }
-        @case ('missing') { No detector model here yet. }
+        @case ('downloading') { Downloading the detector{{ modelProgress() ? ' ' + pct(modelProgress()) : '' }}… }
+        @case ('missing') { {{ hosted ? 'The detector is a one-time download.' : 'No detector model here yet.' }} }
         @case ('error') { <span class="error">The detector didn't load: {{ modelError() }}</span> }
       }
     </p>
+    @if (modelState() === 'downloading') {
+      <progress class="full" max="1" [value]="modelProgress()" aria-label="Detector download"></progress>
+    }
     @if (modelState() === 'missing' || modelState() === 'error') {
+      @if (hosted) {
+        <button type="button" class="btn btn-primary" (click)="downloadModel()">Download the detector ({{ hosted.megabytes }} MB)</button>
+        <p class="hint full">Downloaded once and kept in this browser, from Hugging Face. Or load your own model file.</p>
+      }
       <label class="btn">
         <input class="sr-only" type="file" accept=".onnx" (change)="onModel($event)" />
         Load model (.onnx)
       </label>
-      <p class="hint full">Make one with <code>tools/inspection/export_model.py</code>, then load it here once. It's kept in this browser.</p>
+      @if (!hosted) {
+        <p class="hint full">Make one with <code>tools/inspection/export_model.py</code>, then load it here once. It's kept in this browser.</p>
+      }
     }
     <details class="full look">
       <summary>Look for: <strong>{{ wantedSummary() }}</strong></summary>

@@ -15,7 +15,9 @@ so the large model costs nothing there; on 1080p footage the smaller ones are qu
 
 It writes drone-logger/public/models/inspection-<size>.onnx and copies it to inspection-v1.onnx, the one the /inspector
 page loads (unless --keep-default), which `ng serve` serves. That folder is
-git-ignored: the model is big, so it isn't committed or deployed. Elsewhere, pick the .onnx on the page itself.
+git-ignored: the model is big, so it isn't committed or deployed. The live site downloads it from Hugging Face
+(HOSTED_MODEL in inspect-model.ts): to publish a new one, upload it there under a new name (inspection-l-v2.onnx)
+and point HOSTED_MODEL at it.
 
 The classes and their prompts live in drone-logger/src/app/inspect/vocabulary.json, shared with the page:
 edit them there, then re-export.

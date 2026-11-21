@@ -140,8 +140,8 @@ solar panels, trees, vehicles and people. Nothing is uploaded.
   (H.264 `.mp4`, made in the browser).
 
 It's a beta: the detector misses small and distant things and sometimes names them wrong, so treat it as a second pair
-of eyes. The model (about 190 MB) isn't on the live site yet; export it with `tools/inspection/export_model.py` and pick
-the `.onnx` on the page (it's kept in your browser after that). See [Inspector (beta)](#inspector-beta) below.
+of eyes. The detector is a one-time 186 MB download from [Hugging Face](https://huggingface.co/bswiersma/gitdrone-inspector), kept in your browser after that. See
+[Inspector (beta)](#inspector-beta) below.
 
 ### 🏠 And a front page to show it off
 
@@ -611,9 +611,15 @@ once (two more wait, the rest get a "busy, try again" 503).
 - **Making it.** `tools/inspection/export_model.py` (Python, on your own machine; the setup is in its header) writes
   `drone-logger/public/models/inspection-<size>.onnx` for `--size s`, `m` or `l` (the default) and copies it to
   `inspection-v1.onnx`, the one the page loads. Re-run it after changing `vocabulary.json`; it takes about a minute. The
-  folder is git-ignored, so the model is neither committed nor deployed: where `models/inspection-v1.onnx` isn't served,
-  the page asks you to pick the file, and keeps it in Cache Storage. On 4K footage all three sizes scan at about 8 frames
-  a second on an RTX 3060 Ti (decoding is the bottleneck), so large is the default.
+  folder is git-ignored, so the model is neither committed nor deployed. On 4K footage all three sizes scan at about 8
+  frames a second on an RTX 3060 Ti (decoding is the bottleneck), so large is the default.
+- **Where the page gets it.** First a model kept in the browser (picked from disk, or downloaded before), then
+  `models/inspection-v1.onnx` next to the app (what `ng serve` has), then it offers **Download the detector** from
+  `HOSTED_MODEL` in `inspect-model.ts`: `inspection-l-v1.onnx` in the public Hugging Face repo
+  [bswiersma/gitdrone-inspector](https://huggingface.co/bswiersma/gitdrone-inspector), free and allowed to be fetched from other sites. The download is kept in Cache
+  Storage, so it happens once. **Load model (.onnx)** takes any file instead.
+- **Publishing a new model.** Export it, upload it to the Hugging Face repo under a new name (`inspection-l-v2.onnx`),
+  and change `HOSTED_MODEL`'s `url` (and `megabytes`). The new name makes browsers fetch it; the old copy is dropped.
 - **Scanning.** Mediabunny decodes a frame every 0.25–2 s (your choice) at 1280 px wide, skipping near-identical ones;
   each is letterboxed to 640 px for the detector. Detections are matched across frames into tracks, and the boxes on the
   preview and in the exported video slide between sampled frames (`inspect-scan.ts`, `inspect-draw.ts`). Colour and
@@ -693,5 +699,5 @@ GitDrone stands on the open-source FPV world:
   finished `.mp4`.
 - **[ONNX Runtime Web](https://onnxruntime.ai/)** (MIT): running the Inspector's detector in the browser.
 - **[Ultralytics YOLO-World](https://github.com/ultralytics/ultralytics)** (AGPL-3.0) and **[CLIP](https://github.com/openai/CLIP)**
-  (MIT): the open-vocabulary detector behind the Inspector, exported on your own machine; its weights aren't in this
-  repository.
+  (MIT): the open-vocabulary detector behind the Inspector, exported on your own machine and hosted on
+  [Hugging Face](https://huggingface.co/bswiersma/gitdrone-inspector) under AGPL-3.0; its weights aren't in this repository.
