@@ -11,8 +11,10 @@ import { CraftFix, craftAt, describe, takeoffTime, withoutPosition } from './ins
 import { detectionsAt, drawCraft, drawDetections } from './inspect-draw';
 import { InspectRenderPlan, MEMORY_LIMIT, RenderCancelled, estimateBytes, outputSize, renderInspection } from './inspect-render';
 import {
-  CLASSES, Detector, HOSTED_MODEL, PRESETS, classIndex, downloadHostedModel, forgetModels, keepPickedModel, loadModelBytes,
+  CLASSES, ClassKind, Detector, HOSTED_MODEL, PRESETS, activePrompts, addCustomClass, cantAdd, classIndex, downloadHostedModel,
+  forgetModels, keepPickedModel, loadModelBytes, removeCustomClass,
 } from './inspect-model';
+import { TEXT_MODEL_MEGABYTES, embed } from './inspect-text';
 import { Finding, ScanProgress, ScanResult, clock, findingsCsv, scanFootage } from './inspect-scan';
 
 type ModelState = 'loading' | 'downloading' | 'ready' | 'missing' | 'error';
@@ -51,13 +53,26 @@ export class InspectComponent {
   protected readonly step = signal(0.5);
 
   // ---- What to look for (chosen before scanning; remembered in this browser) ----
-  protected readonly presets = PRESETS.map(p => ({ name: p.name, set: new Set(p.labels.map(classIndex)) }));
-  protected readonly objectClasses = CLASSES.map((c, i) => ({ ...c, i })).filter(c => c.kind === 'object');
-  protected readonly lookalikeClasses = CLASSES.map((c, i) => ({ ...c, i })).filter(c => c.kind === 'lookalike');
-  protected readonly defectClasses = CLASSES.map((c, i) => ({ ...c, i })).filter(c => c.kind === 'defect');
+  /** Bumped when the pilot adds or takes off one of their own, so the lists below are worked out again. */
+  private readonly listVersion = signal(0);
+  private readonly listed = computed(() => {
+    this.listVersion();
+    return CLASSES.map((c, i) => ({ ...c, i })).filter(c => !c.removed);
+  });
+  protected readonly presets = computed(() => {
+    const all = this.listed();
+    return PRESETS.map(p => ({
+      name: p.name,
+      set: new Set(p.name === 'Everything' ? all.map(c => c.i) : p.labels.map(classIndex).filter(i => i >= 0)),
+    }));
+  });
+  protected readonly objectClasses = computed(() => this.listed().filter(c => c.kind === 'object' && !c.custom));
+  protected readonly lookalikeClasses = computed(() => this.listed().filter(c => c.kind === 'lookalike'));
+  protected readonly defectClasses = computed(() => this.listed().filter(c => c.kind === 'defect' && !c.custom));
+  protected readonly ownClasses = computed(() => this.listed().filter(c => c.custom));
   protected readonly wanted = signal<ReadonlySet<number>>(loadWanted());
   protected readonly wantedSummary = computed(() => {
-    const w = this.wanted(), preset = this.presets.find(p => sameSet(p.set, w));
+    const w = this.wanted(), preset = this.presets().find(p => sameSet(p.set, w));
     if (preset) return preset.name === 'Everything' ? `everything (${w.size} kinds)` : `${preset.name.toLowerCase()} (${w.size} kinds)`;
     return w.size ? CLASSES.filter((_, i) => w.has(i)).map(c => c.label.toLowerCase()).join(', ') : 'nothing';
   });
@@ -247,6 +262,50 @@ export class InspectComponent {
     this.duration.set(v.duration || 0);
   }
 
+  // ---- The pilot's own things to look for ----
+  protected readonly textModelMegabytes = TEXT_MODEL_MEGABYTES;
+  protected readonly ownText = signal('');
+  protected readonly ownKind = signal<ClassKind>('object');
+  /** Working out the words of one being added: null when not, else how far the word model's download has got. */
+  protected readonly adding = signal<number | null>(null);
+  protected readonly ownError = signal('');
+
+  protected setOwnText(event: Event) { this.ownText.set((event.target as HTMLInputElement).value); this.ownError.set(''); }
+  protected setOwnKind(event: Event) { this.ownKind.set((event.target as HTMLSelectElement).value === 'defect' ? 'defect' : 'object'); }
+
+  /** Adds what the pilot typed to the list, ticked: its words worked out first (downloading the word model the first time). */
+  protected async addOwn(event?: Event) {
+    event?.preventDefault();
+    const text = this.ownText().trim(), why = cantAdd(text);
+    if (why) { this.ownError.set(why); return; }
+    this.ownError.set('');
+    this.adding.set(0);
+    try {
+      await embed([text], p => this.adding.set(p));
+    } catch (err) {
+      console.error('[inspect] word model', err);
+      this.ownError.set(`Couldn't work out what "${text}" means: ${err instanceof Error ? err.message : err}. Check the connection and try again.`);
+      return;
+    } finally {
+      this.adding.set(null);
+    }
+    const i = addCustomClass(text, this.ownKind());
+    this.listVersion.update(v => v + 1);
+    this.setWanted(new Set([...this.wanted(), i]));
+    this.ownText.set('');
+    this.announce.set(`Added ${text} to what to look for.`);
+  }
+
+  protected removeOwn(i: number) {
+    const label = CLASSES[i]?.label;
+    removeCustomClass(i);
+    this.listVersion.update(v => v + 1);
+    const n = new Set(this.wanted());
+    n.delete(i);
+    this.setWanted(n);
+    if (label) this.announce.set(`Took ${label} off what to look for.`);
+  }
+
   protected async scan() {
     const f = this.file();
     if (!f || !this.detector || this.scanning()) return;
@@ -257,6 +316,9 @@ export class InspectComponent {
     this.result.set(null);
     this.announce.set('Scanning started.');
     try {
+      // Everything on the list is given to the detector, so each box is named by its closest kind, wanted or not.
+      const prompts = activePrompts();
+      this.detector.setPrompts(await embed(prompts.map(p => p.prompt)), prompts.map(p => p.cls));
       const r = await scanFootage(f, this.detector, this.step(), this.wanted(), (p, partial) => {
         this.progress.set(p);
         this.result.set(partial);

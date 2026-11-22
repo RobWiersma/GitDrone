@@ -9,7 +9,7 @@ import { CLASSES } from './inspect-model';
 export interface Cue { kind: 'rust' | 'vegetation' | 'spots' | 'lean' | 'model'; text: string }
 
 const RUST_ON = new Set(['Fence', 'Railing', 'Gate', 'Utility pole', 'Transmission tower', 'Roof', 'Lamp post', 'Street sign']);
-const VEG_NEAR = new Set(['Utility pole', 'Transmission tower', 'Power line', 'Insulator', 'Fence', 'Railing', 'Solar panel']);
+const VEG_NEAR = new Set(['Utility pole', 'Transmission tower', 'Power line', 'Insulator', 'Fence', 'Railing', 'Solar panel', 'Drainage ditch']);
 const UPRIGHT = new Set(['Utility pole', 'Transmission tower', 'Lamp post', 'Street sign', 'Pier']);
 
 /** Hue in degrees, saturation and value 0..1. */

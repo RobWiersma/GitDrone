@@ -64,33 +64,63 @@
       <fieldset [disabled]="scanning()">
         <legend class="sr-only">What to look for</legend>
         <div class="chips" role="group" aria-label="Presets">
-          @for (p of presets; track p.name) {
+          @for (p of presets(); track p.name) {
             <button type="button" class="chip" [attr.aria-pressed]="isPreset(p.set)" (click)="usePreset(p.set)">{{ p.name }}</button>
           }
         </div>
         <div class="kinds">
           <div role="group" aria-labelledby="kinds-things">
             <p id="kinds-things" class="eyebrow">Things</p>
-            @for (c of objectClasses; track c.i) {
+            @for (c of objectClasses(); track c.i) {
               <label class="check"><input type="checkbox" [checked]="wanted().has(c.i)" (change)="toggleWanted(c.i)" />
                 <span class="dot" [style.background]="c.color"></span>{{ c.label }}</label>
             }
           </div>
           <div role="group" aria-labelledby="kinds-alike">
             <p id="kinds-alike" class="eyebrow">Look-alikes</p>
-            @for (c of lookalikeClasses; track c.i) {
+            @for (c of lookalikeClasses(); track c.i) {
               <label class="check"><input type="checkbox" [checked]="wanted().has(c.i)" (change)="toggleWanted(c.i)" />
                 <span class="dot" [style.background]="c.color"></span>{{ c.label }}</label>
             }
           </div>
           <div role="group" aria-labelledby="kinds-defects">
             <p id="kinds-defects" class="eyebrow">Defects the model can see</p>
-            @for (c of defectClasses; track c.i) {
+            @for (c of defectClasses(); track c.i) {
               <label class="check"><input type="checkbox" [checked]="wanted().has(c.i)" (change)="toggleWanted(c.i)" />
                 <span class="dot" [style.background]="c.color"></span>{{ c.label }}</label>
             }
           </div>
+          <div role="group" aria-labelledby="kinds-own">
+            <p id="kinds-own" class="eyebrow">Your own</p>
+            @for (c of ownClasses(); track c.i) {
+              <span class="own">
+                <label class="check"><input type="checkbox" [checked]="wanted().has(c.i)" (change)="toggleWanted(c.i)" />
+                  <span class="dot" [style.background]="c.color"></span>{{ c.label }}{{ c.kind === 'defect' ? ' (defect)' : '' }}</label>
+                <button type="button" class="link remove" (click)="removeOwn(c.i)" [attr.aria-label]="'Take ' + c.label + ' off the list'" title="Take it off the list">✕</button>
+              </span>
+            } @empty {
+              <p class="hint">Nothing yet. Add anything below.</p>
+            }
+          </div>
         </div>
+        <!-- Anything the pilot types in: the detector is open-vocabulary, so it looks for whatever's described. -->
+        <form class="add-own" (submit)="addOwn($event)">
+          <label for="own-text">Look for something else</label>
+          <input id="own-text" type="text" maxlength="60" placeholder="e.g. blocked drain, cracked solar panel" autocomplete="off"
+                 [value]="ownText()" (input)="setOwnText($event)" [disabled]="adding() !== null" aria-describedby="own-hint" />
+          <select aria-label="What kind it is" (change)="setOwnKind($event)" [disabled]="adding() !== null">
+            <option value="object" [selected]="ownKind() === 'object'">Thing</option>
+            <option value="defect" [selected]="ownKind() === 'defect'">Defect</option>
+          </select>
+          <button type="submit" class="btn small" [disabled]="adding() !== null || !ownText().trim()">Add</button>
+        </form>
+        @if (adding() !== null) {
+          <p class="hint" role="status">Working out what it means{{ adding()! > 0 && adding()! < 1 ? ': downloading the word model, ' + pct(adding()!) : '' }}…</p>
+        }
+        @if (ownError()) { <p class="error" role="alert">{{ ownError() }}</p> }
+        <p id="own-hint" class="hint">Describe it the way you'd caption a photo: a few plain words work best. A defect is
+          flagged when it's found on one of the things. The first time, this downloads a {{ textModelMegabytes }} MB word
+          model, kept in this browser; your list is kept here too.</p>
         <p class="hint">Unticked kinds are left out of the scan. Each box is still named by its closest kind first, so a bench
           won't turn up as a fence when you look for fences only.</p>
       </fieldset>

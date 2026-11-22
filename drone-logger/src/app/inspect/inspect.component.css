@@ -73,3 +73,9 @@ select:focus-visible, input:focus-visible, .link:focus-visible { outline: 2px so
 .video-export .eyebrow { margin: 0; }
 .video-export .hint { margin: 0; }
 .tools > progress { width: 100%; height: .6rem; accent-color: var(--accent); }
+/* The pilot's own things to look for: each with a button to take it off, and the form to add one. */
+.own { display: inline-flex; align-items: center; gap: .3rem; }
+.own .remove { padding: 0 .25rem; color: var(--muted); text-decoration: none; }
+.own .remove:hover { color: var(--danger); }
+.add-own { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
+.add-own input[type=text] { flex: 1 1 14rem; min-width: 0; }

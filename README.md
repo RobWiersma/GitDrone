@@ -125,9 +125,13 @@ Each quad with its photo, specs, tune timeline (with firmware updates marked) an
 **[Inspector](https://lovelyosd.com/inspector)** (`/inspector`) watches slow inspection footage for you. Load a clip and
 it scans it on your own computer, frame by frame on your GPU (WebGPU, or WebAssembly without one), with an open-vocabulary
 detector (YOLO-World): buildings and roofs, fences, railings and gates, utility poles, pylons, power lines and insulators,
-solar panels, trees, vehicles and people. Nothing is uploaded.
+solar panels, drainage ditches and culverts, CCTV cameras, trees, vehicles and people. Nothing is uploaded.
 
-- **Look for** only what you inspect: presets for power lines, solar, fences and gates, or buildings, or tick the classes.
+- **Look for** only what you inspect: presets for power lines, solar, fences and gates, buildings, drainage or security
+  cameras, or tick the classes.
+- **Add your own.** Type anything ("blocked drain", "cracked solar panel", "playground slide") and it's looked for
+  straight away, as a thing or a defect. The first time, that downloads a 127 MB word model (CLIP's text half), kept in
+  your browser like your list.
 - **Findings, not frames.** Each thing is tracked across the clip into one finding with its best frame, a thumbnail and
   where it shows on the timeline. Things that look alike (benches, boats, lamp posts, street signs, piers) get their own
   classes so they aren't called fences or poles.
@@ -140,7 +144,7 @@ solar panels, trees, vehicles and people. Nothing is uploaded.
   (H.264 `.mp4`, made in the browser).
 
 It's a beta: the detector misses small and distant things and sometimes names them wrong, so treat it as a second pair
-of eyes. The detector is a one-time 186 MB download from [Hugging Face](https://huggingface.co/bswiersma/gitdrone-inspector), kept in your browser after that. See
+of eyes. The detector is a one-time 188 MB download from [Hugging Face](https://huggingface.co/bswiersma/gitdrone-inspector), kept in your browser after that. See
 [Inspector (beta)](#inspector-beta) below.
 
 ### 🏠 And a front page to show it off
@@ -204,7 +208,7 @@ GitDrone/
 │       ├── tunes/                Import, timeline, compare
 │       ├── about/                The public By the numbers page
 │       └── home/ · stats/        Front page and visitor stats
-├── tools/inspection/             export_model.py: builds the Inspector's ONNX model from inspect/vocabulary.json
+├── tools/inspection/             export_model.py: builds the Inspector's ONNX model and inspect/prompt-embeddings.json
 ├── docs/screenshots/             Images for this README
 └── .github/workflows/deploy.yml  Build Angular into wwwroot and deploy to Azure
 ```
@@ -603,23 +607,36 @@ once (two more wait, the rest get a "busy, try again" 503).
 `/inspector` (also `/inspect`) finds things to inspect in drone footage, entirely in the browser
 (`drone-logger/src/app/inspect/`). It's linked in the header with a **Beta** tag.
 
-- **The model.** YOLO-World v2 (Ultralytics) with GitDrone's vocabulary baked in, exported to ONNX and run with
-  [ONNX Runtime Web](https://onnxruntime.ai/) on WebGPU, falling back to WebAssembly (`inspect-model.ts`). The classes,
-  their colours and the prompts for each live in `inspect/vocabulary.json`, shared by the page and the export script;
+- **The model.** YOLO-World v2 (Ultralytics), exported to ONNX and run with
+  [ONNX Runtime Web](https://onnxruntime.ai/) on WebGPU, falling back to WebAssembly (`inspect-model.ts`). What to look
+  for is an input, not baked in: up to 96 prompts as CLIP ViT-B/32 text embeddings (`txt_feats`, 1×96×512), the spare
+  slots repeating the first (YOLO-World takes the strongest match over its prompts in places, so a repeat changes
+  nothing where an empty slot would). The built-in classes, their colours and prompts live in `inspect/vocabulary.json`;
   several prompts can map to one class ("chain-link fence", "wooden fence" and "metal fence" are all Fence). Naming the
   look-alikes and being specific ("wooden utility pole", not "pole") does more for accuracy than anything else.
+- **Words.** The built-in prompts' embeddings ship with the page (`inspect/prompt-embeddings.json`, written by the export
+  script with the same CLIP the model was trained against), so scanning for them needs nothing more. A prompt the pilot
+  types is embedded in the browser by CLIP's text model through [Transformers.js](https://huggingface.co/docs/transformers.js)
+  (from the jsDelivr CDN; the model is `Xenova/clip-vit-base-patch32` in half precision, 127 MB, which matches Python's to
+  four decimal places where the 65 MB 8-bit one drifts enough to miss things), one prompt at a time (batched with padding,
+  the shorter ones come out wrong), and remembered in `localStorage` (`inspect-text.ts`). The pilot's own classes are kept
+  there too; taking one off leaves its slot until the page reloads, so findings keep their numbers.
 - **Making it.** `tools/inspection/export_model.py` (Python, on your own machine; the setup is in its header) writes
-  `drone-logger/public/models/inspection-<size>.onnx` for `--size s`, `m` or `l` (the default) and copies it to
-  `inspection-v1.onnx`, the one the page loads. Re-run it after changing `vocabulary.json`; it takes about a minute. The
-  folder is git-ignored, so the model is neither committed nor deployed. On 4K footage all three sizes scan at about 8
-  frames a second on an RTX 3060 Ti (decoding is the bottleneck), so large is the default.
+  `drone-logger/public/models/inspection-<size>-v2.onnx` for `--size s`, `m` or `l` (the default), copies it to
+  `inspection-v2.onnx`, the one the page loads, and rewrites `prompt-embeddings.json`. It checks the ONNX model against
+  PyTorch (scores to within 2e-3, boxes to a pixel) before writing. Re-run it, or just `--embeddings-only`, after
+  changing `vocabulary.json`, and commit `prompt-embeddings.json`. The models folder is git-ignored, so the model is
+  neither committed nor deployed. On 4K footage all three sizes scan at about 8 frames a second on an RTX 3060 Ti
+  (decoding is the bottleneck), so large is the default.
 - **Where the page gets it.** First a model kept in the browser (picked from disk, or downloaded before), then
-  `models/inspection-v1.onnx` next to the app (what `ng serve` has), then it offers **Download the detector** from
-  `HOSTED_MODEL` in `inspect-model.ts`: `inspection-l-v1.onnx` in the public Hugging Face repo
+  `models/inspection-v2.onnx` next to the app (what `ng serve` has), then it offers **Download the detector** from
+  `HOSTED_MODEL` in `inspect-model.ts`: `inspection-l-v2.onnx` in the public Hugging Face repo
   [bswiersma/gitdrone-inspector](https://huggingface.co/bswiersma/gitdrone-inspector), free and allowed to be fetched from other sites. The download is kept in Cache
-  Storage, so it happens once. **Load model (.onnx)** takes any file instead.
-- **Publishing a new model.** Export it, upload it to the Hugging Face repo under a new name (`inspection-l-v2.onnx`),
+  Storage, so it happens once. **Load model (.onnx)** takes any file instead. A model from before prompts were an input
+  (`inspection-*-v1.onnx`) is refused with a note to download the new one.
+- **Publishing a new model.** Export it, upload it to the Hugging Face repo under a new name (`inspection-l-v3.onnx`),
   and change `HOSTED_MODEL`'s `url` (and `megabytes`). The new name makes browsers fetch it; the old copy is dropped.
+  Adding built-in classes no longer needs one: only `--embeddings-only` and a commit.
 - **Scanning.** Mediabunny decodes a frame every 0.25–2 s (your choice) at 1280 px wide, skipping near-identical ones;
   each is letterboxed to 640 px for the detector. Detections are matched across frames into tracks, and the boxes on the
   preview and in the exported video slide between sampled frames (`inspect-scan.ts`, `inspect-draw.ts`). Colour and

@@ -1,11 +1,13 @@
 import type { InferenceSession, Tensor } from 'onnxruntime-web';
 
 import vocabulary from './vocabulary.json';
+import { EMBED_DIMS } from './inspect-text';
 
 /**
- * The inspection detector: an open-vocabulary YOLO-World model, exported to ONNX with the prompts in vocabulary.json
- * baked in (see tools/inspection/export_model.py, which reads the same file), run in the browser by ONNX Runtime Web on
- * the GPU through WebGPU, or on the CPU through WebAssembly where there's no WebGPU. Nothing leaves the machine.
+ * The inspection detector: an open-vocabulary YOLO-World model, exported to ONNX (tools/inspection/export_model.py)
+ * taking what to look for as an input, CLIP text embeddings of the prompts (inspect-text.ts), so the pilot can add
+ * their own. Run in the browser by ONNX Runtime Web on the GPU through WebGPU, or on the CPU through WebAssembly where
+ * there's no WebGPU. Nothing leaves the machine.
  */
 
 /** object: what inspections are about; lookalike: named so it isn't mistaken for one; defect: seen on an object. */
@@ -17,24 +19,82 @@ export interface InspectClass {
   kind: ClassKind;
   /** Box colour over the video (bright, to stand out on footage). */
   color: string;
-  /** What the model was told to look for; each is one of its outputs. */
+  /** What the model is told to look for; each is one of its outputs. */
   prompts: readonly string[];
+  /** Added by the pilot (kept in this browser), not built in. */
+  custom?: boolean;
+  /** A pilot's own class taken off again: kept in place until the page reloads, so findings keep their numbers. */
+  removed?: boolean;
 }
 
-export const CLASSES: readonly InspectClass[] = vocabulary.classes as InspectClass[];
+/** How many prompts the model takes at once (SLOTS in export_model.py). */
+export const PROMPT_SLOTS = 96;
+const CUSTOM_KEY = 'gitdrone-inspect-custom-classes';
+/** Box colours for the pilot's own classes, in turn. */
+const CUSTOM_COLORS = ['#ff6ad5', '#7afcff', '#feff9c', '#ff9f43', '#a3ff6a', '#c792ea', '#ff8080', '#80b3ff'];
 
-/** The model's outputs, in order: which class each prompt belongs to. */
-const PROMPT_CLASS: readonly number[] = CLASSES.flatMap((c, i) => c.prompts.map(() => i));
+/** The built-in classes, then the pilot's own. Indexes never change while the page is open (removed ones stay, marked). */
+export const CLASSES: InspectClass[] = [...(vocabulary.classes as InspectClass[]), ...loadCustom()];
 
-export const classIndex = (label: string) => CLASSES.findIndex(c => c.label === label);
+export const classIndex = (label: string) => CLASSES.findIndex(c => !c.removed && c.label.toLowerCase() === label.toLowerCase());
+
+/** Every prompt the detector is given, in order, with the class it stands for. */
+export const activePrompts = () =>
+  CLASSES.flatMap((c, cls) => (c.removed ? [] : c.prompts.map(prompt => ({ prompt, cls }))));
+
+function loadCustom(): InspectClass[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '[]') as { label?: unknown; kind?: unknown }[];
+    return raw.filter(c => typeof c.label === 'string' && c.label.trim())
+      .map((c, i) => customClass(String(c.label), c.kind === 'defect' ? 'defect' : 'object', i));
+  } catch { return []; }
+}
+
+const customClass = (label: string, kind: ClassKind, n: number): InspectClass =>
+  ({ label, kind, color: CUSTOM_COLORS[n % CUSTOM_COLORS.length], prompts: [label], custom: true });
+
+function saveCustom() {
+  const own = CLASSES.filter(c => c.custom && !c.removed).map(c => ({ label: c.label, kind: c.kind }));
+  try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(own)); } catch { /* only for this visit */ }
+}
+
+/**
+ * Why `text` can't be added as a class of the pilot's own, or '' when it can: it needs words, a name not taken, and
+ * room among the model's prompts.
+ */
+export function cantAdd(text: string): string {
+  const label = text.trim();
+  if (!label) return 'Type what to look for.';
+  if (label.length > 60) return 'Keep it short: a few words, the way you would caption a photo.';
+  if (classIndex(label) >= 0) return `${label} is already on the list.`;
+  if (activePrompts().length >= PROMPT_SLOTS) return 'The list is full. Take something off first.';
+  return '';
+}
+
+/** Adds a class of the pilot's own, looked for by its name, and returns its index. Check {@link cantAdd} first. */
+export function addCustomClass(text: string, kind: ClassKind): number {
+  const n = CLASSES.filter(c => c.custom).length;
+  CLASSES.push(customClass(text.trim(), kind, n));
+  saveCustom();
+  return CLASSES.length - 1;
+}
+
+/** Takes one of the pilot's own classes off the list. */
+export function removeCustomClass(i: number) {
+  if (!CLASSES[i]?.custom) return;
+  CLASSES[i] = { ...CLASSES[i], removed: true };
+  saveCustom();
+}
 
 /** Ready-made "look for" sets: the things an inspection is about, plus the defects that matter on them. */
 export const PRESETS: readonly { name: string; labels: readonly string[] }[] = [
-  { name: 'Everything', labels: CLASSES.map(c => c.label) },
+  { name: 'Everything', labels: [] }, // filled in with every class on the list, the pilot's own too
   { name: 'Power lines', labels: ['Utility pole', 'Transmission tower', 'Power line', 'Insulator', 'Tree', 'Rust', 'Crack', 'Bird nest'] },
   { name: 'Solar', labels: ['Solar panel', 'Roof', 'Building', 'Crack', 'Bird nest'] },
   { name: 'Fences and gates', labels: ['Fence', 'Railing', 'Gate', 'Rust', 'Crack', 'Graffiti'] },
   { name: 'Buildings', labels: ['Building', 'Roof', 'Rust', 'Crack', 'Graffiti'] },
+  { name: 'Drainage', labels: ['Drainage ditch', 'Tree', 'Crack'] },
+  { name: 'Security cameras', labels: ['CCTV camera', 'Building', 'Utility pole', 'Lamp post', 'Graffiti'] },
 ];
 
 /** A box in the frame, as fractions of its width and height (so it fits any size the video is shown at). */
@@ -43,15 +103,15 @@ export interface Box { x: number; y: number; w: number; h: number }
 export interface Detection { cls: number; score: number; box: Box }
 
 /** Where the model is looked for first: a file next to the app (kept out of git; see the export script). */
-export const MODEL_URL = 'models/inspection-v1.onnx';
+export const MODEL_URL = 'models/inspection-v2.onnx';
 /**
  * The model online, for the live site (which doesn't serve one): a public Hugging Face repo, which is free and allows
  * other sites to download from it. Give each upload a new file name (inspection-l-v2.onnx…)
  * so browsers that kept the old one fetch the new one.
  */
 export const HOSTED_MODEL: { url: string; megabytes: number } | null = {
-  url: 'https://huggingface.co/bswiersma/gitdrone-inspector/resolve/main/inspection-l-v1.onnx',
-  megabytes: 186,
+  url: 'https://huggingface.co/bswiersma/gitdrone-inspector/resolve/main/inspection-l-v2.onnx',
+  megabytes: 188,
 };
 const ORT_VERSION = '1.31.1';
 /** ONNX Runtime's WebAssembly, from the CDN rather than our own (free, bandwidth-capped) server. */
@@ -68,6 +128,10 @@ const NMS_IOU = 0.5;
 
 export type Backend = 'webgpu' | 'wasm';
 
+/** Said when the model is the older kind, with what to look for baked in rather than an input. */
+const OLD_MODEL = 'This is the older detector, from before you could add your own things to look for. Download the new one, '
+  + 'or make one with tools/inspection/export_model.py.';
+
 export class Detector {
   private constructor(
     private readonly ort: typeof import('onnxruntime-web'),
@@ -78,25 +142,45 @@ export class Detector {
   private readonly canvas = makeCanvas(SIZE, SIZE);
   private readonly ctx = this.canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
   private readonly input = new Float32Array(3 * SIZE * SIZE);
+  /** What to look for, as the model takes it: PROMPT_SLOTS embeddings, and which class each filled slot is. */
+  private readonly prompts = new Float32Array(PROMPT_SLOTS * EMBED_DIMS);
+  private promptClass: number[] = [];
+
+  /**
+   * Sets what to look for: one embedding per prompt (inspect-text.ts) and the class each stands for. The spare slots
+   * repeat the first prompt: the model takes the strongest match over its prompts in places, so a repeat changes
+   * nothing, where an empty slot would.
+   */
+  setPrompts(embeddings: readonly Float32Array[], classes: readonly number[]) {
+    if (!embeddings.length || embeddings.length > PROMPT_SLOTS) throw new Error(`The detector takes 1 to ${PROMPT_SLOTS} things to look for.`);
+    for (let i = 0; i < PROMPT_SLOTS; i++) this.prompts.set(embeddings[i < embeddings.length ? i : 0], i * EMBED_DIMS);
+    this.promptClass = [...classes];
+  }
 
   /** Opens the model (bytes from {@link loadModelBytes}) on WebGPU, else WebAssembly. */
   static async open(bytes: Uint8Array): Promise<Detector> {
     const ort = await import('onnxruntime-web/webgpu');
     ort.env.wasm.wasmPaths = WASM_PATHS;
     ort.env.logLevel = 'error';
+    const usable = (session: InferenceSession) => {
+      if (session.inputNames.includes('txt_feats')) return session;
+      void session.release();
+      throw new Error(OLD_MODEL);
+    };
     const hasGpu = typeof navigator !== 'undefined' && 'gpu' in navigator
       && !!(await (navigator as unknown as { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter().catch(() => null));
     if (hasGpu) {
       try {
         const session = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'], graphOptimizationLevel: 'all' });
-        return new Detector(ort, session, 'webgpu');
+        return new Detector(ort, usable(session), 'webgpu');
       } catch (err) {
+        if (err instanceof Error && err.message === OLD_MODEL) throw err;
         console.warn('WebGPU detector failed, falling back to WebAssembly', err);
       }
     }
     ort.env.wasm.numThreads = Math.min(8, navigator.hardwareConcurrency || 4);
     const session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
-    return new Detector(ort, session, 'wasm');
+    return new Detector(ort, usable(session), 'wasm');
   }
 
   /**
@@ -118,20 +202,25 @@ export class Detector {
       data[plane + i] = px[4 * i + 1] / 255;
       data[2 * plane + i] = px[4 * i + 2] / 255;
     }
-    const feeds: Record<string, Tensor> = { [this.session.inputNames[0]]: new this.ort.Tensor('float32', data, [1, 3, SIZE, SIZE]) };
+    if (!this.promptClass.length) throw new Error('Nothing to look for: set the prompts first.');
+    const feeds: Record<string, Tensor> = {
+      images: new this.ort.Tensor('float32', data, [1, 3, SIZE, SIZE]),
+      txt_feats: new this.ort.Tensor('float32', this.prompts, [1, PROMPT_SLOTS, EMBED_DIMS]),
+    };
     const results = await this.session.run(feeds);
     const out = results[this.session.outputNames[0]];
     try {
       const [, rows, anchors] = out.dims as number[];
-      const nc = rows - 4;
-      if (nc !== PROMPT_CLASS.length) throw new Error(`This model was made for ${nc} prompts; the page has ${PROMPT_CLASS.length}. Re-export it with tools/inspection/export_model.py.`);
+      if (rows - 4 !== PROMPT_SLOTS) throw new Error(`This model takes ${rows - 4} prompts; the page gives ${PROMPT_SLOTS}. Re-export it with tools/inspection/export_model.py.`);
+      // Only the filled slots: the spare ones repeat the first prompt.
+      const classes = this.promptClass, nc = classes.length;
       const o = (out.type === 'float32' ? out.data : Float32Array.from(out.data as ArrayLike<number>)) as Float32Array;
       const found: Detection[] = [];
       for (let a = 0; a < anchors; a++) {
         let best = 0, cls = -1;
         for (let c = 0; c < nc; c++) {
           const s = o[(4 + c) * anchors + a];
-          if (s > best) { best = s; cls = PROMPT_CLASS[c]; }
+          if (s > best) { best = s; cls = classes[c]; }
         }
         if (best < MIN_SCORE || (wanted && !wanted.has(cls))) continue;
         const cx = o[a], cy = o[anchors + a], w = o[2 * anchors + a], h = o[3 * anchors + a];
