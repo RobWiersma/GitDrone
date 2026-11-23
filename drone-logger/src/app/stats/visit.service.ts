@@ -9,7 +9,8 @@ export interface VisitStats {
   today: number;
   /** Sum of each day's unique visitors (someone back on another day counts again). */
   total: number;
-  daily: { day: string; visitors: number }[];
+  /** pageViews: pages opened that day, each page once per visitor (reloads don't add to it). */
+  daily: { day: string; visitors: number; pageViews: number }[];
   pages: { path: string; visitors: number }[];
   /** Where visitor-days came from: a site name or "Direct". */
   referrers: { source: string; visitors: number }[];
