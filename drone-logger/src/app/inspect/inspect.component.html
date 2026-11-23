@@ -106,7 +106,7 @@
         <!-- Anything the pilot types in: the detector is open-vocabulary, so it looks for whatever's described. -->
         <form class="add-own" (submit)="addOwn($event)">
           <label for="own-text">Look for something else</label>
-          <input id="own-text" type="text" maxlength="60" placeholder="e.g. blocked drain, cracked solar panel" autocomplete="off"
+          <input id="own-text" type="text" maxlength="60" placeholder="e.g. manhole cover, satellite dish" autocomplete="off"
                  [value]="ownText()" (input)="setOwnText($event)" [disabled]="adding() !== null" aria-describedby="own-hint" />
           <select aria-label="What kind it is" (change)="setOwnKind($event)" [disabled]="adding() !== null">
             <option value="object" [selected]="ownKind() === 'object'">Thing</option>
@@ -118,11 +118,13 @@
           <p class="hint" role="status">Working out what it means{{ adding()! > 0 && adding()! < 1 ? ': downloading the word model, ' + pct(adding()!) : '' }}…</p>
         }
         @if (ownError()) { <p class="error" role="alert">{{ ownError() }}</p> }
-        <p id="own-hint" class="hint">Describe it the way you'd caption a photo: a few plain words work best. A defect is
+        <p id="own-hint" class="hint">Describe it the way you'd caption a photo: a few plain words work best. It knows things far better than
+          their state, so "rusty gate" finds gates, rusty or not. A defect is
           flagged when it's found on one of the things. The first time, this downloads a {{ textModelMegabytes }} MB word
           model, kept in this browser; your list is kept here too.</p>
         <p class="hint">Unticked kinds are left out of the scan. Each box is still named by its closest kind first, so a bench
-          won't turn up as a fence when you look for fences only.</p>
+          won't turn up as a fence when you look for fences only. Your own are looked for on their own as well, so "person
+          sitting" turns up alongside Person rather than losing to it.</p>
       </fieldset>
     </details>
     @if (wantedChanged()) { <p class="hint full" role="status">Scan again to look for {{ wantedSummary() }}.</p> }

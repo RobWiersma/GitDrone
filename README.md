@@ -129,9 +129,11 @@ solar panels, drainage ditches and culverts, CCTV cameras, trees, vehicles and p
 
 - **Look for** only what you inspect: presets for power lines, solar, fences and gates, buildings, drainage or security
   cameras, or tick the classes.
-- **Add your own.** Type anything ("blocked drain", "cracked solar panel", "playground slide") and it's looked for
-  straight away, as a thing or a defect. The first time, that downloads a 127 MB word model (CLIP's text half), kept in
-  your browser like your list.
+- **Add your own.** Type anything ("manhole cover", "satellite dish", "playground slide") and it's looked for
+  straight away, as a thing or a defect. Your own are judged on their own score, not against the built-in kinds, so
+  "person sitting" turns up alongside Person instead of losing to it. The model knows things far better than their
+  state: "rusty playground slide" scores as high on a clean slide, so it finds the thing, not the fault. The first
+  time, that downloads a 127 MB word model (CLIP's text half), kept in your browser like your list.
 - **Findings, not frames.** Each thing is tracked across the clip into one finding with its best frame, a thumbnail and
   where it shows on the timeline. Things that look alike (benches, boats, lamp posts, street signs, piers) get their own
   classes so they aren't called fences or poles.

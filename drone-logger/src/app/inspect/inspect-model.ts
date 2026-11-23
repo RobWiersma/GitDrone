@@ -155,7 +155,15 @@ export class Detector {
     if (!embeddings.length || embeddings.length > PROMPT_SLOTS) throw new Error(`The detector takes 1 to ${PROMPT_SLOTS} things to look for.`);
     for (let i = 0; i < PROMPT_SLOTS; i++) this.prompts.set(embeddings[i < embeddings.length ? i : 0], i * EMBED_DIMS);
     this.promptClass = [...classes];
+    this.ownSlots = classes.flatMap((cls, slot) => (CLASSES[cls]?.custom ? [slot] : []));
   }
+
+  /**
+   * The slots holding the pilot's own classes. Those are judged on their own score rather than having to beat every
+   * other prompt: they're often a narrower take on a built-in one ("person sitting" against Person, "rusty gate" against
+   * Gate), which would otherwise win nearly every box, so the pilot's would hardly ever be seen.
+   */
+  private ownSlots: number[] = [];
 
   /** Opens the model (bytes from {@link loadModelBytes}) on WebGPU, else WebAssembly. */
   static async open(bytes: Uint8Array): Promise<Detector> {
@@ -213,21 +221,30 @@ export class Detector {
       const [, rows, anchors] = out.dims as number[];
       if (rows - 4 !== PROMPT_SLOTS) throw new Error(`This model takes ${rows - 4} prompts; the page gives ${PROMPT_SLOTS}. Re-export it with tools/inspection/export_model.py.`);
       // Only the filled slots: the spare ones repeat the first prompt.
-      const classes = this.promptClass, nc = classes.length;
+      const classes = this.promptClass, nc = classes.length, own = this.ownSlots;
       const o = (out.type === 'float32' ? out.data : Float32Array.from(out.data as ArrayLike<number>)) as Float32Array;
       const found: Detection[] = [];
-      for (let a = 0; a < anchors; a++) {
-        let best = 0, cls = -1;
-        for (let c = 0; c < nc; c++) {
-          const s = o[(4 + c) * anchors + a];
-          if (s > best) { best = s; cls = classes[c]; }
-        }
-        if (best < MIN_SCORE || (wanted && !wanted.has(cls))) continue;
+      const add = (a: number, cls: number, score: number) => {
         const cx = o[a], cy = o[anchors + a], w = o[2 * anchors + a], h = o[3 * anchors + a];
         const x0 = Math.max(0, (cx - w / 2 - padX) / dw), y0 = Math.max(0, (cy - h / 2 - padY) / dh);
         const x1 = Math.min(1, (cx + w / 2 - padX) / dw), y1 = Math.min(1, (cy + h / 2 - padY) / dh);
-        if (x1 - x0 < 0.004 || y1 - y0 < 0.004) continue;
-        found.push({ cls, score: best, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } });
+        if (x1 - x0 < 0.004 || y1 - y0 < 0.004) return;
+        found.push({ cls, score, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } });
+      };
+      for (let a = 0; a < anchors; a++) {
+        // The box's best built-in class...
+        let best = 0, cls = -1;
+        for (let c = 0; c < nc; c++) {
+          if (CLASSES[classes[c]].custom) continue;
+          const s = o[(4 + c) * anchors + a];
+          if (s > best) { best = s; cls = classes[c]; }
+        }
+        if (best >= MIN_SCORE && (!wanted || wanted.has(cls))) add(a, cls, best);
+        // ...and any of the pilot's own it looks like.
+        for (const c of own) {
+          const s = o[(4 + c) * anchors + a];
+          if (s >= MIN_SCORE && (!wanted || wanted.has(classes[c]))) add(a, classes[c], s);
+        }
       }
       return nms(found);
     } finally {
