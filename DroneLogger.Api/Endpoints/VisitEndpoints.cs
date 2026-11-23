@@ -18,7 +18,8 @@ public record PublicCountDto(string Name, int Total, int Last30Days);
 public record PublicStatsDto(DateOnly? Since, IReadOnlyList<PublicCountDto> Counts);
 /// <summary>Visitors: visitor-days that did it at least once. Times: how often, all told.</summary>
 public record EventStatsDto(string Name, int Visitors, int Times);
-public record DayVisitorsDto(DateOnly Day, int Visitors);
+/// <summary>PageViews: pages opened that day, each page counted once per visitor (reloads don't add to it).</summary>
+public record DayVisitorsDto(DateOnly Day, int Visitors, int PageViews);
 public record PageVisitorsDto(string Path, int Visitors);
 /// <summary>Source is a site name ("LinkedIn", "github.com") or "Direct" for typed addresses, bookmarks and apps that send none.</summary>
 public record ReferrerVisitorsDto(string Source, int Visitors);
@@ -141,8 +142,10 @@ public static partial class VisitEndpoints
             .Select(v => new { v.Day, v.VisitorHash, v.Path, v.Referrer }).ToListAsync(ct);
 
         var perDay = rows.GroupBy(r => r.Day).ToDictionary(g => g.Key, g => g.Select(r => r.VisitorHash).Distinct().Count());
+        // One row per visitor, page and day, so a day's rows are its page views.
+        var viewsPerDay = rows.GroupBy(r => r.Day).ToDictionary(g => g.Key, g => g.Count());
         var daily = Enumerable.Range(0, n).Select(i => from.AddDays(i))
-            .Select(d => new DayVisitorsDto(d, perDay.GetValueOrDefault(d))).ToList();
+            .Select(d => new DayVisitorsDto(d, perDay.GetValueOrDefault(d), viewsPerDay.GetValueOrDefault(d))).ToList();
         var pages = rows.GroupBy(r => r.Path)
             .Select(g => new PageVisitorsDto(g.Key, g.Select(r => (r.Day, r.VisitorHash)).Distinct().Count()))
             .OrderByDescending(p => p.Visitors).ThenBy(p => p.Path).ToList();
