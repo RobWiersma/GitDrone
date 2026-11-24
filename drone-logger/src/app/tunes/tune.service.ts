@@ -10,11 +10,11 @@ export class TuneService {
 
   private mockStore: TuneSnapshotSummary[] = [
     { id: 1, aircraftId: 1, label: 'Stock-ish baseline', firmwareVersion: '4.4.2', target: 'MATEKF405',
-      createdAt: '2026-05-02T18:20:00Z', settingCount: 64, flightCount: 11 },
+      createdAt: '2026-05-02T18:20:00Z', settingCount: 64 },
     { id: 2, aircraftId: 1, label: 'Less D on pitch', notes: 'Motors were warm after the first pack.',
-      firmwareVersion: '4.4.2', target: 'MATEKF405', createdAt: '2026-06-14T16:05:00Z', settingCount: 66, flightCount: 9 },
+      firmwareVersion: '4.4.2', target: 'MATEKF405', createdAt: '2026-06-14T16:05:00Z', settingCount: 66 },
     { id: 3, aircraftId: 1, label: 'Updated to 4.5, RPM filter on', firmwareVersion: '4.5.0', target: 'MATEKF405',
-      createdAt: '2026-08-21T10:40:00Z', settingCount: 71, flightCount: 4 },
+      createdAt: '2026-08-21T10:40:00Z', settingCount: 71 },
   ];
 
   list(aircraftId: number): Observable<TuneSnapshotSummary[]> {
@@ -35,7 +35,6 @@ export class TuneService {
         target: /^#?\s*board_name\s+(\S+)/m.exec(req.rawText)?.[1] ?? 'unknown',
         createdAt: new Date().toISOString(),
         settingCount: (req.rawText.match(/^set /gm) ?? []).length,
-        flightCount: 0,
       };
       this.mockStore = [...this.mockStore, snapshot];
       return of({ snapshot, duplicateOf: null }).pipe(delay(400));
@@ -51,7 +50,7 @@ export class TuneService {
           firmwareVersion: /(\d+\.\d+\.\d+)/.exec(item.rawText)?.[1] ?? 'unknown',
           target: /^#?\s*board_name\s+(\S+)/m.exec(item.rawText)?.[1] ?? 'unknown',
           createdAt: item.createdAt ?? new Date().toISOString(),
-          settingCount: (item.rawText.match(/^set /gm) ?? []).length, flightCount: 0,
+          settingCount: (item.rawText.match(/^set /gm) ?? []).length,
         };
         this.mockStore = [...this.mockStore, snapshot];
         return { index, status: 'created', snapshot, duplicateOf: null, error: null };

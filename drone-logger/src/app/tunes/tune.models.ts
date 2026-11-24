@@ -7,7 +7,6 @@ export interface TuneSnapshotSummary {
   target: string;          // e.g. "MATEKF405"
   createdAt: string;       // ISO date from the API
   settingCount: number;
-  flightCount: number;
 }
 
 export interface TuneImportRequest {

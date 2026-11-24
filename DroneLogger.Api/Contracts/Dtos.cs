@@ -9,7 +9,7 @@ public record AircraftDto(
 
 public record TuneSnapshotDto(
     int Id, int AircraftId, string Label, string? Notes, string FirmwareVersion, string Target,
-    DateTime CreatedAt, int SettingCount, int FlightCount);
+    DateTime CreatedAt, int SettingCount);
 
 public record TuneImportRequest(string? Label, string? Notes, string? RawText);
 
@@ -35,11 +35,6 @@ public record FlightDto(
 public record FlightBatteryDto(int Cells, double StartV, double EndV, double MinV, double? MahUsed, double? PeakCurrentA,
     double? AvgCurrentA, double? PeakPowerW);
 
-/// <summary>Duplicate is true when this exact file was already uploaded for the aircraft; Flights are then the existing ones.</summary>
-public record FlightUploadResult(IReadOnlyList<FlightDto> Flights, bool Duplicate);
-
-public record FlightUpdateRequest(int? TuneSnapshotId, string? Notes);
-
 public record TuneRawDto(int Id, string RawText);
 
 /// <summary>CreatedAt is when the backup was taken (from its file name); null means now.</summary>
@@ -51,14 +46,10 @@ public record TuneBulkRequest(IReadOnlyList<TuneBulkItem>? Items);
 public record TuneBulkItemResult(int Index, string Status, TuneSnapshotDto? Snapshot, int? DuplicateOf, string? Error);
 
 /// <summary>
-/// One armed session from a log read by LovelyOSD, never stored. Flight has Id 0 and no aircraft; Track, Sticks and
-/// Battery and Telemetry are the same JSON the /api/flights/{id}/track, /sticks, /battery and /telemetry endpoints
-/// return, or null when absent.
+/// One armed session from a log read by LovelyOSD, never stored. Flight has Id 0 and no aircraft; Track, Sticks,
+/// Battery and Telemetry are the series as JSON (FlightTrack.cs), or null when absent.
 /// </summary>
 public record OsdSessionDto(FlightDto Flight, System.Text.Json.JsonElement? Track, System.Text.Json.JsonElement? Sticks,
     System.Text.Json.JsonElement? Battery, System.Text.Json.JsonElement? Telemetry);
 
 public record OsdAnalysisDto(string FileName, IReadOnlyList<OsdSessionDto> Sessions);
-
-/// <summary>A page of the all-aircraft flight feed. HasMore says whether another page exists after this one.</summary>
-public record FlightFeedPage(IReadOnlyList<FlightDto> Flights, bool HasMore);

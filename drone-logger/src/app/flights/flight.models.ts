@@ -103,12 +103,6 @@ export const msToKmh = (ms: number) => ms * 3.6;
 export type SpeedUnit = 'kmh' | 'mph';
 export const speedFromMs = (ms: number, unit: SpeedUnit) => (unit === 'mph' ? ms * 2.236936 : ms * 3.6);
 
-export interface FlightUploadResult {
-  flights: Flight[];
-  /** True when this exact file was uploaded before; flights are then the existing ones. */
-  duplicate: boolean;
-}
-
 /** One armed session from a log read by LovelyOSD. Never stored: flight.id is 0 and there's no aircraft. */
 export interface OsdSession {
   flight: Flight;
@@ -121,21 +115,6 @@ export interface OsdSession {
 export interface OsdAnalysis {
   fileName: string;
   sessions: OsdSession[];
-}
-
-export interface FlightFeedPage {
-  flights: Flight[];
-  hasMore: boolean;
-}
-
-/** The date a flight is filed under: the log's start time, or the upload time when the FC had no clock. */
-export function flightDate(f: Flight): string {
-  return f.startedAt ?? f.createdAt;
-}
-
-export interface FlightUpdate {
-  tuneSnapshotId: number | null;
-  notes: string | null;
 }
 
 /** "4:05" style duration. */

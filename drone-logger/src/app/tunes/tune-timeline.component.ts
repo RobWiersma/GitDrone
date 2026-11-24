@@ -36,8 +36,7 @@ import { AuthService } from '../auth.service';
                     {{ row.snapshot.createdAt | date: 'd MMM y' }}, Betaflight {{ row.snapshot.firmwareVersion }} on {{ row.snapshot.target }}
                   </p>
                   <p class="meta">
-                    {{ row.snapshot.settingCount }} non-default settings,
-                    {{ row.snapshot.flightCount }} {{ row.snapshot.flightCount === 1 ? 'flight' : 'flights' }}
+                    {{ row.snapshot.settingCount }} non-default settings
                   </p>
                   @if (row.snapshot.notes) { <p class="note">{{ row.snapshot.notes }}</p> }
                   <div class="links">

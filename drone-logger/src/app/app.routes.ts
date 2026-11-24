@@ -6,23 +6,16 @@ import { AircraftDetailComponent } from './aircraft/aircraft-detail.component';
 import { TuneImportComponent } from './tunes/tune-import.component';
 import { TuneCompareComponent } from './tunes/tune-compare.component';
 import { TuneBulkImportComponent } from './tunes/tune-bulk-import.component';
-import { FlightUploadComponent } from './flights/flight-upload.component';
-import { FlightFeedComponent } from './flights/flight-feed.component';
 import { HomeComponent } from './home/home.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', component: HomeComponent, title: 'LovelyOSD Editor: your FPV footage with its OSD, in your browser' },
-  { path: 'flights', pathMatch: 'full', component: FlightFeedComponent, title: 'Flights' },
   { path: 'hangar', component: AircraftListComponent, title: 'Hangar' },
   { path: 'hangar/new', canActivate: [requireSignIn], component: AircraftFormComponent, title: 'Add aircraft' },
   { path: 'hangar/:id', component: AircraftDetailComponent, title: 'Aircraft' },
   { path: 'hangar/:id/edit', canActivate: [requireSignIn], component: AircraftFormComponent, title: 'Edit aircraft' },
   { path: 'hangar/:id/tunes/import', canActivate: [requireSignIn], component: TuneImportComponent, title: 'Import tune' },
   { path: 'hangar/:id/tunes/bulk', canActivate: [requireSignIn], component: TuneBulkImportComponent, title: 'Bulk import tunes' },
-  { path: 'hangar/:id/flights/upload', canActivate: [requireSignIn], component: FlightUploadComponent, title: 'Upload blackbox log' },
-  // Lazy: this page pulls in Leaflet, which nothing else needs.
-  { path: 'flights/:id/overlay', loadComponent: () => import('./flights/flight-overlay.component').then(m => m.FlightOverlayComponent), title: 'Video overlay' },
-  { path: 'flights/:id', loadComponent: () => import('./flights/flight-detail.component').then(m => m.FlightDetailComponent), title: 'Flight' },
   { path: 'tunes/compare', component: TuneCompareComponent, title: 'Compare tunes' },
   { path: 'stats', canActivate: [requireSignIn], loadComponent: () => import('./stats/stats.component').then(m => m.StatsComponent), title: 'Visitors' },
   { path: 'guides/add-osd-to-dji-o4-footage', loadComponent: () => import('./guides/dji-o4-osd.component').then(m => m.DjiO4OsdGuideComponent),
@@ -41,7 +34,6 @@ export const routes: Routes = [
   { path: 'aircraft/:id/edit', redirectTo: 'hangar/:id/edit' },
   { path: 'aircraft/:id/tunes/import', redirectTo: 'hangar/:id/tunes/import' },
   { path: 'aircraft/:id/tunes/bulk', redirectTo: 'hangar/:id/tunes/bulk' },
-  { path: 'aircraft/:id/flights/upload', redirectTo: 'hangar/:id/flights/upload' },
 
   { path: '**', redirectTo: '' },
 ];

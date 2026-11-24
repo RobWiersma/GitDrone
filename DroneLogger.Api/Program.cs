@@ -29,7 +29,6 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     else options.UseSqlite(connection);
 });
 builder.Services.AddSingleton<ImageStore>();
-builder.Services.AddSingleton<LogStore>();
 builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
     .WithOrigins(config.GetSection("Cors:Origins").Get<string[]>() ?? [])
     .AllowAnyHeader()
@@ -120,10 +119,10 @@ app.UseStaticFiles(spaFiles);
 
 app.MapAircraft();
 app.MapTunes();
-app.MapFlights();
+app.MapOsd();
 app.MapVisits();
 
-// Client-side routes (/aircraft/3, /flights/7, ...) all load the Angular app. Unknown /api paths still 404.
+// Client-side routes (/hangar/3, /osd, ...) all load the Angular app. Unknown /api paths still 404.
 app.MapFallback("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html", spaFiles);
 

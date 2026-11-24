@@ -1805,8 +1805,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
   `],
 })
 /**
- * Preview and export of the transparent HUD video for one flight's data. Used by the stored flight's overlay page and
- * by LovelyOSD, which reads a log without storing it.
+ * Preview and export of the transparent HUD video for one flight's data, in LovelyOSD Editor, which reads a log without
+ * storing it.
  */
 export class OverlayExportComponent {
   data = input.required<OverlayData>();

@@ -9,8 +9,8 @@
 Drop in your Betaflight blackbox log (straight off the quad over USB, if you like) and your footage. LovelyOSD Editor
 lines them up on your takeoff, draws your OSD in your goggles' own font, grades the picture, mixes your sound and music,
 and renders a finished video or YouTube Short on your GPU, near lossless, right in your browser. Or it exports a
-transparent OSD overlay for Premiere. GitDrone, around it, keeps your flights as maps, charts and stick replays, and
-your tune history, and its Inspector (beta) finds the fences, power lines and solar panels in your inspection footage.
+transparent OSD overlay for Premiere. GitDrone, around it, keeps your hangar of quads and
+their tune history, and its Inspector (beta) finds the fences, power lines and solar panels in your inspection footage.
 
 [![Deploy to Azure](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml/badge.svg)](https://github.com/RobWiersma/GitDrone/actions/workflows/deploy.yml)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
@@ -95,18 +95,18 @@ match frame for frame.
 
 ### 🗺️ Flight analysis
 
-Every flight gets a GPS map (Leaflet + OpenStreetMap) with the path coloured by speed, a stick replay, charts for
+Every log you load in LovelyOSD Editor gets a GPS map (Leaflet + OpenStreetMap) with the path coloured by speed, a stick replay, charts for
 height (GPS and barometer), speed, RSSI, voltage and current, and the numbers that matter: top speed, lowest cell,
 mAh used, peak power, furthest distance from home.
 
 <p align="center">
-  <img src="docs/screenshots/flight.png" alt="A flight page: stat tiles for distance, speed, height, RSSI, mAh, lowest cell, current and power, a map of the flight path coloured by speed, and a playback panel with both sticks" width="860">
+  <img src="docs/screenshots/flight.png" alt="Flight stats: stat tiles for distance, speed, height, RSSI, mAh, lowest cell, current and power, a map of the flight path coloured by speed, and a playback panel with both sticks" width="860">
 </p>
 
 ### 🎛️ Tune history
 
 Paste a `diff all` after each change and see what you changed, grouped by profile and category (PIDs, filters,
-rates, motors, ...). Compare any two tunes, even across aircraft, and see which tune each flight was flown on.
+rates, motors, ...). Compare any two tunes, even across aircraft.
 
 <p align="center">
   <img src="docs/screenshots/compare.png" alt="Compare tunes: two snapshots picked side by side, a summary of changed, newly set and back-to-default settings, and a table of filter changes" width="860">
@@ -114,10 +114,10 @@ rates, motors, ...). Compare any two tunes, even across aircraft, and see which 
 
 ### 🛩️ Your hangar
 
-Each quad with its photo, specs, tune timeline (with firmware updates marked) and flights in one place.
+Each quad with its photo, specs and tune timeline (with firmware updates marked) in one place.
 
 <p align="center">
-  <img src="docs/screenshots/hangar.png" alt="An aircraft page: photo and specs of a Speedybee Mario 5 X, a table of flights with map thumbnails, and the start of its tune history" width="860">
+  <img src="docs/screenshots/hangar.png" alt="An aircraft page: photo and specs of a Speedybee Mario 5 X, and its tune history with firmware updates marked between backups" width="860">
 </p>
 
 ### 🔍 Inspector (beta)
@@ -192,8 +192,8 @@ lives in `DroneLogger.Api/samples/diff-all-sample.txt`.
 ```text
 GitDrone/
 ├── DroneLogger.Api/              ASP.NET Core API (.NET 10)
-│   ├── Endpoints/                Aircraft, tunes, flights, visits
-│   ├── Services/                 BlackboxDecoder, FlightTrack, TuneParser, TuneDiff, stores
+│   ├── Endpoints/                Aircraft, tunes, log reading (osd), visits
+│   ├── Services/                 BlackboxDecoder, FlightTrack, TuneParser, TuneDiff, image store
 │   ├── Domain/ · Data/           Entities and EF Core DbContext
 │   ├── Migrations/               EF Core migrations (SQLite)
 │   └── samples/                  Sample Betaflight diff all
@@ -201,8 +201,8 @@ GitDrone/
 │   ├── public/                   Icons, the home page clip and stills, and the sample flight (samples/)
 │   └── src/app/
 │       ├── aircraft/             Hangar: list, detail, form
-│       ├── flights/              Flight pages, map, charts, playback, overlay editor and export, finished-video
-│       │                         render, logs over USB
+│       ├── flights/              The editor's flight stats, map, charts, playback, overlay editor and export,
+│       │                         finished-video render, logs over USB
 │       ├── icon.component.ts     The small outline icons used across the editor
 │       ├── osd/                  LovelyOSD Editor (no-account video and overlay tool)
 │       ├── inspect/              Inspector (beta): detector, scan, tracking, defect hints, telemetry, video export
@@ -223,7 +223,6 @@ GitDrone/
 | Route                        | Component                  |
 |------------------------------|----------------------------|
 | /                            | HomeComponent              |
-| /flights                     | FlightFeedComponent        |
 | /hangar                      | AircraftListComponent      |
 | /hangar/new                  | AircraftFormComponent      |
 | /hangar/:id                  | AircraftDetailComponent    |
@@ -231,9 +230,6 @@ GitDrone/
 | /hangar/:id/tunes/import     | TuneImportComponent        |
 | /hangar/:id/tunes/bulk       | TuneBulkImportComponent    |
 | /tunes/compare?from=&to=     | TuneCompareComponent       |
-| /hangar/:id/flights/upload   | FlightUploadComponent      |
-| /flights/:id                 | FlightDetailComponent      |
-| /flights/:id/overlay         | FlightOverlayComponent     |
 | /osd                         | LovelyOsdComponent         |
 | /inspector                   | InspectComponent (beta)    |
 | /stats                       | StatsComponent (signed in) |
@@ -260,18 +256,11 @@ GET    /api/tunes/compare?from={snapshotId}&to={snapshotId}
                                    returns: { from, to, changed, added, removed, unchanged,
                                               groups: [{ scope, scopeLabel, category, changes: [{ key, from, to, kind }] }] }
                                    from/to on a change is null when that side is at the firmware default.
-GET    /api/aircraft/{id}/flights
-POST   /api/aircraft/{id}/flights  multipart/form-data: file (.bbl/.bfl, max 64 MB), tuneSnapshotId? (empty = match by date), notes?
-                                   returns: { flights, duplicate }  (one flight per armed session in the file)
-GET    /api/flights/{id}
-PUT    /api/flights/{id}          body: { tuneSnapshotId, notes }
-DELETE /api/flights/{id}
-GET    /api/flights/{id}/telemetry  returns: { points: [[t, rssi %|null, baro height above takeoff (m)|null], ...] } at 10 Hz,
-                                   or 404 when the log has neither rssi nor baroAlt
 POST   /api/osd/analyze          multipart/form-data: file (.bbl/.bfl, max 64 MB)
                                    returns: { fileName, sessions: [{ flight, track, sticks, battery, telemetry }] }
-                                   Decodes in memory and stores nothing. flight.id is 0; track/sticks/battery match the
-                                   per-flight endpoints, or null.
+                                   Decodes in memory and stores nothing. flight.id is 0; track, sticks, battery and
+                                   telemetry are null when the log doesn't have them. telemetry is
+                                   { points: [[t, rssi %|null, baro height above takeoff (m)|null, ...], ...] } at 10 Hz.
 ```
 
 </details>
@@ -283,22 +272,21 @@ snapshots, including from different aircraft, and shows changes grouped by profi
 category (PIDs, filters, rates, motors, ...). "Newly set" and "back to default" reflect that
 `diff all` only lists non-default values.
 
-## Flights (blackbox logs)
+## Blackbox logs
 
-Upload a Betaflight `.bbl`/`.bfl` file on the aircraft page, or get it straight off the quad: plug the flight controller
-in over USB (no battery needed), press **Connect FC over USB** and then **Open FC drive**. In Chrome and Edge, GitDrone
-sends the flight controller the same MSP reboot-to-mass-storage command as the Configurator's "Activate Mass Storage
-Device Mode" button (`flights/fc-usb.ts`, Web Serial), then lists the logs on the drive it becomes and picks the newest.
-LovelyOSD Editor has the same buttons. Eject the drive and unplug the quad afterwards to put it back to normal. The API decodes it itself
-(`Services/BlackboxDecoder.cs`, ported from betaflight/blackbox-log-viewer), creates one flight per
-armed session, and links each to the newest tune saved before that flight (or the tune you pick).
-Craft name and device UID from the log header are not stored. The original file is kept in
-`App_Data/logs` so it can be re-parsed later, for example to add GPS tracks once logs include them
-(enable the GPS field in the Configurator's Blackbox tab).
+Pick a Betaflight `.bbl`/`.bfl` file in LovelyOSD Editor or the Inspector, or get it straight off the quad: plug the
+flight controller in over USB (no battery needed), press **Connect FC over USB** and then **Open FC drive**. In Chrome
+and Edge, GitDrone sends the flight controller the same MSP reboot-to-mass-storage command as the Configurator's
+"Activate Mass Storage Device Mode" button (`flights/fc-usb.ts`, Web Serial), then lists the logs on the drive it
+becomes and picks the newest. Eject the drive and unplug the quad afterwards to put it back to normal. The API decodes
+the log in memory (`Services/BlackboxDecoder.cs`, ported from betaflight/blackbox-log-viewer), one session per armed
+stretch, and keeps nothing. Craft name and device UID from the log header are never sent back.
 
-Flights with GPS get distance, top speed, max height above takeoff and furthest distance from home,
-plus a map (Leaflet + OpenStreetMap tiles) with the path coloured by speed. `POST /api/flights/{id}/reprocess`
-re-reads the stored log file, e.g. after a decoder change. `GET /api/flights/{id}/track` returns the path.
+GitDrone used to keep a logbook of uploaded flights. That's gone; the `Flights` table and the log files in
+`Storage:LogsPath` were left untouched on the server, but nothing reads them any more.
+
+Logs with GPS get distance, top speed, max height above takeoff and furthest distance from home,
+plus a map (Leaflet + OpenStreetMap tiles) with the path coloured by speed.
 
 Logs with `rssi` get a lowest-RSSI stat, an RSSI chart and an RSSI element on the overlay. This is the signal
 strength Betaflight logs (shown 0–100% like its OSD), not link quality, which Betaflight doesn't write to the blackbox
@@ -311,8 +299,7 @@ its altitude from either.
 
 ## Video overlay
 
-Each flight page has **Export video overlay** (`/flights/:id/overlay`), and LovelyOSD Editor has the same tool: a
-transparent HUD video to put on a track above your footage in Premiere Pro or After Effects. It shows:
+LovelyOSD Editor's **Export video overlay** makes a transparent HUD video to put on a track above your footage in Premiere Pro or After Effects. It shows:
 
 - a **speed panel**: speed, G-force, current and power;
 - a **battery panel**: per-cell and pack voltage, flight time (always shown) and mAh used;
@@ -574,14 +561,13 @@ in the format, resolution and frame rate set under Output (`flights/video-render
 
 ## LovelyOSD Editor
 
-The **LovelyOSD Editor** tab (`/osd`), first in the nav and what the home page is about, is the quick route: pick a blackbox log, see the same stats, map, playback
-and charts as a flight page (folded away under the editor until you open **Flight stats**), and export the overlay video, without adding anything to the hangar. The API reads the
-file in memory and forgets it (nothing goes into the database or `App_Data/logs`), and the results only live on the
+The **LovelyOSD Editor** tab (`/osd`), first in the nav and what the home page is about, is the quick route: pick a blackbox log, see its stats, map, playback
+and charts (folded away under the editor until you open **Flight stats**), and export the overlay video. The API reads the
+file in memory and forgets it (nothing goes into the database or onto disk), and the results only live on the
 page, so leaving it clears them, unless you save the session. A file with several armed sessions gets a session picker.
 
-**The site is about the editor.** The nav is LovelyOSD Editor, Inspector (beta) and About; your logbook (Flights, Hangar, and Visitor
-stats for owners) is in the account menu once you're signed in, and the home page shows the latest flights only then.
-Those pages still work for anyone with a link.
+**The site is about the editor.** The nav is LovelyOSD Editor, Inspector (beta) and About; the Hangar (and Visitor
+stats for owners) is in the account menu once you're signed in. The Hangar still works for anyone with a link.
 
 **A guide for newcomers.** [How to add your OSD to DJI O4 footage](https://lovelyosd.com/guides/add-osd-to-dji-o4-footage)
 (`/guides/add-osd-to-dji-o4-footage`) walks the whole job in plain words, for search and for linking in forums. The site
@@ -663,7 +649,6 @@ App settings on the App Service:
 |------------------------------|----------------------------------------|
 | `ConnectionStrings__Default` | `Data Source=/home/data/droneLogger.db` |
 | `Storage__UploadsPath`       | `/home/data/uploads`                   |
-| `Storage__LogsPath`          | `/home/data/logs`                      |
 | `Auth__OwnerIds`             | Your account id (comma-separate several) |
 
 `/home` survives restarts and deploys, so SQLite is fine on a single instance. Turn on App Service
@@ -681,7 +666,7 @@ cookies and without storing IP addresses:
 - On each page change the site calls `POST /api/visit` with the page and, on the landing page only, the referring
   site's **hostname** (never the full link).
 - The API stores a 16-character hash of IP + browser + **today's secret**, the day, the page folded onto its route
-  (`/flights/8` becomes `/flights/:id`) and the referrer name. The secret is random, kept in `VisitSalts`, and deleted
+  (`/hangar/8` becomes `/hangar/:id`) and the referrer name. The secret is random, kept in `VisitSalts`, and deleted
   once the day is over, so old hashes can't be recomputed or linked to anyone.
 - The same person on two days counts as two; nobody can be followed over time. Signed-in visits and obvious bots
   aren't counted.

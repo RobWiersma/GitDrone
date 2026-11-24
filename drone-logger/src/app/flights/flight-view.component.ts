@@ -1,6 +1,5 @@
-import { Component, computed, inject, input, linkedSignal, output } from '@angular/core';
+import { Component, computed, inject, input, linkedSignal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { RouterLink } from '@angular/router';
 import { BatteryPoint, Flight, FlightTrack, StickPoint, TelemetryPoint, formatDistance, formatDuration } from './flight.models';
 import { FlightMapComponent } from './flight-map.component';
 import { ChartSeries, FlightProfileComponent, clock, nearest } from './flight-profile.component';
@@ -8,12 +7,12 @@ import { FlightPlaybackComponent, Readout } from './flight-playback.component';
 import { UnitsService } from '../units.service';
 
 /**
- * A flight's stats, map, playback and charts. Shared by the stored flight page and LovelyOSD, which reads a log
- * without storing it; the parent loads the data and decides what goes around it.
+ * A flight's stats, map, playback and charts, for LovelyOSD Editor, which reads a log without storing it; the parent
+ * loads the data and decides what goes around it.
  */
 @Component({
   selector: 'app-flight-view',
-  imports: [DecimalPipe, RouterLink, FlightMapComponent, FlightProfileComponent, FlightPlaybackComponent],
+  imports: [DecimalPipe, FlightMapComponent, FlightProfileComponent, FlightPlaybackComponent],
   template: `
     @let f = flight();
     @if (tileCount() > 0) {
@@ -81,10 +80,7 @@ import { UnitsService } from '../units.service';
 
     @if (sticks() || track() || battery() || telemetry()) {
       <section class="panel" aria-labelledby="playback-heading">
-        <div class="panel-head">
-          <h2 id="playback-heading">Playback</h2>
-          @if (overlayLink(); as link) { <a class="btn" [routerLink]="link">Export video overlay</a> }
-        </div>
+        <h2 id="playback-heading">Playback</h2>
         <app-flight-playback [duration]="seconds()" [sticks]="sticks()" [readouts]="readouts()"
                              [(time)]="scrubTime" [(playing)]="playing" />
       </section>
@@ -131,12 +127,7 @@ import { UnitsService } from '../units.service';
         <dt>Corrupt frames</dt><dd class="warn">{{ f.corruptFrames }} skipped</dd>
       }
       <dt>GPS</dt>
-      <dd>
-        {{ f.hasGps ? 'Recorded' : 'Not in this log' }}
-        @if (!f.hasGps && canReprocess()) {
-          <button class="link" type="button" [disabled]="busy()" (click)="reprocess.emit()">Re-read log file</button>
-        }
-      </dd>
+      <dd>{{ f.hasGps ? 'Recorded' : 'Not in this log' }}</dd>
     </dl>
   `,
   styles: [`
@@ -144,8 +135,6 @@ import { UnitsService } from '../units.service';
     h2 { margin: 1.5rem 0 .75rem; }
     .panel { margin-bottom: 1rem; }
     .panel h2 { margin: 0 0 .75rem; }
-    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: .75rem; }
-    .panel-head h2 { margin: 0; }
     .stats { display: grid; grid-template-columns: max-content 1fr; gap: .45rem 1.25rem; margin: 0; }
     .stats dt { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: .15rem; }
     dt { color: var(--muted); }
@@ -170,8 +159,6 @@ import { UnitsService } from '../units.service';
     .table-view th, .table-view td { padding: .2rem .9rem .2rem 0; text-align: right; border-bottom: 1px solid var(--line); }
     .table-view thead th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
     .table-view tbody th { font-weight: normal; text-align: left; }
-    .link { margin-left: .5rem; background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
-    .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   `],
 })
 export class FlightViewComponent {
@@ -183,12 +170,6 @@ export class FlightViewComponent {
   sticks = input<StickPoint[] | null>(null);
   battery = input<BatteryPoint[] | null>(null);
   telemetry = input<TelemetryPoint[] | null>(null);
-  /** Router link for the "Export video overlay" button; null hides it. */
-  overlayLink = input<unknown[] | null>(null);
-  /** Shows "Re-read log file" next to a missing GPS track. */
-  canReprocess = input(false);
-  busy = input(false);
-  reprocess = output();
 
   seconds = computed(() => this.flight().durationMs / 1000);
 

@@ -1,16 +1,11 @@
-import { Component, ElementRef, inject, signal, viewChild } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { Component, ElementRef, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { FlightService } from '../flights/flight.service';
-import { Flight, flightDate, formatDistance, formatDuration } from '../flights/flight.models';
-import { FlightThumbComponent } from '../flights/flight-thumb.component';
-import { AuthService } from '../auth.service';
 import { PhoneNoticeComponent } from '../phone-notice.component';
 
-/** Welcome page, all about LovelyOSD Editor; someone signed in also gets the latest flights from their logbook. */
+/** Welcome page, all about LovelyOSD Editor. */
 @Component({
   selector: 'app-home',
-  imports: [DatePipe, RouterLink, FlightThumbComponent, PhoneNoticeComponent],
+  imports: [RouterLink, PhoneNoticeComponent],
   template: `
     <div class="page home">
       <section class="hero" aria-labelledby="hero-heading">
@@ -134,26 +129,6 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
         </ul>
       </section>
 
-      <!-- The logbook is for whoever's signed in; visitors get the editor. -->
-      @if (auth.signedIn() && latest().length) {
-        <section aria-labelledby="latest-heading">
-          <div class="latest-head">
-            <h2 id="latest-heading">Latest flights</h2>
-            <a routerLink="/flights">All flights</a>
-          </div>
-          <ul class="latest">
-            @for (f of latest(); track f.id) {
-              <li>
-                <a class="panel flight" [routerLink]="['/flights', f.id]">
-                  <span class="thumb">@if (f.hasGps) { <app-flight-thumb [flightId]="f.id" /> } @else { <span class="no-gps">No GPS</span> }</span>
-                  <span class="craft">{{ f.aircraftName }}</span>
-                  <span class="hint">{{ date(f) | date: 'd MMM y' }} · {{ duration(f) }}@if (f.distanceM !== null) { · {{ distance(f) }} }</span>
-                </a>
-              </li>
-            }
-          </ul>
-        </section>
-      }
     </div>
   `,
   styles: [`
@@ -196,49 +171,17 @@ import { PhoneNoticeComponent } from '../phone-notice.component';
     .promises ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem 1.5rem; }
     .promises li { line-height: 1.5; padding-left: 1.4rem; position: relative; }
     .promises li::before { content: '✓'; position: absolute; left: 0; color: var(--ok); font-weight: 800; }
-
-    .latest-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
-    .latest { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; }
-    .flight { display: grid; gap: .3rem; color: inherit; text-decoration: none; padding: .75rem; }
-    .flight:hover { border-color: var(--accent); }
-    .flight:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .flight .thumb { display: block; height: 7.5rem; border-radius: 8px; overflow: hidden; background: var(--raised); }
-    .no-gps { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: .85rem; }
-    .craft { font-weight: 700; }
   `],
 })
 export class HomeComponent {
-  private flights = inject(FlightService);
-  readonly auth = inject(AuthService);
-  latest = signal<Flight[]>([]);
-
   private clip = viewChild<ElementRef<HTMLVideoElement>>('clip');
   /** Plays on its own, unless the visitor asked for reduced motion. */
   playing = signal(!matchMedia('(prefers-reduced-motion: reduce)').matches);
-
-  constructor() {
-    // Only fetched for someone signed in, the only ones who see them.
-    void this.auth.load().then(me => {
-      if (me.signedIn) this.flights.feed(0, 3).subscribe({ next: p => this.latest.set(p.flights), error: () => this.latest.set([]) });
-    });
-  }
 
   togglePlay() {
     const v = this.clip()?.nativeElement;
     if (!v) return;
     if (v.paused) v.play().catch(() => undefined);
     else v.pause();
-  }
-
-  date(f: Flight) {
-    return flightDate(f);
-  }
-
-  duration(f: Flight) {
-    return formatDuration(f.durationMs);
-  }
-
-  distance(f: Flight) {
-    return f.distanceM === null ? '' : formatDistance(f.distanceM);
   }
 }

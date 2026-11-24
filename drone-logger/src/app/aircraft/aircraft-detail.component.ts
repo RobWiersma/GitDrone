@@ -4,12 +4,11 @@ import { AircraftService } from './aircraft.service';
 import { Aircraft } from './aircraft.models';
 import { AircraftImageComponent } from './aircraft-image.component';
 import { TuneTimelineComponent } from '../tunes/tune-timeline.component';
-import { FlightListComponent } from '../flights/flight-list.component';
 import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-aircraft-detail',
-  imports: [RouterLink, AircraftImageComponent, TuneTimelineComponent, FlightListComponent],
+  imports: [RouterLink, AircraftImageComponent, TuneTimelineComponent],
   template: `
     <div class="page">
       <a routerLink="/hangar">Back to hangar</a>
@@ -37,7 +36,6 @@ import { AuthService } from '../auth.service';
           </div>
         </div>
 
-        <app-flight-list [aircraftId]="a.id" />
         <app-tune-timeline [aircraftId]="a.id" />
       }
     </div>
@@ -87,7 +85,7 @@ export class AircraftDetailComponent {
   }
 
   remove(a: Aircraft) {
-    if (!confirm(`Delete ${a.name} and all of its tunes and flights? This can't be undone.`)) return;
+    if (!confirm(`Delete ${a.name} and all of its tunes? This can't be undone.`)) return;
     this.service.remove(a.id).subscribe(() => this.router.navigate(['/hangar']));
   }
 }

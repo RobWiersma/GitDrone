@@ -52,7 +52,7 @@ public static class TuneEndpoints
     }
 
     private static TuneSnapshotDto ToDto(TuneSnapshot t) =>
-        new(t.Id, t.AircraftId, t.Label, t.Notes, t.FirmwareVersion, t.Target, t.CreatedAt, t.Settings.Count, 0);
+        new(t.Id, t.AircraftId, t.Label, t.Notes, t.FirmwareVersion, t.Target, t.CreatedAt, t.Settings.Count);
 
     private static async Task<IResult> List(int aircraftId, AppDbContext db, CancellationToken ct)
     {
@@ -62,7 +62,7 @@ public static class TuneEndpoints
             .Where(t => t.AircraftId == aircraftId)
             .OrderByDescending(t => t.CreatedAt)
             .Select(t => new TuneSnapshotDto(t.Id, t.AircraftId, t.Label, t.Notes, t.FirmwareVersion, t.Target,
-                t.CreatedAt, t.Settings.Count, db.Flights.Count(f => f.TuneSnapshotId == t.Id)))
+                t.CreatedAt, t.Settings.Count))
             .ToListAsync(ct);
         return Results.Ok(tunes);
     }
@@ -197,7 +197,7 @@ public static class TuneEndpoints
             var existing = await db.TuneSnapshots.AsNoTracking()
                 .Where(t => t.Id == latest.Id)
                 .Select(t => new TuneSnapshotDto(t.Id, t.AircraftId, t.Label, t.Notes, t.FirmwareVersion, t.Target,
-                    t.CreatedAt, t.Settings.Count, 0))
+                    t.CreatedAt, t.Settings.Count))
                 .FirstAsync(ct);
             return Results.Ok(new TuneImportResult(existing, latest.Id));
         }
@@ -218,7 +218,7 @@ public static class TuneEndpoints
         await db.SaveChangesAsync(ct);
 
         var dto = new TuneSnapshotDto(snapshot.Id, aircraftId, snapshot.Label, snapshot.Notes, snapshot.FirmwareVersion,
-            snapshot.Target, snapshot.CreatedAt, snapshot.Settings.Count, 0);
+            snapshot.Target, snapshot.CreatedAt, snapshot.Settings.Count);
         return Results.Created($"/api/aircraft/{aircraftId}/tunes/{snapshot.Id}", new TuneImportResult(dto, null));
     }
 }

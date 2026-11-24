@@ -1,107 +1,19 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, delay, of, throwError } from 'rxjs';
+import { Observable, throwError } from 'rxjs';
 import { API_BASE, USE_MOCK } from '../api.config';
-import { Flight, FlightBatterySeries, FlightFeedPage, FlightSticks, FlightTelemetry, FlightTrack, FlightUpdate, FlightUploadResult, OsdAnalysis, flightDate } from './flight.models';
+import { OsdAnalysis } from './flight.models';
 
+/** Reads blackbox logs on the server for LovelyOSD Editor and the Inspector. Nothing is stored. */
 @Injectable({ providedIn: 'root' })
 export class FlightService {
   private http = inject(HttpClient);
 
-  private mockStore: Flight[] = [
-    { id: 1, aircraftId: 1, aircraftName: 'Mach 5', tuneSnapshotId: 3, tuneLabel: 'Updated to 4.5, RPM filter on', notes: 'Smooth, a bit of propwash on dives.',
-      originalFileName: 'btfl_012.bbl', logIndex: 0, startedAt: '2026-08-22T17:10:00Z', durationMs: 245_000,
-      firmwareRevision: 'Betaflight 4.5.0 (c155f5830) STM32F405', board: 'MTKS MATEKF405', avgThrottlePercent: 34.2,
-      maxThrottlePercent: 91.5, corruptFrames: 0, createdAt: '2026-08-22T19:00:00Z',
-      hasGps: false, distanceM: null, maxSpeedMs: null, maxHeightM: null, maxDistanceM: null, hasSticks: false, avgSpeedMs: null, battery: null,
-      hasTelemetry: false, minRssiPercent: null, maxBaroHeightM: null },
-  ];
-
-  /** All aircraft, newest first. */
-  feed(skip: number, take: number): Observable<FlightFeedPage> {
-    if (USE_MOCK) {
-      const sorted = [...this.mockStore].sort((a, b) => flightDate(b).localeCompare(flightDate(a)));
-      return of({ flights: sorted.slice(skip, skip + take), hasMore: sorted.length > skip + take }).pipe(delay(200));
-    }
-    return this.http.get<FlightFeedPage>(`${API_BASE}/flights`, { params: { skip, take } });
-  }
-
-  list(aircraftId: number): Observable<Flight[]> {
-    if (USE_MOCK) return of(this.mockStore.filter(f => f.aircraftId === aircraftId)).pipe(delay(200));
-    return this.http.get<Flight[]>(`${API_BASE}/aircraft/${aircraftId}/flights`);
-  }
-
-  get(id: number): Observable<Flight> {
-    if (!USE_MOCK) return this.http.get<Flight>(`${API_BASE}/flights/${id}`);
-    const found = this.mockStore.find(f => f.id === id);
-    return found ? of(found).pipe(delay(150)) : throwError(() => new Error('Not found'));
-  }
-
-  /** maxPoints thins the path on the server, for thumbnails. */
-  track(id: number, maxPoints?: number): Observable<FlightTrack> {
-    if (USE_MOCK) return throwError(() => new Error('No track in mock mode'));
-    const params = maxPoints ? { max: maxPoints } : undefined;
-    return this.http.get<FlightTrack>(`${API_BASE}/flights/${id}/track`, { params });
-  }
-
-  sticks(id: number): Observable<FlightSticks> {
-    if (USE_MOCK) return throwError(() => new Error('No sticks in mock mode'));
-    return this.http.get<FlightSticks>(`${API_BASE}/flights/${id}/sticks`);
-  }
-
-  battery(id: number): Observable<FlightBatterySeries> {
-    if (USE_MOCK) return throwError(() => new Error('No battery data in mock mode'));
-    return this.http.get<FlightBatterySeries>(`${API_BASE}/flights/${id}/battery`);
-  }
-
-  telemetry(id: number): Observable<FlightTelemetry> {
-    if (USE_MOCK) return throwError(() => new Error('No telemetry in mock mode'));
-    return this.http.get<FlightTelemetry>(`${API_BASE}/flights/${id}/telemetry`);
-  }
-
-  /** Re-reads the stored log file on the server, e.g. to pick up GPS. */
-  reprocess(id: number): Observable<Flight> {
-    if (USE_MOCK) return this.get(id);
-    return this.http.post<Flight>(`${API_BASE}/flights/${id}/reprocess`, {});
-  }
-
-  /** tuneSnapshotId null lets the API match the tune by flight date. */
-  upload(aircraftId: number, file: File, tuneSnapshotId: number | null, notes: string): Observable<FlightUploadResult> {
-    if (USE_MOCK) {
-      const flight: Flight = { ...this.mockStore[0], id: this.mockStore.length + 1, aircraftId, tuneSnapshotId,
-        tuneLabel: null, notes: notes || null, originalFileName: file.name, createdAt: new Date().toISOString() };
-      this.mockStore = [...this.mockStore, flight];
-      return of({ flights: [flight], duplicate: false }).pipe(delay(500));
-    }
-    const body = new FormData();
-    body.append('file', file);
-    body.append('tuneSnapshotId', tuneSnapshotId == null ? '' : String(tuneSnapshotId));
-    body.append('notes', notes);
-    return this.http.post<FlightUploadResult>(`${API_BASE}/aircraft/${aircraftId}/flights`, body);
-  }
-
-  /** Reads a log on the server without storing it (LovelyOSD). */
+  /** Reads a log on the server without storing it. */
   analyze(file: File): Observable<OsdAnalysis> {
     if (USE_MOCK) return throwError(() => new Error('LovelyOSD needs the API'));
     const body = new FormData();
     body.append('file', file);
     return this.http.post<OsdAnalysis>(`${API_BASE}/osd/analyze`, body);
-  }
-
-  update(id: number, changes: FlightUpdate): Observable<Flight> {
-    if (USE_MOCK) {
-      const existing = this.mockStore.find(f => f.id === id);
-      if (!existing) return throwError(() => new Error('Not found'));
-      const saved = { ...existing, ...changes };
-      this.mockStore = this.mockStore.map(f => (f.id === id ? saved : f));
-      return of(saved).pipe(delay(200));
-    }
-    return this.http.put<Flight>(`${API_BASE}/flights/${id}`, changes);
-  }
-
-  remove(id: number): Observable<void> {
-    if (!USE_MOCK) return this.http.delete<void>(`${API_BASE}/flights/${id}`);
-    this.mockStore = this.mockStore.filter(f => f.id !== id);
-    return of(void 0).pipe(delay(200));
   }
 }
