@@ -59,7 +59,8 @@ function ticks(max: number, count = 3): number[] {
       </div>
       <p class="hint">
         Counted without cookies or IP addresses: each visitor is a hash that changes every day, so the same person on two days
-        counts twice, and nobody can be followed over time. Your own visits while signed in aren't counted.
+        counts twice, and nobody can be followed over time. Visits while signed in (yours) are counted on their own, in
+        Signed in, and kept out of every other number.
       </p>
 
       @if (error()) {
@@ -70,6 +71,8 @@ function ticks(max: number, count = 3): number[] {
           <li class="panel"><span class="lbl">Last {{ s.days }} days</span><span class="num">{{ s.total | number }}</span><span class="sub">visitors, added up per day</span></li>
           <li class="panel"><span class="lbl">Page views</span><span class="num">{{ pageViews() | number }}</span>
             <span class="sub">last {{ s.days }} days, each page once per visitor per day</span></li>
+          <li class="panel"><span class="lbl">Signed in</span><span class="num">{{ s.signedIn | number }}</span>
+            <span class="sub">you, on {{ s.signedInPageViews | number }} pages; {{ s.total | number }} visitors signed out</span></li>
           <li class="panel"><span class="lbl">Busiest day</span><span class="num">{{ busiest()?.visitors ?? 0 | number }}</span>
             <span class="sub">{{ busiest() ? (busiest()!.day | date: 'EEE d MMM' : 'UTC') : 'No visits yet' }}</span></li>
         </ul>
@@ -113,10 +116,10 @@ function ticks(max: number, count = 3): number[] {
           <details class="table-view">
             <summary>Data table</summary>
             <table>
-              <thead><tr><th scope="col">Day</th><th scope="col">Unique visitors</th><th scope="col">Page views</th></tr></thead>
+              <thead><tr><th scope="col">Day</th><th scope="col">Unique visitors</th><th scope="col">Page views</th><th scope="col">Signed in</th></tr></thead>
               <tbody>
                 @for (d of s.daily; track d.day) {
-                  <tr><th scope="row">{{ d.day | date: 'EEE d MMM y' : 'UTC' }}</th><td>{{ d.visitors }}</td><td>{{ d.pageViews }}</td></tr>
+                  <tr><th scope="row">{{ d.day | date: 'EEE d MMM y' : 'UTC' }}</th><td>{{ d.visitors }}</td><td>{{ d.pageViews }}</td><td>{{ d.signedIn }}</td></tr>
                 }
               </tbody>
             </table>
@@ -204,9 +207,7 @@ function ticks(max: number, count = 3): number[] {
     .hint { margin: 0; }
     h2 { margin: 0 0 .75rem; font-size: 1.1rem; }
 
-    .tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
-    @media (max-width: 48rem) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 30rem) { .tiles { grid-template-columns: 1fr; } }
+    .tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .75rem; }
     .tiles li { display: grid; gap: .15rem; }
     .lbl { color: var(--muted); font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .num { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }

@@ -19,13 +19,17 @@ public record PublicStatsDto(DateOnly? Since, IReadOnlyList<PublicCountDto> Coun
 /// <summary>Visitors: visitor-days that did it at least once. Times: how often, all told.</summary>
 public record EventStatsDto(string Name, int Visitors, int Times);
 /// <summary>PageViews: pages opened that day, each page counted once per visitor (reloads don't add to it).</summary>
-public record DayVisitorsDto(DateOnly Day, int Visitors, int PageViews);
+/// <summary>SignedIn: visitors that day who were signed in (in practice the owner), counted apart from Visitors.</summary>
+public record DayVisitorsDto(DateOnly Day, int Visitors, int PageViews, int SignedIn);
 public record PageVisitorsDto(string Path, int Visitors);
 /// <summary>Source is a site name ("LinkedIn", "github.com") or "Direct" for typed addresses, bookmarks and apps that send none.</summary>
 public record ReferrerVisitorsDto(string Source, int Visitors);
-/// <summary>Daily unique visitors over the period, and per page how many visitor-days opened it.</summary>
+/// <summary>
+/// Daily unique visitors over the period, and per page how many visitor-days opened it. Everything counts visitors who
+/// weren't signed in; SignedIn and SignedInPageViews are the signed-in visitor-days and pages over the period.
+/// </summary>
 public record VisitStatsDto(int Days, int Today, int Total, IReadOnlyList<DayVisitorsDto> Daily, IReadOnlyList<PageVisitorsDto> Pages,
-    IReadOnlyList<ReferrerVisitorsDto> Referrers, IReadOnlyList<EventStatsDto> Events);
+    IReadOnlyList<ReferrerVisitorsDto> Referrers, IReadOnlyList<EventStatsDto> Events, int SignedIn, int SignedInPageViews);
 
 /// <summary>
 /// Privacy-friendly visit counting: no cookies, no IP addresses stored. Each visitor is a hash of IP and browser with a
@@ -41,12 +45,16 @@ public static partial class VisitEndpoints
         app.MapGet("/api/stats/public", PublicStats);
     }
 
-    /// <summary>Called by the site on each page change. Always 204, so it never gets in the way of the page.</summary>
+    /// <summary>
+    /// Called by the site on each page change. Always 204, so it never gets in the way of the page. Visits while signed
+    /// in (in practice the owner) are kept too, marked, so the stats can show them apart from everyone else's.
+    /// </summary>
     private static async Task<IResult> Record(VisitRequest body, HttpContext http, AppDbContext db, CancellationToken ct)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var hash = await VisitorHashAsync(http, today, db, ct);
+        var hash = await VisitorHashAsync(http, today, db, ct, countSignedIn: true);
         if (hash is null) return Results.NoContent();
+        var signedIn = SignIn.IsSignedIn(http, countDevelopment: false);
 
         var path = NormalizePath(body.Path);
 
@@ -54,11 +62,15 @@ public static partial class VisitEndpoints
         var existing = await db.Visits.FirstOrDefaultAsync(v => v.Day == today && v.VisitorHash == hash && v.Path == path, ct);
         if (existing is not null)
         {
-            // A later landing on the same page from somewhere new still records where they came from.
-            if (referrer is not null && existing.Referrer is null) { existing.Referrer = referrer; await db.SaveChangesAsync(ct); }
+            // A later landing on the same page from somewhere new still records where they came from, and signing in
+            // part way through the day marks the page as seen signed in.
+            var changed = false;
+            if (referrer is not null && existing.Referrer is null) { existing.Referrer = referrer; changed = true; }
+            if (signedIn && !existing.SignedIn) { existing.SignedIn = true; changed = true; }
+            if (changed) await db.SaveChangesAsync(ct);
             return Results.NoContent();
         }
-        db.Visits.Add(new Visit { Day = today, VisitorHash = hash, Path = path, Referrer = referrer });
+        db.Visits.Add(new Visit { Day = today, VisitorHash = hash, Path = path, Referrer = referrer, SignedIn = signedIn });
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException) { /* the same visit arriving twice at once; the unique index keeps one */ }
         return Results.NoContent();
@@ -138,14 +150,18 @@ public static partial class VisitEndpoints
         var n = Math.Clamp(days ?? 30, 1, 365);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var from = today.AddDays(1 - n);
-        var rows = await db.Visits.AsNoTracking().Where(v => v.Day >= from)
-            .Select(v => new { v.Day, v.VisitorHash, v.Path, v.Referrer }).ToListAsync(ct);
+        var all = await db.Visits.AsNoTracking().Where(v => v.Day >= from)
+            .Select(v => new { v.Day, v.VisitorHash, v.Path, v.Referrer, v.SignedIn }).ToListAsync(ct);
+        // Everyone else's numbers below; the signed-in ones are counted on their own.
+        var rows = all.Where(r => !r.SignedIn).ToList();
+        var signedInRows = all.Where(r => r.SignedIn).ToList();
+        var signedInPerDay = signedInRows.GroupBy(r => r.Day).ToDictionary(g => g.Key, g => g.Select(r => r.VisitorHash).Distinct().Count());
 
         var perDay = rows.GroupBy(r => r.Day).ToDictionary(g => g.Key, g => g.Select(r => r.VisitorHash).Distinct().Count());
         // One row per visitor, page and day, so a day's rows are its page views.
         var viewsPerDay = rows.GroupBy(r => r.Day).ToDictionary(g => g.Key, g => g.Count());
         var daily = Enumerable.Range(0, n).Select(i => from.AddDays(i))
-            .Select(d => new DayVisitorsDto(d, perDay.GetValueOrDefault(d), viewsPerDay.GetValueOrDefault(d))).ToList();
+            .Select(d => new DayVisitorsDto(d, perDay.GetValueOrDefault(d), viewsPerDay.GetValueOrDefault(d), signedInPerDay.GetValueOrDefault(d))).ToList();
         var pages = rows.GroupBy(r => r.Path)
             .Select(g => new PageVisitorsDto(g.Key, g.Select(r => (r.Day, r.VisitorHash)).Distinct().Count()))
             .OrderByDescending(p => p.Visitors).ThenBy(p => p.Path).ToList();
@@ -158,7 +174,8 @@ public static partial class VisitEndpoints
             .GroupBy(e => e.Name).Select(g => new { Name = g.Key, Visitors = g.Count(), Times = g.Sum(e => e.Count) }).ToListAsync(ct);
         var events = eventRows.OrderBy(e => Array.IndexOf(EventOrder, e.Name))
             .Select(e => new EventStatsDto(e.Name, e.Visitors, e.Times)).ToList();
-        return Results.Ok(new VisitStatsDto(n, perDay.GetValueOrDefault(today), daily.Sum(d => d.Visitors), daily, pages, referrers, events));
+        return Results.Ok(new VisitStatsDto(n, perDay.GetValueOrDefault(today), daily.Sum(d => d.Visitors), daily, pages, referrers, events,
+            daily.Sum(d => d.SignedIn), signedInRows.Count));
     }
 
     /// <summary>Today's secret, made on the first visit of the day. Older ones are deleted on the spot.</summary>

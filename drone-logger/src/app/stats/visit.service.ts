@@ -9,13 +9,19 @@ export interface VisitStats {
   today: number;
   /** Sum of each day's unique visitors (someone back on another day counts again). */
   total: number;
-  /** pageViews: pages opened that day, each page once per visitor (reloads don't add to it). */
-  daily: { day: string; visitors: number; pageViews: number }[];
+  /**
+   * pageViews: pages opened that day, each page once per visitor (reloads don't add to it). signedIn: visitors that day
+   * who were signed in, counted apart from visitors and everything else here.
+   */
+  daily: { day: string; visitors: number; pageViews: number; signedIn: number }[];
   pages: { path: string; visitors: number }[];
   /** Where visitor-days came from: a site name or "Direct". */
   referrers: { source: string; visitors: number }[];
   /** What visitors did in LovelyOSD Editor: visitor-days that did it, and how many times all told. */
   events: { name: UsageEvent; visitors: number; times: number }[];
+  /** Signed-in visitor-days and pages opened over the period (in practice the owner's), kept out of the rest. */
+  signedIn: number;
+  signedInPageViews: number;
 }
 
 /** The About page's numbers: since when they're counted, and each public action's totals. */

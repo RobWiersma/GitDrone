@@ -125,6 +125,8 @@ public class Visit
     public string Path { get; set; } = "";
     /// <summary>Site the visitor came from ("linkedin.com"), on the visit's landing page only; never the full link.</summary>
     public string? Referrer { get; set; }
+    /// <summary>Seen while signed in (in practice the owner). Kept apart from everyone else's numbers.</summary>
+    public bool SignedIn { get; set; }
 }
 
 /// <summary>

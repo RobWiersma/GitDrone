@@ -668,12 +668,13 @@ cookies and without storing IP addresses:
 - The API stores a 16-character hash of IP + browser + **today's secret**, the day, the page folded onto its route
   (`/hangar/8` becomes `/hangar/:id`) and the referrer name. The secret is random, kept in `VisitSalts`, and deleted
   once the day is over, so old hashes can't be recomputed or linked to anyone.
-- The same person on two days counts as two; nobody can be followed over time. Signed-in visits and obvious bots
-  aren't counted.
+- The same person on two days counts as two; nobody can be followed over time. Obvious bots aren't counted. Visits
+  while signed in (in practice the owner) are marked and shown on their own as **Signed in**, kept out of every other
+  number.
 - **What editor visitors did.** LovelyOSD Editor also calls `POST /api/event` with just an action's name: loaded a log
   (and whether straight off the quad), added footage, a sound track or music, rendered a video (and whether a vertical
   Short), exported an overlay, had a render fail, saved or reopened a session, or tried the sample flight (whose own
-  files don't count as loads). Signed-in users' actions count too, unlike their visits; bots still don't. Never a file name, size or setting. Each is
+  files don't count as loads). Signed-in users' actions count too; bots don't. Never a file name, size or setting. Each is
   stored like a visit, once per visitor per day with how many times (`UsageEvents`), and the API takes that fixed list of
   names only. `/stats` shows them as a share of the editor's visitors, so you can see whether people who come try it.
 - `GET /api/stats/visits?days=30` returns the numbers (signed in only).

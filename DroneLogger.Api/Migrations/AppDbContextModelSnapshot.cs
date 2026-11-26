@@ -15,7 +15,7 @@ namespace DroneLogger.Api.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
             modelBuilder.Entity("DroneLogger.Api.Domain.Aircraft", b =>
                 {
@@ -337,6 +337,9 @@ namespace DroneLogger.Api.Migrations
                     b.Property<string>("Referrer")
                         .HasMaxLength(60)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("SignedIn")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("VisitorHash")
                         .IsRequired()
