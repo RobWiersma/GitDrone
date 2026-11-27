@@ -449,7 +449,13 @@ a 0–200% strength:
   this change are decoded again the first time they're opened, to pick up the accelerometer's direction.
 - On the footage: **Zoom punch**, **Vignette** (the edges break into pixel blocks of the footage's own colour, biggest at the edge and smaller toward the middle, in a lumpy, off-centre shape that changes with every trigger) and **Saturation** (the colour swells; its **Look** set to **Rainbow**, the footage's colours also spin once round the rainbow as each trigger fades, back to their own by the time it's gone), and **Rainbow tint** (off until ticked: rainbow bands across the
   footage that take its hue and keep its light and dark, turning with the song, pushed round by the bass, stronger as the
-  song gets louder and on each trigger; it runs all the time rather than only on triggers). The others fire
+  song gets louder and on each trigger; it runs all the time rather than only on triggers), and **MilkDrop** (off until
+  ticked: Winamp's MilkDrop visualiser, through [Butterchurn](https://github.com/jberg/butterchurn), fed the song itself
+  frame by frame and screened over the footage. Its **Look** is one of seven presets from butterchurn-presets, or cycles
+  through them every 16 s; **Colours** recolours it in harvest gold, pumpkin and cranberry or keeps the preset's own;
+  **Where** keeps it round the edges, faint in the middle, or puts it everywhere. It's fetched only when switched on, and
+  as MilkDrop feeds each frame into the next, the finished video matches the preview in look and timing rather than
+  pixel for pixel). The others fire
   only on a trigger and leave the footage alone in between. **Footage on** picks the zoom and saturation's trigger and
   **Vignette on** the vignette's: **Every hit**, **Big hits** (the sharpest quarter, the footage's default), **Biggest
   hits** (a few a minute, well apart, the vignette's default) or **Drops** (where the song jumps up after a quieter

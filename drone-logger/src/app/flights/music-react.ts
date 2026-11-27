@@ -26,8 +26,15 @@ const FOOTAGE_TRIGGERS = ['hits', 'big', 'huge', 'drops'] as const;
 export type TintSource = 'bass' | 'mid' | 'treble' | 'all';
 
 /** The effects, each with a strength and its own on/off. */
-export type MusicEffect = 'pulse' | 'split' | 'tint' | 'particles' | 'spectrum' | 'road' | 'zoom' | 'vignette' | 'saturation' | 'rainbow';
-export const MUSIC_EFFECTS: readonly MusicEffect[] = ['pulse', 'split', 'tint', 'particles', 'spectrum', 'road', 'zoom', 'vignette', 'saturation', 'rainbow'];
+export type MusicEffect = 'pulse' | 'split' | 'tint' | 'particles' | 'spectrum' | 'road' | 'zoom' | 'vignette' | 'saturation' | 'rainbow' | 'milkdrop';
+export const MUSIC_EFFECTS: readonly MusicEffect[] = ['pulse', 'split', 'tint', 'particles', 'spectrum', 'road', 'zoom', 'vignette', 'saturation', 'rainbow', 'milkdrop'];
+
+/** The MilkDrop looks (presets, in milkdrop-presets.ts), with 'cycle' moving on through them as the song plays. */
+export const MILKDROP_LOOKS = [
+  ['cycle', 'Cycle through them'], ['cauldron', 'Cauldron'], ['heat', 'Heat haze'], ['fractal', 'Fractal drop'],
+  ['rose', 'Desert rose'], ['fire', 'Liquid fire'], ['ornament', 'Star ornament'], ['tokamak', 'Thumb drum'],
+] as const;
+export type MilkdropLook = (typeof MILKDROP_LOOKS)[number][0];
 
 /** How the HUD and the footage react. Strengths are multipliers: 1 is the default, 0 as good as off. */
 export interface MusicReact {
@@ -81,6 +88,13 @@ export interface MusicReact {
   saturationStyle: 'plain' | 'rainbow';
   /** Rainbow bands sweeping across the footage with the music: how strong. */
   rainbow: number;
+  /** A MilkDrop visualiser (Winamp's, through Butterchurn) dancing to the song, glowing over the footage: how bright. */
+  milkdrop: number;
+  milkdropLook: MilkdropLook;
+  /** In harvest colours (amber, pumpkin, cranberry), or the preset's own. */
+  milkdropColors: 'harvest' | 'original';
+  /** Round the edges, leaving the middle clear to fly through, or over the whole picture. */
+  milkdropPlace: 'edges' | 'full';
   /** What sets off the zoom and saturation. */
   footageTrigger: FootageTrigger;
   /** What sets off the vignette: rarer by default, so it lands as an event. */
@@ -88,9 +102,10 @@ export interface MusicReact {
 }
 
 export const MUSIC_REACT_DEFAULTS: MusicReact = {
-  on: false, enabled: { pulse: true, split: true, tint: true, particles: true, spectrum: false, road: false, zoom: true, vignette: true, saturation: true, rainbow: false }, pulse: 1, split: 1, splitColors: ['#ff2a55', '#22e4ff'], osdTrigger: 'hits',
+  on: false, enabled: { pulse: true, split: true, tint: true, particles: true, spectrum: false, road: false, zoom: true, vignette: true, saturation: true, rainbow: false, milkdrop: false }, pulse: 1, split: 1, splitColors: ['#ff2a55', '#22e4ff'], osdTrigger: 'hits',
   tint: 1, tintMode: 'drift', tintColor: '#ff4fd8', tintSpeed: 24, tintBy: 'bass', particles: 1, sparkSize: 1.6, spectrum: 1, spectrumStyle: 'lightspeed', streakDirection: 'in', streakColor: 'white', road: 1, roadAim: 12, roadLength: 0.5, roadStyle: 'tube', hitLength: 0.14, sensitivity: 1,
   zoom: 1, vignette: 1, saturation: 1, saturationStyle: 'plain', rainbow: 1, footageTrigger: 'big', vignetteTrigger: 'huge',
+  milkdrop: 1, milkdropLook: 'cycle', milkdropColors: 'harvest', milkdropPlace: 'edges',
 };
 
 /** Settings as saved (perhaps by an older version), with anything missing or malformed back at its default. */
@@ -120,6 +135,9 @@ export function readMusicReact(saved: unknown): MusicReact {
     roadStyle: pick(s['roadStyle'], ['tube', 'road'] as const, d.roadStyle),
     footageTrigger: pick(s['footageTrigger'], FOOTAGE_TRIGGERS, d.footageTrigger),
     vignetteTrigger: pick(s['vignetteTrigger'], FOOTAGE_TRIGGERS, d.vignetteTrigger),
+    milkdrop: num('milkdrop', 0, 2), milkdropLook: pick(s['milkdropLook'], MILKDROP_LOOKS.map(l => l[0]), d.milkdropLook),
+    milkdropColors: pick(s['milkdropColors'], ['harvest', 'original'] as const, d.milkdropColors),
+    milkdropPlace: pick(s['milkdropPlace'], ['edges', 'full'] as const, d.milkdropPlace),
   };
 }
 
@@ -354,6 +372,11 @@ export interface MusicFx extends Omit<MusicReact, 'on' | 'enabled'> {
    * false where no music plays.
    */
   spectrumOut: (out: number, into: Float32Array) => boolean;
+  /**
+   * The song's sound itself `out` s into the finished video, as the 0..255 bytes (128 silent) a Web Audio analyser gives,
+   * one array per channel, for the MilkDrop visualiser; false where no music plays.
+   */
+  waveOut: (out: number, left: Uint8Array, right: Uint8Array) => boolean;
   /** Seconds into the finished video at log time `t` (null where it isn't shown): the clock the sparks run on. */
   outAt: (t: number) => number | null;
 }

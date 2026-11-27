@@ -29,7 +29,8 @@
               "src/styles.css"
             ],
             "allowedCommonJsDependencies": [
-              "leaflet"
+              "leaflet",
+              "butterchurn"
             ]
           },
           "configurations": {

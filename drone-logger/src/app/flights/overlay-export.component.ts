@@ -10,7 +10,8 @@ import { StickMode, readStickMode } from './stick-math';
 import { clock } from './flight-profile.component';
 import { ArmingMatch, MotorMatch, SoundPeaks, SoundProfile, decode, findArming, findClaps, matchMotorSound, soundPeaks, soundProfile } from './clap';
 import { MUSIC_EFFECTS, MUSIC_REACT_DEFAULTS, MusicAnalysis, MusicEffect, MusicFx, MusicReact, analyzeMusic, footagePunch, readMusicReact,
-  footageColourFilter, rainbowCss, rainbowTint, vignetteLevel, vignetteMosaic } from './music-react';
+  footageColourFilter, rainbowCss, rainbowTint, vignetteLevel, vignetteMosaic, MILKDROP_LOOKS } from './music-react';
+import { MilkdropLayer, milkdropAlpha } from './milkdrop';
 import { CUT_TRANSITIONS, CutTransition, EditClip, FootageMotion, autoEdit, editLength, editOut, excitement, findTricks, footageMotion,
          transitionAt, transitionHalf } from './auto-edit';
 import { AUDIO_BITRATE, RenderCancelled, RenderPlan, RenderTarget, drawBottomFill, expectedBitrate, footageFrameRate, fpsLabel, outputFrameRate, renderVideo } from './video-render';
@@ -431,6 +432,10 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                   <!-- The music's rainbow tint: bands of colour over the footage, taking its hue and keeping its light and dark. -->
                   @if (footageRainbow(); as rb) {
                     <div class="rainbow-tint" [style.background]="rb.background" [style.opacity]="rb.opacity" aria-hidden="true"></div>
+                  }
+                  <!-- The MilkDrop visualiser, dancing to the song and glowing over the footage. -->
+                  @if (milkdropOn()) {
+                    <canvas #milkdropCanvas class="milkdrop" [style.opacity]="footageMilkdrop()" aria-hidden="true"></canvas>
                   }
                   <!-- The music's vignette: a mosaic of the footage's own colours around its edges, as the finished video draws it. -->
                   <canvas #vignetteCanvas class="beat-vignette" [class.fit]="footage43() && !vertical()" [style.aspect-ratio]="videoAspect()"
@@ -1217,6 +1222,35 @@ function saveColors(o: typeof DEFAULT_COLORS) {
                         }
                       </div>
                     }
+                    @if (e.key === 'milkdrop' && musicReact().enabled.milkdrop) {
+                      <div class="playback-row">
+                        <span class="offset" title="Which MilkDrop preset plays, or moving on to the next every 16 seconds">
+                          <label for="milkdrop-look">Look</label>
+                          <select id="milkdrop-look" [ngModel]="musicReact().milkdropLook" (ngModelChange)="setMusicReact('milkdropLook', $event)">
+                            @for (l of milkdropLooks; track l[0]) {
+                              <option [value]="l[0]">{{ l[1] }}</option>
+                            }
+                          </select>
+                        </span>
+                        <span class="offset" title="Harvest colours (gold, pumpkin and cranberry), or the preset's own">
+                          <label for="milkdrop-colors">Colours</label>
+                          <select id="milkdrop-colors" [ngModel]="musicReact().milkdropColors" (ngModelChange)="setMusicReact('milkdropColors', $event)">
+                            <option value="harvest">Harvest</option>
+                            <option value="original">The preset's own</option>
+                          </select>
+                        </span>
+                        <span class="offset" title="Round the edges, leaving the middle clear, or over the whole picture">
+                          <label for="milkdrop-place">Where</label>
+                          <select id="milkdrop-place" [ngModel]="musicReact().milkdropPlace" (ngModelChange)="setMusicReact('milkdropPlace', $event)">
+                            <option value="edges">Round the edges</option>
+                            <option value="full">Everywhere</option>
+                          </select>
+                        </span>
+                        @if (milkdropFailed()) {
+                          <span class="hint" role="status">{{ milkdropFailed() }}</span>
+                        }
+                      </div>
+                    }
                     @if (e.key === 'saturation' && musicReact().enabled.saturation) {
                       <div class="playback-row">
                         <span class="offset" title="The colour swell as it is, or spinning the footage's colours once round the rainbow as each trigger fades">
@@ -1668,7 +1702,8 @@ function saveColors(o: typeof DEFAULT_COLORS) {
     .footage-box .cut-fade { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: none; }
     .cut-veil { position: absolute; inset: 0; z-index: 3; background: #000; pointer-events: none; opacity: 0; }
     .cut-veil.white { background: #fff; }
-    .rainbow-tint { position: absolute; inset: 0; z-index: 2; pointer-events: none; mix-blend-mode: color; }
+    .rainbow-tint, .frame .milkdrop { position: absolute; inset: 0; z-index: 2; pointer-events: none; mix-blend-mode: color; }
+    .frame .milkdrop { width: 100%; height: 100%; mix-blend-mode: screen; }
     /* In vertical the footage's box is the top part; the veil reaches down over the bottom part (the fill or the stick cam) too. */
     .stage.vertical .cut-veil { bottom: calc(-100% * 46.3 / 53.7); }
     /* Vertical: a tall frame, no taller than most of the window, centred in the preview panel. */
@@ -2266,8 +2301,13 @@ export class OverlayExportComponent {
       const peaks = await soundPeaks(file);
       if (this.musicFile === file) this.musicPeaks.set(peaks);
       // The beat for the music-reactive HUD: measured once, from the sound already decoded for the peaks.
-      const analysis = await analyzeMusic(await decode(file));
-      if (this.musicFile === file) this.musicAnalysis.set(analysis);
+      const sound = await decode(file), analysis = await analyzeMusic(sound);
+      if (this.musicFile === file) {
+        this.musicAnalysis.set(analysis);
+        // The sound itself, for the MilkDrop visualiser to dance to.
+        const left = sound.getChannelData(0);
+        this.musicWave.set({ rate: sound.sampleRate, left, right: sound.numberOfChannels > 1 ? sound.getChannelData(1) : left });
+      }
     } catch {
       this.backdropError.set(`Couldn't read the music in ${file.name}. Try an MP3, M4A, WAV or OGG.`);
     }
@@ -2284,11 +2324,14 @@ export class OverlayExportComponent {
     this.musicName.set('');
     this.musicPeaks.set(null);
     this.musicAnalysis.set(null);
+    this.musicWave.set(null);
     this.musicPlaying.set(false);
   }
 
   /** The song's measured beat and bands, for the music-reactive HUD; null until measured. */
   musicAnalysis = signal<MusicAnalysis | null>(null);
+  /** The song's samples, per channel; null until decoded. */
+  private musicWave = signal<{ rate: number; left: Float32Array; right: Float32Array } | null>(null);
   musicReact = signal<MusicReact>(readMusicReact(readPrefs().musicReact));
   readonly musicReactDefaults = MUSIC_REACT_DEFAULTS;
   setMusicReact<K extends keyof MusicReact>(key: K, value: MusicReact[K]) {
@@ -2319,6 +2362,7 @@ export class OverlayExportComponent {
     { key: 'vignette', label: 'Vignette', title: "How dark the footage's edges get on each trigger; 0 for none" },
     { key: 'saturation', label: 'Saturation', title: "How much the footage's colour swells on each trigger; 0 for none" },
     { key: 'rainbow', label: 'Rainbow tint', title: 'Rainbow bands sweeping across the footage, turning with the song, pushed round by the bass and stronger on each trigger; how strong' },
+    { key: 'milkdrop', label: 'MilkDrop', title: "Winamp's MilkDrop visualiser dancing to the song, glowing over the footage; how bright" },
   ] as const;
   /** Whether the Effects sub panel is unfolded. */
   readonly fxOpen = signal(false);
@@ -2329,7 +2373,7 @@ export class OverlayExportComponent {
    * loud as its fades let it be. Null while switched off, muted, or not yet measured.
    */
   private musicFx = computed<MusicFx | null>(() => {
-    const analysis = this.musicAnalysis(), { on, enabled, ...settings } = this.musicReact();
+    const analysis = this.musicAnalysis(), wave = this.musicWave(), { on, enabled, ...settings } = this.musicReact();
     if (!on || !analysis || this.musicMuted()) return null;
     // A switched-off effect draws at strength 0.
     const fx = { ...settings, ...Object.fromEntries(MUSIC_EFFECTS.map(k => [k, enabled[k] ? settings[k] : 0])) };
@@ -2352,6 +2396,18 @@ export class OverlayExportComponent {
         if (out < 0 || out > len || !analysis.spectrumAt(out + song, into)) return false;
         const k = fadeLevel(out, len, fadeIn, fadeOut);
         for (let b = 0; b < into.length; b++) into[b] *= k;
+        return true;
+      },
+      waveOut: (out, left, right) => {
+        if (!wave || out < 0 || out > len) return false;
+        // The samples leading up to the moment, as an analyser would hand them over, as loud as the fades let them be.
+        const end = Math.round((out + song) * wave.rate), from = end - left.length, k = fadeLevel(out, len, fadeIn, fadeOut) * 128;
+        if (end <= 0 || from >= wave.left.length) return false;
+        for (let i = 0; i < left.length; i++) {
+          const j = from + i, inside = j >= 0 && j < wave.left.length;
+          left[i] = inside ? Math.max(0, Math.min(255, 128 + wave.left[j] * k)) : 128;
+          right[i] = inside ? Math.max(0, Math.min(255, 128 + wave.right[j] * k)) : 128;
+        }
         return true;
       },
       at: t => {
@@ -2427,6 +2483,48 @@ export class OverlayExportComponent {
     const fx = this.musicFx(), t = this.videoTime() - this.videoOffset();
     const tint = rainbowTint(this.musicNow(), fx, fx ? fx.outAt(t) : null);
     return tint ? { background: rainbowCss(tint.turn), opacity: tint.alpha } : null;
+  });
+  readonly milkdropLooks = MILKDROP_LOOKS;
+  milkdropOn = computed(() => (this.musicFx()?.milkdrop ?? 0) > 0);
+  footageMilkdrop = computed(() => milkdropAlpha(this.musicNow(), this.musicFx()));
+  /** Why the visualiser can't run here (no WebGL 2, or it couldn't be fetched); empty when it can. */
+  milkdropFailed = signal('');
+  private milkdropCanvas = viewChild<ElementRef<HTMLCanvasElement>>('milkdropCanvas');
+  private milkdropLayer = signal<MilkdropLayer | null>(null);
+  private milkdropLoading = false;
+  /** The video time of the visualiser's last frame, to move it on by as much as the footage has. */
+  private milkdropAt = NaN;
+  /** Fetches the visualiser the first time the effect is switched on. */
+  private loadMilkdropNow = effect(() => {
+    if (!this.milkdropOn() || untracked(this.milkdropLayer) || this.milkdropLoading) return;
+    this.milkdropLoading = true;
+    MilkdropLayer.create(16 / 9)
+      .then(layer => {
+        this.milkdropLayer.set(layer);
+        this.milkdropFailed.set(layer ? '' : "MilkDrop needs WebGL 2, which this browser doesn't have.");
+      })
+      .catch(() => this.milkdropFailed.set("Couldn't load MilkDrop. Check the connection and switch it on again."))
+      .finally(() => (this.milkdropLoading = false));
+  });
+  /** Moves the preview's visualiser on with the footage, frame by frame as it plays (and once on each seek). */
+  private drawMilkdropNow = effect(() => {
+    const layer = this.milkdropLayer(), fx = this.musicFx(), at = this.videoTime(), c = this.milkdropCanvas()?.nativeElement;
+    if (!layer || !fx || !(fx.milkdrop > 0) || !c) return;
+    untracked(() => {
+      const out = fx.outAt(at - this.videoOffset());
+      if (out === null) return;
+      const step = at - this.milkdropAt;
+      this.milkdropAt = at;
+      if (c.clientWidth > 0 && c.clientHeight > 0) layer.setAspect(c.clientWidth / c.clientHeight);
+      layer.frame(fx, out, step > 0 && step < 0.25 ? step : 1 / 30);
+      if (c.width !== layer.canvas.width || c.height !== layer.canvas.height) {
+        c.width = layer.canvas.width;
+        c.height = layer.canvas.height;
+      }
+      const ctx = c.getContext('2d')!;
+      ctx.globalCompositeOperation = 'copy';
+      ctx.drawImage(layer.canvas, 0, 0);
+    });
   });
   /** The music's saturation on the preview's footage, as the finished video draws it. */
   footageFilter = computed(() => footageColourFilter(this.musicNow(), this.musicFx()));

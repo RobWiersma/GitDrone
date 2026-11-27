@@ -5,6 +5,7 @@ import {
 import { Grade, GradeRenderer, isNeutral } from './grade';
 import type { AudioCodec, StreamTargetChunk, Target, VideoCodec, WrappedCanvas } from 'mediabunny';
 import { OverlayOptions, OverlayRenderer } from './overlay-renderer';
+import { MilkdropLayer, drawMilkdrop, milkdropAlpha } from './milkdrop';
 import { drawRainbowTint, drawVignette, footagePunch, rainbowTint, saturationBoost, saturationHue, vignetteLevel } from './music-react';
 import { EditClip, EditTransition, transitionAt, transitionHalf } from './auto-edit';
 
@@ -229,6 +230,12 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       ? new CanvasSink(camTrack!, { width: Math.min(camTrack!.displayWidth, W) }).canvasesAtTimestamps(times.map(t => Math.max(0, t - plan.cam!.offset)))
       : null;
 
+    // The MilkDrop visualiser, warmed up on the song's opening so it doesn't start from black.
+    const music0 = plan.overlay.opts.music ?? null, mdBox = footageBox(plan, W, H);
+    const milkdrop = music0 && music0.milkdrop > 0 ? await MilkdropLayer.create(mdBox.w / mdBox.h) : null;
+    if (music0 && music0.milkdrop > 0 && !milkdrop) console.warn('[render] no WebGL 2 here, so no MilkDrop');
+    if (milkdrop) for (let k = 0; k < MILKDROP_WARMUP; k++) milkdrop.frame(music0!, 0, 1 / fps);
+
     const grader = isNeutral(plan.footage.grade) ? null : new GradeRenderer();
     if (grader && !grader.ready) console.warn('[render] no WebGL 2 here, so the footage goes ungraded');
     let foot: WrappedCanvas | null = null;
@@ -267,6 +274,10 @@ export async function renderVideo(plan: RenderPlan, target: RenderTarget | null,
       // The rainbow tint: bands of colour over the footage (only its box: the top part in vertical).
       const tint = rainbowTint(level, music, i / fps);
       if (tint) drawRainbowTint(ctx, footageBox(plan, W, H), tint);
+      if (milkdrop && music) {
+        milkdrop.frame(music, i / fps, 1 / fps);
+        drawMilkdrop(ctx, milkdrop, mdBox, milkdropAlpha(level, music));
+      }
       drawVignette(ctx, pictureBox(plan, foot, W, H), vignetteLevel(level, music), level?.vigBeat ?? 0);
       if (cut && cut.veil > 0) {
         // The whole picture under the HUD: in vertical the bottom half jumps at the cut too.
@@ -306,6 +317,8 @@ function fadeLevel(t: number, last: number, fade: number) {
 }
 
 /** The footage's box: the whole frame, or the top part in vertical. */
+/** Frames the visualiser runs through before the first, to build up its picture. */
+const MILKDROP_WARMUP = 45;
 const footageBox = (plan: RenderPlan, W: number, H: number) => (plan.vertical ? { x: 0, y: 0, w: W, h: SPLIT * H } : { x: 0, y: 0, w: W, h: H });
 
 /** Where the footage's picture is: its whole box, or shown whole (4:3 in 16:9), just the picture between the bars. */
